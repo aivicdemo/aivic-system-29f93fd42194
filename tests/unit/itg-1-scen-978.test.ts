@@ -1,77 +1,77 @@
-import { calculateBillingAmount } from '../../src/logic/it-1-2-1';
+import { describe, it, expect, beforeEach } from '@jest/globals';
+import { validateAndCalculateBillingAmount } from '../../src/logic/it-1781935279444-2-2-1';
 
-describe('営業成果データから請求対象項目を自動抽出し、顧客ごと・サービスごとの請求額を集計する機能', () => {
-  test('SCEN-978: 複数サービス組み合わせ時の集計計算が手順書ルールに合致して正常と判定される', () => {
-    // 複数サービスを含む請求データを準備
-    const billingInput = {
-      customerId: 'cust_001',
-      serviceItems: [
-        {
-          serviceId: 'svc_A',
-          serviceName: 'サービスA',
-          unitPrice: 10000,
-          quantity: 1,
-        },
-        {
-          serviceId: 'svc_B',
-          serviceName: 'サービスB',
-          unitPrice: 15000,
-          quantity: 1,
-        },
-        {
-          serviceId: 'svc_C',
-          serviceName: 'サービスC',
-          unitPrice: 5000,
-          quantity: 1,
-        },
-      ],
-      discountRuleForMultipleServices: {
-        isApplicable: true,
-        discountRate: 0.05, // 複数サービス利用時5%割引
-      },
-      taxRate: 0.1, // 税率10%
-    };
+describe('請求額算出・検証機能 - 手順書違反検出', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
 
-    // システムで複数サービス組み合わせ時の集計計算を実行
-    const result = calculateBillingAmount(billingInput);
+  // SCEN-978
+  it('手順書に違反した請求額算出がエラーとして検出される', () => {
+    // テスト用営業データ準備：基本契約金額100,000円、割引率10%、税率10%
+    const validContractAmount = 100000;
+    const validDiscountRate = 0.1;
+    const validTaxRate = 0.1;
 
-    // 各サービスの個別料金を確認
-    expect(result.serviceDetails[0].serviceName).toBe('サービスA');
-    expect(result.serviceDetails[0].serviceAmount).toBe(10000);
+    // 正規手順：(基本額 - 割引額) × (1 + 税率)
+    // = (100,000 - 10,000) × 1.1 = 90,000 × 1.1 = 99,000
+    const expectedValidBillingAmount = 99000;
 
-    expect(result.serviceDetails[1].serviceName).toBe('サービスB');
-    expect(result.serviceDetails[1].serviceAmount).toBe(15000);
-
-    expect(result.serviceDetails[2].serviceName).toBe('サービスC');
-    expect(result.serviceDetails[2].serviceAmount).toBe(5000);
-
-    // 計算結果の小計（30,000円）を確認
-    expect(result.subtotal).toBe(30000);
-
-    // 割引ルール適用後の金額（28,500円）を確認
-    const discountAmount = 30000 * 0.05; // 1,500円
-    const discountedAmount = 30000 - discountAmount; // 28,500円
-    expect(result.discountedAmount).toBe(28500);
-
-    // 税金計算
-    const taxAmount = 28500 * 0.1; // 2,850円
-    const finalAmount = 28500 + taxAmount; // 31,350円
-
-    // 最終請求額（31,350円）を確認
-    expect(result.totalBillingAmount).toBe(31350);
-
-    // 計算ロジックが手順書のルールに準拠していることを検証
-    expect(result.calculationLog).toEqual({
-      step1_subtotal: 30000,
-      step2_discountApplied: true,
-      step2_discountRate: 0.05,
-      step2_discountAmount: 1500,
-      step2_afterDiscount: 28500,
-      step3_taxRate: 0.1,
-      step3_taxAmount: 2850,
-      step3_finalAmount: 31350,
+    // 正規パラメータで計算実行 - エラーが発生しないこと
+    const validResult = validateAndCalculateBillingAmount({
+      contractAmount: validContractAmount,
+      discountRate: validDiscountRate,
+      taxRate: validTaxRate,
+      discountApplicationOrder: 'before_tax',
+      taxCalculationOrder: 'after_discount',
     });
 
-    expect(result.isCompliantWithHandbook).toBe(true);
+    expect(validResult.isValid).toBe(true);
+    expect(validResult.billingAmount).toBe(expectedValidBillingAmount);
+    expect(validResult.errorCode).toBeNull();
+
+    // 手順書違反ケース1：税率計算を割引前に適用（逆転）
+    // 誤手順：(基本額 × (1 + 税率)) - 割引額 = 110,000 - 10,000 = 100,000
+    const invalidResult1 = validateAndCalculateBillingAmount({
+      contractAmount: validContractAmount,
+      discountRate: validDiscountRate,
+      taxRate: validTaxRate,
+      discountApplicationOrder: 'after_tax',
+      taxCalculationOrder: 'before_discount',
+    });
+
+    expect(invalidResult1.isValid).toBe(false);
+    expect(invalidResult1.errorCode).toBeDefined();
+    expect(invalidResult1.errorCode).toMatch(/税率/);
+    expect(invalidResult1.violationDetail).toBeDefined();
+    expect(invalidResult1.violationDetail).toMatch(/手順書/);
+
+    // 手順書違反ケース2：割引適用タイミング誤り（割引を税込み後に適用）
+    // 誤手順では期待される計算順序に違反
+    const invalidResult2 = validateAndCalculateBillingAmount({
+      contractAmount: validContractAmount,
+      discountRate: validDiscountRate,
+      taxRate: validTaxRate,
+      discountApplicationOrder: 'after_tax',
+      taxCalculationOrder: 'after_discount',
+    });
+
+    expect(invalidResult2.isValid).toBe(false);
+    expect(invalidResult2.errorCode).toMatch(/割引/);
+    expect(invalidResult2.violationDetail).toMatch(/手順書/);
+
+    // 再度正規手順で計算実行 - エラーが発生しないことを再確認
+    const validRerunResult = validateAndCalculateBillingAmount({
+      contractAmount: validContractAmount,
+      discountRate: validDiscountRate,
+      taxRate: validTaxRate,
+      discountApplicationOrder: 'before_tax',
+      taxCalculationOrder: 'after_discount',
+    });
+
+    expect(validRerunResult.isValid).toBe(true);
+    expect(validRerunResult.billingAmount).toBe(expectedValidBillingAmount);
+    expect(validRerunResult.errorCode).toBeNull();
+    expect(validRerunResult.violationDetail).toBeNull();
   });
 });

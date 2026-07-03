@@ -1,108 +1,68 @@
-import { searchMailHistoriesByFilters } from '../../src/logic/it-1781935279444-1-1-1';
+import { validateBillingDataConsistency } from "../../src/logic/it-1781935279444-2-2-1";
 
-describe('営業データ項目のメタデータ管理機能 - メール履歴検索・フィルタリング', () => {
-  // SCEN-806: [normal] メール履歴検索・フィルタリング機能 - 顧客ID・契約ID・日付範囲の条件に合致するメール履歴が抽出される
-  test('should extract mail histories matching all specified filter conditions (customer_id, contract_id, date range)', () => {
-    const mock_mail_histories = [
-      {
-        mail_history_id: 'MH001',
-        customer_id: 'C001',
-        contract_id: 'CT001',
-        sent_date: new Date('2024-01-15T10:30:00Z'),
-        sender: 'sales@company.com',
-        recipient: 'customer1@example.com',
-        subject: 'Contract Update Notification',
-        body: 'Your contract has been updated.',
-      },
-      {
-        mail_history_id: 'MH002',
-        customer_id: 'C001',
-        contract_id: 'CT001',
-        sent_date: new Date('2024-01-20T14:00:00Z'),
-        sender: 'sales@company.com',
-        recipient: 'customer1@example.com',
-        subject: 'Delivery Notice',
-        body: 'Deliverable ready for review.',
-      },
-      {
-        mail_history_id: 'MH003',
-        customer_id: 'C001',
-        contract_id: 'CT002',
-        sent_date: new Date('2024-01-25T09:00:00Z'),
-        sender: 'sales@company.com',
-        recipient: 'customer1@example.com',
-        subject: 'Invoice Notification',
-        body: 'Your invoice is ready.',
-      },
-      {
-        mail_history_id: 'MH004',
-        customer_id: 'C002',
-        contract_id: 'CT001',
-        sent_date: new Date('2024-01-18T11:00:00Z'),
-        sender: 'sales@company.com',
-        recipient: 'customer2@example.com',
-        subject: 'Contract Update Notification',
-        body: 'Your contract has been updated.',
-      },
-      {
-        mail_history_id: 'MH005',
-        customer_id: 'C001',
-        contract_id: 'CT001',
-        sent_date: new Date('2024-02-05T16:30:00Z'),
-        sender: 'sales@company.com',
-        recipient: 'customer1@example.com',
-        subject: 'Monthly Report',
-        body: 'Your monthly sales report is attached.',
-      },
-    ];
-
-    const filter_params = {
-      customer_id: 'C001',
-      contract_id: 'CT001',
-      start_date: new Date('2024-01-10T00:00:00Z'),
-      end_date: new Date('2024-01-31T23:59:59Z'),
+describe("営業データの完全性・正確性を自動検証し、不足データ・誤りを検出・通知する機能", () => {
+  test("SCEN-806: 請求データ妥当性自動検証機能 - 請求内容が契約条件・営業成果データと一致している場合に検証を通過する", () => {
+    // 契約条件データ
+    const contractData = {
+      contractId: "CNT-2024-001",
+      customerId: "CUST-ABC123",
+      serviceId: "SVC-STANDARD",
+      contractAmount: 100000,
+      contractStartDate: "2024-01-01",
+      contractEndDate: "2024-12-31",
+      unitPrice: 1000,
+      discountRate: 0.1,
+      minimumBillingAmount: 50000,
+      maximumBillingAmount: 150000,
     };
 
-    const result = searchMailHistoriesByFilters(mock_mail_histories, filter_params);
+    // 営業成果データ
+    const salesPerformanceData = {
+      salesDataId: "SALES-2024-001",
+      customerId: "CUST-ABC123",
+      serviceId: "SVC-STANDARD",
+      appointmentCount: 50,
+      contractCount: 30,
+      salesAmount: 30000,
+      customerReaction: "positive",
+      recordDate: "2024-01-31",
+      month: "2024-01",
+    };
 
-    // Expected: MH001, MH002 (both match C001, CT001, and fall within 2024-01-10 to 2024-01-31)
-    // Not expected: MH003 (different CT002), MH004 (different C002), MH005 (outside date range 2024-02-05)
+    // 請求内容データ（契約条件と営業成果データから計算）
+    // 計算: 売上額 30,000 × 単価 1,000 ÷ 1,000 = 30,000
+    // 割引適用: 30,000 × (1 - 0.1) = 27,000
+    // 最小請求額チェック: 27,000 < 50,000 なので最小請求額 50,000 を適用
+    const billingData = {
+      billingId: "BILL-2024-001",
+      customerId: "CUST-ABC123",
+      serviceId: "SVC-STANDARD",
+      contractId: "CNT-2024-001",
+      billingMonth: "2024-01",
+      baseAmount: 30000,
+      discountRate: 0.1,
+      discountAmount: 3000,
+      billingAmount: 50000,
+      billingStartDate: "2024-01-01",
+      billingEndDate: "2024-01-31",
+      validationStatus: "pending",
+    };
 
-    expect(result).toEqual([
-      {
-        mail_history_id: 'MH001',
-        customer_id: 'C001',
-        contract_id: 'CT001',
-        sent_date: new Date('2024-01-15T10:30:00Z'),
-        sender: 'sales@company.com',
-        recipient: 'customer1@example.com',
-        subject: 'Contract Update Notification',
-        body: 'Your contract has been updated.',
-      },
-      {
-        mail_history_id: 'MH002',
-        customer_id: 'C001',
-        contract_id: 'CT001',
-        sent_date: new Date('2024-01-20T14:00:00Z'),
-        sender: 'sales@company.com',
-        recipient: 'customer1@example.com',
-        subject: 'Delivery Notice',
-        body: 'Deliverable ready for review.',
-      },
-    ]);
-
-    expect(result.length).toBe(2);
-
-    result.forEach((mail) => {
-      expect(mail.customer_id).toBe('C001');
-      expect(mail.contract_id).toBe('CT001');
-      expect(mail.sent_date.getTime()).toBeGreaterThanOrEqual(filter_params.start_date.getTime());
-      expect(mail.sent_date.getTime()).toBeLessThanOrEqual(filter_params.end_date.getTime());
+    // 妥当性検証を実行
+    const validationResult = validateBillingDataConsistency({
+      billingData,
+      contractData,
+      salesPerformanceData,
     });
 
-    const unmatched_ids = ['MH003', 'MH004', 'MH005'];
-    result.forEach((mail) => {
-      expect(unmatched_ids).not.toContain(mail.mail_history_id);
-    });
+    // 期待結果: 検証が通過し、ステータスが "valid" で詳細が正常
+    expect(validationResult.isValid).toBe(true);
+    expect(validationResult.status).toBe("valid");
+    expect(validationResult.billingAmount).toBe(50000);
+    expect(validationResult.discountApplied).toBe(true);
+    expect(validationResult.minimumBillingApplied).toBe(true);
+    expect(validationResult.errors).toEqual([]);
+    expect(validationResult.warnings).toEqual([]);
+    expect(typeof validationResult.validatedAt).toBe("string");
   });
 });

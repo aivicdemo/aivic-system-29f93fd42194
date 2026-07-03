@@ -1,139 +1,90 @@
-import { describe, test, expect } from "@jest/globals";
-import { validateContractChangeRequiredFields } from "../../src/logic/it-1781935279444-2-1-1";
+import { describeMonthlySummaryTemplate } from '../../src/logic/it-1-br-1781935279444-1-2-1';
 
-describe("営業データ入力時の品質検証ルール定義・実行機能", () => {
-  test("SCEN-1230: 契約変更内容の必須項目検証機能 - 必須項目不足時にエラー発生", () => {
-    // 必須項目を1つ以上不足させたテストデータ
-    const incompleteContractChange = {
-      contractId: "C-2024-001",
-      changeDate: "2024-01-15T09:00:00Z",
-      // changeType が不足（必須項目）
-      // changedFields が不足（必須項目）
-      changeReason: "顧客要望による変更",
-      approvalStatus: "pending",
+describe('月次サマリーテンプレートの定義・管理機能', () => {
+  // SCEN-1230: [edge] 契約変更SLA自動管理機能 - SLA時間に到達した時点での処理完了状況が正確に判定される（境界値）
+  test('SCEN-1230: 契約変更SLA境界値での処理完了状況判定が正確に実行される', () => {
+    const slaHours = 24;
+    const slaMilliseconds = slaHours * 60 * 60 * 1000;
+    
+    const contractChangeInitTime = new Date('2024-01-15T09:00:00Z');
+    const contractChangeInitTimeMs = contractChangeInitTime.getTime();
+    
+    // タイムポイント1: SLA開始から23時間59分59秒経過
+    const point1TimeMs = contractChangeInitTimeMs + (23 * 60 * 60 * 1000) + (59 * 60 * 1000) + (59 * 1000);
+    const point1CheckTime = new Date(point1TimeMs);
+    const elapsedMs1 = point1TimeMs - contractChangeInitTimeMs;
+    
+    // タイムポイント2: SLA開始からちょうど24時間経過（SLA到達時刻）
+    const point2TimeMs = contractChangeInitTimeMs + slaMilliseconds;
+    const point2CheckTime = new Date(point2TimeMs);
+    const elapsedMs2 = point2TimeMs - contractChangeInitTimeMs;
+    
+    // タイムポイント3: SLA開始から24時間1秒経過
+    const point3TimeMs = contractChangeInitTimeMs + slaMilliseconds + 1000;
+    const point3CheckTime = new Date(point3TimeMs);
+    const elapsedMs3 = point3TimeMs - contractChangeInitTimeMs;
+    
+    const contractChangeRecord = {
+      contractChangeId: 'CC-001',
+      initiatedAt: contractChangeInitTime,
+      slaHours: slaHours,
+      processCompletedAt: null as Date | null,
+      status: 'pending' as string,
     };
-
-    // 検証エラーが発生することを確認
-    expect(() => {
-      validateContractChangeRequiredFields(incompleteContractChange);
-    }).toThrow(/必須項目/);
-
-    // 複数必須項目が不足しているテストケース
-    const severelyIncompleteContractChange = {
-      contractId: "C-2024-002",
-      // changeDate が不足（必須項目）
-      // changeType が不足（必須項目）
-      // changedFields が不足（必須項目）
-      approvalStatus: "pending",
-    };
-
-    expect(() => {
-      validateContractChangeRequiredFields(severelyIncompleteContractChange);
-    }).toThrow(/必須項目/);
-
-    // 必須項目が null の場合
-    const nullRequiredFieldContractChange = {
-      contractId: "C-2024-003",
-      changeDate: null,
-      changeType: "pricing",
-      changedFields: ["price"],
-      changeReason: "顧客要望による変更",
-      approvalStatus: "pending",
-    };
-
-    expect(() => {
-      validateContractChangeRequiredFields(nullRequiredFieldContractChange);
-    }).toThrow(/必須項目/);
-
-    // 必須項目が空文字列の場合
-    const emptyStringRequiredFieldContractChange = {
-      contractId: "",
-      changeDate: "2024-01-15T09:00:00Z",
-      changeType: "pricing",
-      changedFields: ["price"],
-      changeReason: "顧客要望による変更",
-      approvalStatus: "pending",
-    };
-
-    expect(() => {
-      validateContractChangeRequiredFields(emptyStringRequiredFieldContractChange);
-    }).toThrow(/必須項目/);
-
-    // 必須項目が空配列の場合
-    const emptyArrayRequiredFieldContractChange = {
-      contractId: "C-2024-004",
-      changeDate: "2024-01-15T09:00:00Z",
-      changeType: "pricing",
-      changedFields: [],
-      changeReason: "顧客要望による変更",
-      approvalStatus: "pending",
-    };
-
-    expect(() => {
-      validateContractChangeRequiredFields(emptyArrayRequiredFieldContractChange);
-    }).toThrow(/必須項目/);
-
-    // すべての必須項目が正常に揃っているテストケース（成功ケース）
-    const completeContractChange = {
-      contractId: "C-2024-005",
-      changeDate: "2024-01-15T09:00:00Z",
-      changeType: "pricing",
-      changedFields: ["price", "discountRate"],
-      changeReason: "顧客要望による変更",
-      approvalStatus: "pending",
-      effectiveDate: "2024-02-01T00:00:00Z",
-    };
-
-    const validationResult = validateContractChangeRequiredFields(
-      completeContractChange
-    );
-    expect(validationResult).toEqual({
-      isValid: true,
-      errors: [],
-      missingFields: [],
+    
+    // テスト実行: 各タイムポイントでSLA判定を実行
+    const result1 = describeMonthlySummaryTemplate({
+      contractChangeRecord: contractChangeRecord,
+      currentCheckTime: point1CheckTime,
+      slaHours: slaHours,
     });
-
-    // 最小限の必須項目のみを含むテストケース（成功ケース）
-    const minimalCompleteContractChange = {
-      contractId: "C-2024-006",
-      changeDate: "2024-01-15T09:00:00Z",
-      changeType: "delivery",
-      changedFields: ["deliveryDate"],
-      approvalStatus: "pending",
-    };
-
-    const minimalValidationResult = validateContractChangeRequiredFields(
-      minimalCompleteContractChange
-    );
-    expect(minimalValidationResult).toEqual({
-      isValid: true,
-      errors: [],
-      missingFields: [],
+    
+    const result2 = describeMonthlySummaryTemplate({
+      contractChangeRecord: contractChangeRecord,
+      currentCheckTime: point2CheckTime,
+      slaHours: slaHours,
     });
-
-    // 不足している複数の必須項目が検証エラーメッセージに含まれることを確認
-    const multipleFieldsMissingContractChange = {
-      contractId: "C-2024-007",
-      // changeDate が不足
-      // changeType が不足
-      changedFields: ["price"],
-      approvalStatus: "pending",
-    };
-
-    expect(() => {
-      validateContractChangeRequiredFields(multipleFieldsMissingContractChange);
-    }).toThrow(/必須項目/);
-
-    // エラーレスポンスのステータスコードが400番台であることを確認
-    try {
-      validateContractChangeRequiredFields(incompleteContractChange);
-      fail("例外がスローされるべき");
-    } catch (error) {
-      if (error instanceof Error && "statusCode" in error) {
-        const typedError = error as Error & { statusCode: number };
-        expect(typedError.statusCode).toBeGreaterThanOrEqual(400);
-        expect(typedError.statusCode).toBeLessThan(500);
-      }
-    }
+    
+    const result3 = describeMonthlySummaryTemplate({
+      contractChangeRecord: contractChangeRecord,
+      currentCheckTime: point3CheckTime,
+      slaHours: slaHours,
+    });
+    
+    // 期待値検証
+    // ポイント1: 23時間59分59秒 → SLA内、処理未完了
+    expect(result1.isWithinSLA).toBe(true);
+    expect(result1.isCompleted).toBe(false);
+    expect(result1.slaExceededFlag).toBe(false);
+    expect(result1.warningFlag).toBe(false);
+    expect(result1.status).toBe('processing');
+    expect(result1.elapsedMilliseconds).toBe(elapsedMs1);
+    expect(result1.timeRemainingMilliseconds).toBe(slaMilliseconds - elapsedMs1);
+    
+    // ポイント2: ちょうど24時間 → SLA到達時刻として正確に検出
+    expect(result2.isWithinSLA).toBe(true);
+    expect(result2.slaReachedExactly).toBe(true);
+    expect(result2.isCompleted).toBe(false);
+    expect(result2.slaExceededFlag).toBe(false);
+    expect(result2.warningFlag).toBe(false);
+    expect(result2.status).toBe('sla_reached');
+    expect(result2.elapsedMilliseconds).toBe(elapsedMs2);
+    expect(result2.timeRemainingMilliseconds).toBe(0);
+    
+    // ポイント3: 24時間1秒 → SLA超過フラグ立下、警告生成
+    expect(result3.isWithinSLA).toBe(false);
+    expect(result3.slaExceededFlag).toBe(true);
+    expect(result3.warningFlag).toBe(true);
+    expect(result3.isCompleted).toBe(false);
+    expect(result3.status).toBe('sla_exceeded');
+    expect(result3.elapsedMilliseconds).toBe(elapsedMs3);
+    expect(result3.timeRemainingMilliseconds).toBe(0);
+    expect(result3.warningMessageCode).toBe('SLA_EXCEEDED');
+    expect(result3.nextStepAction).toBe('escalation_or_penalty');
+    
+    // SLA超過時の詳細検証
+    expect(result3.excessMilliseconds).toBe(1000);
+    expect(result3.autoNotificationTriggered).toBe(true);
+    expect(result3.billingProcessTransitionAllowed).toBe(true);
   });
 });

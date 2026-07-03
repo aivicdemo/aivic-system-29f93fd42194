@@ -1,143 +1,225 @@
-import { validateSalesDataBatch } from "../../src/logic/it-1781935279444-2-2-1";
+import { visualizeContractChangeDifference } from '../../src/logic/it-1-2-1';
 
-describe("営業データの完全性・正確性を自動検証し、不足データ・誤りを検出・通知する機能", () => {
-  test("SCEN-635: 月次営業データ品質自動検証機能 - 営業データ件数が10000件を超える場合でも検証処理が完全に実行される", () => {
-    // ===== テストデータ準備: 15000件の営業データ =====
-    const largeDataset = Array.from({ length: 15000 }, (_, index) => ({
-      id: `sales_${index + 1}`,
-      customerId: `cust_${((index % 500) + 1).toString().padStart(3, "0")}`,
-      serviceId: `svc_${((index % 10) + 1).toString().padStart(2, "0")}`,
-      appointmentCount: Math.floor(Math.random() * 100),
-      contractCount: Math.floor(Math.random() * 50),
-      contactDate: `2024-01-${((index % 28) + 1).toString().padStart(2, "0")}`,
-      contactMethod: ["email", "phone", "meeting"][index % 3],
-      amount: Math.floor(Math.random() * 1000000),
-      status: ["pending", "completed", "cancelled"][index % 3],
-    }));
+describe('営業成果データから請求対象項目を自動抽出し、顧客ごと・サービスごとの請求額を集計する機能', () => {
+  test('SCEN-635: 複数回の契約変更履歴がある場合も全変更ポイントの差分が可視化される', () => {
+    // 複数回の契約変更履歴を持つ契約データ
+    const contractId = 'CTR-2024-001';
+    const changeHistories = [
+      {
+        changeId: 'CHG-001',
+        sequenceNumber: 1,
+        changeDate: '2024-01-15',
+        changedBy: 'USER-001',
+        previousConditions: {
+          basePrice: 100000,
+          serviceType: 'Service-A',
+          discountRate: 0.0,
+          minimumBillingAmount: 50000,
+          billingItems: ['item-1', 'item-2'],
+        },
+        currentConditions: {
+          basePrice: 120000,
+          serviceType: 'Service-A',
+          discountRate: 0.05,
+          minimumBillingAmount: 50000,
+          billingItems: ['item-1', 'item-2', 'item-3'],
+        },
+      },
+      {
+        changeId: 'CHG-002',
+        sequenceNumber: 2,
+        changeDate: '2024-02-20',
+        changedBy: 'USER-002',
+        previousConditions: {
+          basePrice: 120000,
+          serviceType: 'Service-A',
+          discountRate: 0.05,
+          minimumBillingAmount: 50000,
+          billingItems: ['item-1', 'item-2', 'item-3'],
+        },
+        currentConditions: {
+          basePrice: 120000,
+          serviceType: 'Service-B',
+          discountRate: 0.1,
+          minimumBillingAmount: 60000,
+          billingItems: ['item-1', 'item-2', 'item-3', 'item-4'],
+        },
+      },
+      {
+        changeId: 'CHG-003',
+        sequenceNumber: 3,
+        changeDate: '2024-03-10',
+        changedBy: 'USER-003',
+        previousConditions: {
+          basePrice: 120000,
+          serviceType: 'Service-B',
+          discountRate: 0.1,
+          minimumBillingAmount: 60000,
+          billingItems: ['item-1', 'item-2', 'item-3', 'item-4'],
+        },
+        currentConditions: {
+          basePrice: 150000,
+          serviceType: 'Service-B',
+          discountRate: 0.1,
+          minimumBillingAmount: 60000,
+          billingItems: ['item-1', 'item-2', 'item-3', 'item-4', 'item-5'],
+        },
+      },
+    ];
 
-    // 意図的に不正なデータをいくつか混ぜる（検証エラーを生成）
-    largeDataset[100] = { ...largeDataset[100], customerId: "" }; // 必須項目欠落
-    largeDataset[500] = { ...largeDataset[500], appointmentCount: -5 }; // 不正な負数
-    largeDataset[1000] = { ...largeDataset[1000], amount: "invalid" as any }; // データ型エラー
-    largeDataset[5000] = { ...largeDataset[5000], contactDate: "2024-13-45" }; // 日付フォーマット不正
-    largeDataset[10000] = { ...largeDataset[10000], status: "unknown_status" }; // 無効なステータス
-
-    // ===== 検証処理実行 =====
-    const startTime = Date.now();
-    const validationResult = validateSalesDataBatch({
-      dataRecords: largeDataset,
-      executionId: "exec_20240115_001",
-      batchSize: 5000,
-      maxExecutionTimeMs: 60000,
+    const result = visualizeContractChangeDifference({
+      contractId,
+      changeHistories,
     });
-    const executionTimeMs = Date.now() - startTime;
 
-    // ===== 検証結果の構造確認 =====
-    expect(validationResult).toHaveProperty("totalRecordsProcessed");
-    expect(validationResult).toHaveProperty("successCount");
-    expect(validationResult).toHaveProperty("errorCount");
-    expect(validationResult).toHaveProperty("warningCount");
-    expect(validationResult).toHaveProperty("validationDetails");
-    expect(validationResult).toHaveProperty("executionDurationMs");
-    expect(validationResult).toHaveProperty("completionStatus");
+    // 全変更ポイントが漏れなく差分として可視化されることを確認
+    expect(result.totalChangePoints).toBe(3);
+    expect(result.visualizedDifferences.length).toBe(3);
 
-    // ===== 検証処理完了確認 =====
-    expect(validationResult.completionStatus).toBe("completed");
+    // 変更1の差分が正確に可視化されていることを確認
+    const diff1 = result.visualizedDifferences[0];
+    expect(diff1.changeId).toBe('CHG-001');
+    expect(diff1.sequenceNumber).toBe(1);
+    expect(diff1.changeDate).toBe('2024-01-15');
+    expect(diff1.changedBy).toBe('USER-001');
+    expect(diff1.differences.length).toBe(3);
 
-    // ===== 全件数処理確認: 15000件がすべて処理されたことを確認 =====
-    expect(validationResult.totalRecordsProcessed).toBe(15000);
-
-    // ===== 成功・エラー・警告件数の検証 =====
-    // 15000件中、5件が意図的エラー、残り14995件が成功予定（ただし一部は警告の可能性がある）
-    expect(validationResult.successCount + validationResult.errorCount + validationResult.warningCount)
-      .toBe(15000);
-    expect(validationResult.errorCount).toBeGreaterThanOrEqual(5);
-
-    // ===== 検証詳細内容の確認 =====
-    expect(validationResult.validationDetails).toBeDefined();
-    expect(Array.isArray(validationResult.validationDetails)).toBe(true);
-    expect(validationResult.validationDetails.length).toBeGreaterThan(0);
-
-    // 最初のエラーレコードの詳細を検証
-    const errorDetails = validationResult.validationDetails.filter(
-      (d: any) => d.status === "error"
+    const diff1_basePriceChange = diff1.differences.find(
+      (d: any) => d.fieldName === 'basePrice'
     );
-    expect(errorDetails.length).toBeGreaterThanOrEqual(5);
+    expect(diff1_basePriceChange).toBeDefined();
+    expect(diff1_basePriceChange.previousValue).toBe(100000);
+    expect(diff1_basePriceChange.currentValue).toBe(120000);
+    expect(diff1_basePriceChange.changeType).toBe('MODIFIED');
+    expect(diff1_basePriceChange.isHighlighted).toBe(true);
 
-    const firstError = errorDetails[0];
-    expect(firstError).toHaveProperty("recordIndex");
-    expect(firstError).toHaveProperty("recordId");
-    expect(firstError).toHaveProperty("status");
-    expect(firstError).toHaveProperty("errors");
-    expect(Array.isArray(firstError.errors)).toBe(true);
-
-    // エラー内容にビジネス的なキーワードが含まれることを確認
-    expect(firstError.errors[0]).toMatch(/顧客ID|金額|日付|ステータス|件数/);
-
-    // ===== 処理時間の確認: 60秒以内に完了すること =====
-    expect(validationResult.executionDurationMs).toBeLessThanOrEqual(60000);
-    expect(executionTimeMs).toBeLessThanOrEqual(60000);
-
-    // ===== 品質チェック項目の実行確認 =====
-    // 各レコードについて、必須項目・データ型・値の妥当性チェックが実行されたことを確認
-    const sampleRecordIndex = 50;
-    const sampleValidation = validationResult.validationDetails.find(
-      (d: any) => d.recordIndex === sampleRecordIndex
+    const diff1_discountChange = diff1.differences.find(
+      (d: any) => d.fieldName === 'discountRate'
     );
-    expect(sampleValidation).toBeDefined();
-    expect(sampleValidation.status).toMatch(/success|warning|error/);
+    expect(diff1_discountChange).toBeDefined();
+    expect(diff1_discountChange.previousValue).toBe(0.0);
+    expect(diff1_discountChange.currentValue).toBe(0.05);
+    expect(diff1_discountChange.changeType).toBe('MODIFIED');
+    expect(diff1_discountChange.isHighlighted).toBe(true);
 
-    // ===== バッチ処理の進捗情報確認 =====
-    // 5000件ずつのバッチで3バッチ処理されていることを確認
-    expect(validationResult).toHaveProperty("batchProcessingInfo");
-    if (validationResult.batchProcessingInfo) {
-      expect(validationResult.batchProcessingInfo.totalBatches).toBe(3);
-      expect(validationResult.batchProcessingInfo.completedBatches).toBe(3);
-    }
-
-    // ===== メモリ・パフォーマンス: エラーが発生していないことの確認 =====
-    expect(validationResult).not.toHaveProperty("fatalError");
-    expect(validationResult.completionStatus).not.toBe("failed");
-    expect(validationResult.completionStatus).not.toBe("timeout");
-
-    // ===== 検証結果レポート生成の確認 =====
-    expect(validationResult).toHaveProperty("reportGeneratedAt");
-    const reportTimestamp = new Date(validationResult.reportGeneratedAt);
-    expect(reportTimestamp.getTime()).toBeGreaterThan(0);
-
-    // ===== エラーレコードと正常レコードの件数集計が正確であること =====
-    const totalChecked =
-      validationResult.successCount +
-      validationResult.errorCount +
-      validationResult.warningCount;
-    expect(totalChecked).toBe(15000);
-
-    // エラー件数が5件以上であること（意図的に混ぜたエラー）
-    expect(validationResult.errorCount).toBeGreaterThanOrEqual(5);
-
-    // 成功件数が14990件以上であること（15000 - 5 - その他の警告）
-    expect(validationResult.successCount).toBeGreaterThanOrEqual(14990);
-
-    // ===== 特定のエラーレコードの内容確認 =====
-    const customerIdErrorRecord = validationResult.validationDetails.find(
-      (d: any) => d.recordIndex === 100
+    const diff1_itemsChange = diff1.differences.find(
+      (d: any) => d.fieldName === 'billingItems'
     );
-    expect(customerIdErrorRecord).toBeDefined();
-    expect(customerIdErrorRecord.status).toBe("error");
-    expect(customerIdErrorRecord.errors.some((e: string) => e.match(/顧客ID/))).toBe(true);
+    expect(diff1_itemsChange).toBeDefined();
+    expect(diff1_itemsChange.previousValue).toEqual(['item-1', 'item-2']);
+    expect(diff1_itemsChange.currentValue).toEqual([
+      'item-1',
+      'item-2',
+      'item-3',
+    ]);
+    expect(diff1_itemsChange.changeType).toBe('ADDED');
+    expect(diff1_itemsChange.addedItems).toEqual(['item-3']);
 
-    const dateFormatErrorRecord = validationResult.validationDetails.find(
-      (d: any) => d.recordIndex === 5000
+    // 変更2の差分が正確に可視化されていることを確認
+    const diff2 = result.visualizedDifferences[1];
+    expect(diff2.changeId).toBe('CHG-002');
+    expect(diff2.sequenceNumber).toBe(2);
+    expect(diff2.changeDate).toBe('2024-02-20');
+    expect(diff2.changedBy).toBe('USER-002');
+    expect(diff2.differences.length).toBe(4);
+
+    const diff2_serviceChange = diff2.differences.find(
+      (d: any) => d.fieldName === 'serviceType'
     );
-    expect(dateFormatErrorRecord).toBeDefined();
-    expect(dateFormatErrorRecord.status).toBe("error");
-    expect(dateFormatErrorRecord.errors.some((e: string) => e.match(/日付/))).toBe(true);
+    expect(diff2_serviceChange).toBeDefined();
+    expect(diff2_serviceChange.previousValue).toBe('Service-A');
+    expect(diff2_serviceChange.currentValue).toBe('Service-B');
+    expect(diff2_serviceChange.changeType).toBe('MODIFIED');
 
-    // ===== パフォーマンス: 1000件あたりの処理時間が許容範囲内 =====
-    const processingTimePerThousand = (validationResult.executionDurationMs / 15) * 1000;
-    expect(processingTimePerThousand).toBeLessThan(10000); // 1000件あたり10秒以内
+    const diff2_discountChange = diff2.differences.find(
+      (d: any) => d.fieldName === 'discountRate'
+    );
+    expect(diff2_discountChange).toBeDefined();
+    expect(diff2_discountChange.previousValue).toBe(0.05);
+    expect(diff2_discountChange.currentValue).toBe(0.1);
 
-    // ===== 処理状態の終了確認 =====
-    expect(validationResult.completionStatus).toBe("completed");
+    const diff2_minimumChange = diff2.differences.find(
+      (d: any) => d.fieldName === 'minimumBillingAmount'
+    );
+    expect(diff2_minimumChange).toBeDefined();
+    expect(diff2_minimumChange.previousValue).toBe(50000);
+    expect(diff2_minimumChange.currentValue).toBe(60000);
+
+    // 変更3の差分が正確に可視化されていることを確認
+    const diff3 = result.visualizedDifferences[2];
+    expect(diff3.changeId).toBe('CHG-003');
+    expect(diff3.sequenceNumber).toBe(3);
+    expect(diff3.changeDate).toBe('2024-03-10');
+    expect(diff3.changedBy).toBe('USER-003');
+    expect(diff3.differences.length).toBe(2);
+
+    const diff3_basePriceChange = diff3.differences.find(
+      (d: any) => d.fieldName === 'basePrice'
+    );
+    expect(diff3_basePriceChange).toBeDefined();
+    expect(diff3_basePriceChange.previousValue).toBe(120000);
+    expect(diff3_basePriceChange.currentValue).toBe(150000);
+    expect(diff3_basePriceChange.changeType).toBe('MODIFIED');
+
+    const diff3_itemsChange = diff3.differences.find(
+      (d: any) => d.fieldName === 'billingItems'
+    );
+    expect(diff3_itemsChange).toBeDefined();
+    expect(diff3_itemsChange.previousValue).toEqual([
+      'item-1',
+      'item-2',
+      'item-3',
+      'item-4',
+    ]);
+    expect(diff3_itemsChange.currentValue).toEqual([
+      'item-1',
+      'item-2',
+      'item-3',
+      'item-4',
+      'item-5',
+    ]);
+    expect(diff3_itemsChange.changeType).toBe('ADDED');
+    expect(diff3_itemsChange.addedItems).toEqual(['item-5']);
+
+    // 各変更ステップ間での請求パターン差分の計算確認
+    expect(result.billingPatternDifferences.length).toBe(3);
+
+    // 変更1での請求パターン差分を確認
+    const billingDiff1 = result.billingPatternDifferences[0];
+    expect(billingDiff1.sequenceNumber).toBe(1);
+    expect(billingDiff1.basePriceDifference).toBe(20000);
+    expect(billingDiff1.discountRateDifference).toBe(0.05);
+    expect(billingDiff1.minimumBillingAmountDifference).toBe(0);
+    expect(billingDiff1.billingItemsAdded).toEqual(['item-3']);
+    expect(billingDiff1.billingItemsRemoved).toEqual([]);
+
+    // 変更2での請求パターン差分を確認
+    const billingDiff2 = result.billingPatternDifferences[1];
+    expect(billingDiff2.sequenceNumber).toBe(2);
+    expect(billingDiff2.basePriceDifference).toBe(0);
+    expect(billingDiff2.discountRateDifference).toBe(0.05);
+    expect(billingDiff2.minimumBillingAmountDifference).toBe(10000);
+    expect(billingDiff2.serviceTypeChange).toBe('Service-A -> Service-B');
+    expect(billingDiff2.billingItemsAdded).toEqual(['item-4']);
+
+    // 変更3での請求パターン差分を確認
+    const billingDiff3 = result.billingPatternDifferences[2];
+    expect(billingDiff3.sequenceNumber).toBe(3);
+    expect(billingDiff3.basePriceDifference).toBe(30000);
+    expect(billingDiff3.discountRateDifference).toBe(0);
+    expect(billingDiff3.minimumBillingAmountDifference).toBe(0);
+    expect(billingDiff3.billingItemsAdded).toEqual(['item-5']);
+
+    // 変更前後の値の比較表示が正しく機能していることを確認
+    expect(result.visualizationFormat).toBe('HIGHLIGHTED_COMPARISON');
+    expect(result.comparisonHighlighting.enableColorCoding).toBe(true);
+    expect(result.comparisonHighlighting.modifiedFieldColor).toBe('yellow');
+    expect(result.comparisonHighlighting.addedFieldColor).toBe('green');
+    expect(result.comparisonHighlighting.removedFieldColor).toBe('red');
+
+    // 全ての変更履歴について漏れなく差分が表示されていることを確認
+    expect(result.isComplete).toBe(true);
+    expect(result.missingChangeIds.length).toBe(0);
+    expect(result.summaryText).toContain('3');
   });
 });

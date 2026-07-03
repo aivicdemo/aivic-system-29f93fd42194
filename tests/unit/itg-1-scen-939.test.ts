@@ -1,119 +1,126 @@
-import { describe, test, expect, beforeEach, afterEach } from "@jest/globals";
-import { validateMonthlyScheduleDeadline } from "../../src/logic/it-1-1-1";
+import { extractBillingContracts } from "../../src/logic/it-1-2-1";
 
-describe("営業成果データの自動検証ルール定義と異常検出機能", () => {
-  beforeEach(() => {
-    jest.clearAllMocks();
-  });
+describe("営業成果データから請求対象項目を自動抽出し、顧客ごと・サービスごとの請求額を集計する機能", () => {
+  test("SCEN-939: 請求対象サービスが空の契約は請求対象外として除外される", () => {
+    // テストデータ: 請求対象サービスが空の契約と正常な契約
+    const contracts = [
+      {
+        contract_id: "CONTRACT_001",
+        customer_id: "CUST_A",
+        service_ids: [], // 請求対象サービスが空
+        base_fee: 10000,
+        discount_rate: 0.1,
+        effective_date: "2024-01-01",
+        end_date: "2024-12-31",
+      },
+      {
+        contract_id: "CONTRACT_002",
+        customer_id: "CUST_B",
+        service_ids: ["SERVICE_1", "SERVICE_2"], // 請求対象サービスが存在
+        base_fee: 15000,
+        discount_rate: 0.05,
+        effective_date: "2024-01-01",
+        end_date: "2024-12-31",
+      },
+      {
+        contract_id: "CONTRACT_003",
+        customer_id: "CUST_C",
+        service_ids: [], // 請求対象サービスが空
+        base_fee: 20000,
+        discount_rate: 0,
+        effective_date: "2024-01-01",
+        end_date: "2024-12-31",
+      },
+      {
+        contract_id: "CONTRACT_004",
+        customer_id: "CUST_D",
+        service_ids: ["SERVICE_3"], // 請求対象サービスが存在
+        base_fee: 25000,
+        discount_rate: 0.15,
+        effective_date: "2024-01-01",
+        end_date: "2024-12-31",
+      },
+    ];
 
-  afterEach(() => {
-    jest.clearAllMocks();
-  });
+    const result = extractBillingContracts(contracts);
 
-  // SCEN-939: [edge] 月次業務スケジュール管理・期限通知機能 - 期限日時が正確に0分単位で設定される
-  test("should set and maintain monthly schedule deadline with exact minute precision and zero seconds", () => {
-    // 入力: 期限日時を「2024年1月15日 14時30分00秒」に設定
-    const input_deadline_iso = "2024-01-15T14:30:00Z";
-    const input_deadline_datetime = new Date(input_deadline_iso);
-
-    // 第1回目: 設定値を保存し検証
-    const result_first = validateMonthlyScheduleDeadline({
-      scheduled_deadline_utc: input_deadline_datetime,
-      task_id: "monthly_close_001",
-      notification_type: "deadline_minute_precision",
-    });
-
-    // 期待結果: 期限日時が正確に保持されている（秒は00秒、分は指定通り30分）
-    expect(result_first.is_valid).toBe(true);
-    expect(result_first.deadline_utc_iso).toBe("2024-01-15T14:30:00Z");
-    expect(result_first.minute_precision_verified).toBe(true);
-    expect(result_first.seconds_value).toBe(0);
-    expect(result_first.minutes_value).toBe(30);
-    expect(result_first.hours_value).toBe(14);
-
-    // 第2回目: 異なる時刻で設定・保存・確認（14時45分00秒）
-    const input_deadline_iso_second = "2024-01-15T14:45:00Z";
-    const input_deadline_datetime_second = new Date(input_deadline_iso_second);
-
-    const result_second = validateMonthlyScheduleDeadline({
-      scheduled_deadline_utc: input_deadline_datetime_second,
-      task_id: "monthly_close_002",
-      notification_type: "deadline_minute_precision",
-    });
-
-    expect(result_second.is_valid).toBe(true);
-    expect(result_second.deadline_utc_iso).toBe("2024-01-15T14:45:00Z");
-    expect(result_second.minute_precision_verified).toBe(true);
-    expect(result_second.seconds_value).toBe(0);
-    expect(result_second.minutes_value).toBe(45);
-
-    // 第3回目: 別の日付で検証（2024年1月22日 09時00分00秒）
-    const input_deadline_iso_third = "2024-01-22T09:00:00Z";
-    const input_deadline_datetime_third = new Date(input_deadline_iso_third);
-
-    const result_third = validateMonthlyScheduleDeadline({
-      scheduled_deadline_utc: input_deadline_datetime_third,
-      task_id: "monthly_close_003",
-      notification_type: "deadline_minute_precision",
-    });
-
-    expect(result_third.is_valid).toBe(true);
-    expect(result_third.deadline_utc_iso).toBe("2024-01-22T09:00:00Z");
-    expect(result_third.minute_precision_verified).toBe(true);
-    expect(result_third.seconds_value).toBe(0);
-    expect(result_third.minutes_value).toBe(0);
-    expect(result_third.hours_value).toBe(9);
-
-    // 境界値テスト: 秒が00秒以外の場合はエラー（秒単位のズレ検出）
-    const input_deadline_with_seconds = new Date("2024-01-15T14:30:45Z");
-    const result_with_seconds_error = validateMonthlyScheduleDeadline({
-      scheduled_deadline_utc: input_deadline_with_seconds,
-      task_id: "monthly_close_004",
-      notification_type: "deadline_minute_precision",
-    });
-
-    expect(result_with_seconds_error.is_valid).toBe(false);
-    expect(result_with_seconds_error.minute_precision_verified).toBe(false);
-
-    // エラーテスト: 秒単位のズレ検出
-    expect(() =>
-      validateMonthlyScheduleDeadline({
-        scheduled_deadline_utc: new Date("2024-01-15T14:30:45Z"),
-        task_id: "monthly_close_005",
-        notification_type: "deadline_minute_precision",
-      })
-    ).toThrow(/秒単位のズレ/);
-
-    // 通知ログタイムスタンプの一貫性検証
-    const result_timestamp_check = validateMonthlyScheduleDeadline({
-      scheduled_deadline_utc: input_deadline_datetime,
-      task_id: "monthly_close_006",
-      notification_type: "deadline_minute_precision",
-    });
-
-    // 通知ログに記録されるタイムスタンプが正確か検証
-    expect(result_timestamp_check.notification_log_timestamp).toBe(
-      "2024-01-15T14:30:00Z"
+    // 期待結果: 請求対象サービスが存在する契約のみが返却される
+    expect(result.valid_contracts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          contract_id: "CONTRACT_002",
+          customer_id: "CUST_B",
+          service_ids: ["SERVICE_1", "SERVICE_2"],
+        }),
+        expect.objectContaining({
+          contract_id: "CONTRACT_004",
+          customer_id: "CUST_D",
+          service_ids: ["SERVICE_3"],
+        }),
+      ])
     );
-    expect(result_timestamp_check.database_stored_datetime).toBe(
-      "2024-01-15T14:30:00Z"
+
+    // 除外された契約数は 2 件
+    expect(result.valid_contracts.length).toBe(2);
+
+    // 除外ログに CONTRACT_001 と CONTRACT_003 が記録されている
+    expect(result.excluded_contracts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          contract_id: "CONTRACT_001",
+          reason: "請求対象サービスが空",
+        }),
+        expect.objectContaining({
+          contract_id: "CONTRACT_003",
+          reason: "請求対象サービスが空",
+        }),
+      ])
     );
-    expect(result_timestamp_check.ui_display_value).toBe("2024-01-15 14:30");
 
-    // 複数回の設定内容が一貫性を保っているか検証
-    const all_results = [result_first, result_second, result_third];
-    all_results.forEach((result) => {
-      expect(result.is_valid).toBe(true);
-      expect(result.minute_precision_verified).toBe(true);
-      expect(result.seconds_value).toBe(0);
-      expect(
-        result.deadline_utc_iso.match(/.*T.*:.*:00Z$/)
-      ).not.toBeNull();
-    });
+    // 除外ログの件数は 2 件
+    expect(result.excluded_contracts.length).toBe(2);
 
-    // 丸め誤差がないことを確認
-    expect(result_first.rounding_error_detected).toBe(false);
-    expect(result_second.rounding_error_detected).toBe(false);
-    expect(result_third.rounding_error_detected).toBe(false);
+    // 監査ログが生成されている
+    expect(result.audit_log).toBeDefined();
+    expect(result.audit_log.length).toBeGreaterThan(0);
+
+    // 監査ログに除外契約の記録が含まれている
+    expect(result.audit_log).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          contract_id: "CONTRACT_001",
+          action: "exclude",
+          reason: "請求対象サービスが空",
+        }),
+        expect.objectContaining({
+          contract_id: "CONTRACT_003",
+          action: "exclude",
+          reason: "請求対象サービスが空",
+        }),
+      ])
+    );
+
+    // 正常な契約は割引ルールが正確に適用されている
+    const contract_002_record = result.valid_contracts.find(
+      (c) => c.contract_id === "CONTRACT_002"
+    );
+    expect(contract_002_record).toBeDefined();
+    expect(contract_002_record?.base_fee).toBe(15000);
+    expect(contract_002_record?.discount_rate).toBe(0.05);
+    const expected_discounted_fee_002 = 15000 * (1 - 0.05); // 14250
+    expect(contract_002_record?.billing_amount).toBe(expected_discounted_fee_002);
+
+    const contract_004_record = result.valid_contracts.find(
+      (c) => c.contract_id === "CONTRACT_004"
+    );
+    expect(contract_004_record).toBeDefined();
+    expect(contract_004_record?.base_fee).toBe(25000);
+    expect(contract_004_record?.discount_rate).toBe(0.15);
+    const expected_discounted_fee_004 = 25000 * (1 - 0.15); // 21250
+    expect(contract_004_record?.billing_amount).toBe(expected_discounted_fee_004);
+
+    // システムエラーが発生していないことを確認
+    expect(result.error).toBeUndefined();
+    expect(result.success).toBe(true);
   });
 });

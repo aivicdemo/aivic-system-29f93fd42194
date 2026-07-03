@@ -1,112 +1,129 @@
-import { describe, test, expect } from "@jest/globals";
-import { extractAndValidateBillingItems } from "../../src/logic/it-1781935279444-2-2-1";
+import { executeMonthlyReportDistribution } from '../../src/logic/it-1-br-1781935279444-1-2-1';
 
-describe("請求対象項目の抽出・妥当性検証", () => {
-  test("SCEN-1282: 抽出された請求対象項目に漏れまたは重複があり、検出・通知される", () => {
-    // 【テストデータ準備】
-    const salesData = [
+describe('月次サマリーテンプレートの定義・管理機能', () => {
+  // SCEN-1282: [normal] 定義済みルール基づく自動配信 - 月次集計完了・最終承認獲得時に、配信ルール定義に基づき対象顧客に標準化レポートが自動配信される
+  test('月次集計完了・最終承認後、配信ルール定義に基づいて対象顧客全員に標準化レポートが自動配信される', () => {
+    const monthlyAggregationCompleteDate = new Date('2024-01-31T23:59:59Z');
+    const finalApprovalDate = new Date('2024-02-01T09:00:00Z');
+    const distributionRuleId = 'dr-001-standard';
+    const reportTemplateId = 'tpl-monthly-001';
+    
+    const targetCustomerList = [
       {
-        recordId: "sr-001",
-        customerId: "cust-A",
-        billableFlag: true,
-        amount: 50000,
-        billingDate: "2024-01-31",
-        serviceType: "service-X",
+        customerId: 'cust-a001',
+        customerName: 'Customer A Inc.',
+        recipientEmail: 'sales@customer-a.com',
+        distributionChannel: 'email',
+        contractStatus: 'active'
       },
       {
-        recordId: "sr-002",
-        customerId: "cust-B",
-        billableFlag: true,
-        amount: 75000,
-        billingDate: "2024-01-31",
-        serviceType: "service-Y",
+        customerId: 'cust-b001',
+        customerName: 'Customer B Corp.',
+        recipientEmail: 'admin@customer-b.com',
+        distributionChannel: 'email',
+        contractStatus: 'active'
       },
       {
-        recordId: "sr-003",
-        customerId: "cust-C",
-        billableFlag: true,
-        amount: 100000,
-        billingDate: "2024-01-31",
-        serviceType: "service-Z",
-      },
-      {
-        recordId: "sr-004",
-        customerId: "cust-A",
-        billableFlag: false,
-        amount: 0,
-        billingDate: "2024-01-31",
-        serviceType: "service-X",
-      },
-      // 重複レコード（sr-002 と同じ customerId, serviceType）
-      {
-        recordId: "sr-005",
-        customerId: "cust-B",
-        billableFlag: true,
-        amount: 75000,
-        billingDate: "2024-01-31",
-        serviceType: "service-Y",
-      },
+        customerId: 'cust-c001',
+        customerName: 'Customer C Ltd.',
+        recipientEmail: 'finance@customer-c.com',
+        distributionChannel: 'portal',
+        contractStatus: 'active'
+      }
     ];
 
-    // 【関数実行】
-    const result = extractAndValidateBillingItems(salesData);
+    const monthlyReportData = {
+      reportPeriodStart: new Date('2024-01-01T00:00:00Z'),
+      reportPeriodEnd: new Date('2024-01-31T23:59:59Z'),
+      totalAppointments: 145,
+      totalContracts: 38,
+      totalRevenue: 2850000,
+      customerBreakdown: [
+        { customerId: 'cust-a001', appointmentCount: 52, contractCount: 14, revenueAmount: 1050000 },
+        { customerId: 'cust-b001', appointmentCount: 48, contractCount: 12, revenueAmount: 900000 },
+        { customerId: 'cust-c001', appointmentCount: 45, contractCount: 12, revenueAmount: 900000 }
+      ],
+      generatedTimestamp: finalApprovalDate,
+      approvalStatus: 'final_approved'
+    };
 
-    // 【抽出結果の検証】
-    // billableFlag=true のレコードは sr-001, sr-002, sr-003, sr-005 の 4 件が対象
-    expect(result.extractedItems).toHaveLength(4);
-
-    // 【抽出レコード数と元データの比較 - 漏れがないか確認】
-    const billableRecords = salesData.filter((r) => r.billableFlag === true);
-    expect(result.extractedItems.length).toBe(billableRecords.length);
-
-    // 【重複チェック】
-    // sr-002 と sr-005 は同じ customerId="cust-B" と serviceType="service-Y" の組み合わせ
-    const duplicatesByCustomerService = result.extractedItems.reduce(
-      (acc, item) => {
-        const key = `${item.customerId}_${item.serviceType}`;
-        if (!acc[key]) {
-          acc[key] = [];
-        }
-        acc[key].push(item);
-        return acc;
+    const distributionRuleDefinition = {
+      ruleId: distributionRuleId,
+      templateId: reportTemplateId,
+      triggerEvent: 'final_approval_completed',
+      targetCustomerFilter: {
+        contractStatusList: ['active'],
+        serviceTypeList: ['all']
       },
-      {} as Record<string, typeof result.extractedItems>
+      distributionChannels: ['email', 'portal'],
+      retryPolicy: {
+        maxRetries: 3,
+        retryIntervalMinutes: 5
+      },
+      scheduleType: 'immediate',
+      createdDate: new Date('2024-01-15T10:00:00Z')
+    };
+
+    const result = executeMonthlyReportDistribution({
+      reportData: monthlyReportData,
+      distributionRule: distributionRuleDefinition,
+      targetCustomers: targetCustomerList,
+      approvalCompletionTime: finalApprovalDate
+    });
+
+    expect(result.distributionExecuted).toBe(true);
+    expect(result.totalTargetCustomerCount).toBe(3);
+    expect(result.successfulDistributionCount).toBe(3);
+    expect(result.failedDistributionCount).toBe(0);
+    expect(result.distributionStartTimestamp).toEqual(finalApprovalDate);
+    
+    expect(result.distributionDetails).toHaveLength(3);
+    expect(result.distributionDetails[0]).toEqual(
+      expect.objectContaining({
+        customerId: 'cust-a001',
+        customerName: 'Customer A Inc.',
+        recipientEmail: 'sales@customer-a.com',
+        distributionChannel: 'email',
+        deliveryStatus: 'success',
+        deliveryTimestamp: expect.any(Date)
+      })
+    );
+    expect(result.distributionDetails[1]).toEqual(
+      expect.objectContaining({
+        customerId: 'cust-b001',
+        customerName: 'Customer B Corp.',
+        recipientEmail: 'admin@customer-b.com',
+        distributionChannel: 'email',
+        deliveryStatus: 'success',
+        deliveryTimestamp: expect.any(Date)
+      })
+    );
+    expect(result.distributionDetails[2]).toEqual(
+      expect.objectContaining({
+        customerId: 'cust-c001',
+        customerName: 'Customer C Ltd.',
+        recipientEmail: 'finance@customer-c.com',
+        distributionChannel: 'portal',
+        deliveryStatus: 'success',
+        deliveryTimestamp: expect.any(Date)
+      })
     );
 
-    // 重複が存在することを確認
-    expect(duplicatesByCustomerService["cust-B_service-Y"]).toHaveLength(2);
+    expect(result.reportFormatValidation).toBe(true);
+    expect(result.reportContentComplete).toBe(true);
+    expect(result.reportTemplateId).toBe(reportTemplateId);
+    expect(result.reportPeriodStart).toEqual(new Date('2024-01-01T00:00:00Z'));
+    expect(result.reportPeriodEnd).toEqual(new Date('2024-01-31T23:59:59Z'));
 
-    // 【漏れ・重複検出結果の検証】
-    expect(result.validationStatus).toBe("INVALID");
-
-    // 【エラー情報の検証】
-    expect(result.errors).toHaveLength(1);
-    expect(result.errors[0].type).toBe("DUPLICATE");
-    expect(result.errors[0].message).toMatch(/重複/);
-    expect(result.errors[0].affectedRecordIds).toContain("sr-002");
-    expect(result.errors[0].affectedRecordIds).toContain("sr-005");
-
-    // 【通知内容の検証】
-    expect(result.notifications).toHaveLength(1);
-    expect(result.notifications[0]).toMatch(/cust-B/);
-    expect(result.notifications[0]).toMatch(/service-Y/);
-
-    // 【抽出結果の内容検証】
-    const extractedCustomerIds = result.extractedItems.map(
-      (item) => item.customerId
+    expect(result.allDistributionsSuccessful).toBe(true);
+    expect(result.distributionCompletionStatus).toBe('completed');
+    expect(result.systemLogEntry).toEqual(
+      expect.objectContaining({
+        eventType: 'monthly_report_distribution_initiated',
+        eventTimestamp: finalApprovalDate,
+        triggeredBy: 'final_approval_workflow',
+        distributionRuleApplied: distributionRuleId
+      })
     );
-    expect(extractedCustomerIds).toContain("cust-A");
-    expect(extractedCustomerIds).toContain("cust-B");
-    expect(extractedCustomerIds).toContain("cust-C");
-
-    // 【金額の合計検証】
-    const totalAmount = result.extractedItems.reduce(
-      (sum, item) => sum + item.amount,
-      0
-    );
-    expect(totalAmount).toBe(300000); // 50000 + 75000 + 100000 + 75000
-
-    // 【エラーコードの検証】
-    expect(result.errorCode).toBe("BILLING_ITEMS_VALIDATION_ERROR");
   });
 });

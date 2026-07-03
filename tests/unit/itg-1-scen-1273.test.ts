@@ -1,105 +1,79 @@
-import { validateSalesDataQuality } from "../../src/logic/it-1781935279444-2-2-1";
+import { approveInvoiceInfo } from '../../src/logic/it-1-2-1';
 
-describe("営業データ品質チェック・異常値検出・通知", () => {
-  // SCEN-1273
-  test("should pass validation and proceed to next process when all required fields are present and valid", () => {
-    // Arrange: テスト用の営業データを準備（すべての必須項目が正常値）
-    const salesData = {
-      customer_name: "株式会社テスト",
-      amount: 150000,
-      transaction_date: "2024-01-15",
-      product_code: "PRD-001",
-      contact_person: "田中太郎",
-      contact_date: "2024-01-14",
-      outcome_content: "初回打ち合わせ実施",
-      appointment_status: "confirmed",
-      service_type: "consulting",
-      quantity: 10,
-      unit_price: 15000,
-      status: "pending_review",
+describe('営業成果データから請求対象項目を自動抽出し、顧客ごと・サービスごとの請求額を集計する機能', () => {
+  // SCEN-1273: [edge] 請求情報最終承認機能 - 承認基準値の境界値（金額上限値など）に達した請求情報が正確に判定される
+  test('should approve invoice info at exact limit, reject above limit, and approve below limit', () => {
+    const APPROVAL_LIMIT = 1000000;
+
+    // テスト1: 金額上限値と同じ金額（1,000,000円）の請求情報
+    const invoiceAtLimit = {
+      invoiceId: 'INV-001',
+      customerId: 'CUST-001',
+      amount: 1000000,
+      serviceType: 'service-A',
+      invoiceDate: new Date('2024-01-15T09:00:00Z'),
+      items: [
+        { itemId: 'item-001', quantity: 100, unitPrice: 10000 }
+      ]
     };
 
-    // Act: 営業データ品質チェックを実行
-    const result = validateSalesDataQuality(salesData);
-
-    // Assert: 異常値検出ルール適用・すべてのチェック項目で「合格」を確認
-    expect(result).toEqual({
-      is_valid: true,
-      status: "pass",
-      validation_items: [
-        {
-          item_name: "customer_name",
-          check_result: "pass",
-          error_message: null,
-        },
-        {
-          item_name: "amount",
-          check_result: "pass",
-          error_message: null,
-        },
-        {
-          item_name: "transaction_date",
-          check_result: "pass",
-          error_message: null,
-        },
-        {
-          item_name: "product_code",
-          check_result: "pass",
-          error_message: null,
-        },
-        {
-          item_name: "contact_person",
-          check_result: "pass",
-          error_message: null,
-        },
-        {
-          item_name: "contact_date",
-          check_result: "pass",
-          error_message: null,
-        },
-        {
-          item_name: "outcome_content",
-          check_result: "pass",
-          error_message: null,
-        },
-        {
-          item_name: "appointment_status",
-          check_result: "pass",
-          error_message: null,
-        },
-        {
-          item_name: "service_type",
-          check_result: "pass",
-          error_message: null,
-        },
-        {
-          item_name: "quantity",
-          check_result: "pass",
-          error_message: null,
-        },
-        {
-          item_name: "unit_price",
-          check_result: "pass",
-          error_message: null,
-        },
-      ],
-      error_count: 0,
-      warning_count: 0,
-      next_process_eligible: true,
-      overall_message: "検証をパスしました。次工程へ進行できます。",
+    const resultAtLimit = approveInvoiceInfo(invoiceAtLimit, APPROVAL_LIMIT);
+    expect(resultAtLimit).toEqual({
+      invoiceId: 'INV-001',
+      isApproved: true,
+      reason: '金額上限値以下のため承認可能',
+      amount: 1000000,
+      limitAmount: 1000000,
+      status: 'approved'
     });
 
-    // Assert: エラーメッセージや警告が表示されていないことを確認
-    expect(result.error_count).toBe(0);
-    expect(result.warning_count).toBe(0);
-    expect(
-      result.validation_items.every((item) => item.error_message === null)
-    ).toBe(true);
+    // テスト2: 金額上限値より1円少ない金額（999,999円）の請求情報
+    const invoiceBelowLimit = {
+      invoiceId: 'INV-002',
+      customerId: 'CUST-001',
+      amount: 999999,
+      serviceType: 'service-A',
+      invoiceDate: new Date('2024-01-15T09:00:00Z'),
+      items: [
+        { itemId: 'item-002', quantity: 99, unitPrice: 10101 }
+      ]
+    };
 
-    // Assert: 検証完了後、ステータスが「パス」に更新されたことを確認
-    expect(result.status).toBe("pass");
+    const resultBelowLimit = approveInvoiceInfo(invoiceBelowLimit, APPROVAL_LIMIT);
+    expect(resultBelowLimit).toEqual({
+      invoiceId: 'INV-002',
+      isApproved: true,
+      reason: '金額上限値以下のため承認可能',
+      amount: 999999,
+      limitAmount: 1000000,
+      status: 'approved'
+    });
 
-    // Assert: 次工程へのデータが正常に遷移していることを確認
-    expect(result.next_process_eligible).toBe(true);
+    // テスト3: 金額上限値より1円多い金額（1,000,001円）の請求情報
+    const invoiceAboveLimit = {
+      invoiceId: 'INV-003',
+      customerId: 'CUST-001',
+      amount: 1000001,
+      serviceType: 'service-A',
+      invoiceDate: new Date('2024-01-15T09:00:00Z'),
+      items: [
+        { itemId: 'item-003', quantity: 101, unitPrice: 9901 }
+      ]
+    };
+
+    const resultAboveLimit = approveInvoiceInfo(invoiceAboveLimit, APPROVAL_LIMIT);
+    expect(resultAboveLimit).toEqual({
+      invoiceId: 'INV-003',
+      isApproved: false,
+      reason: '金額上限値を超過するため承認不可',
+      amount: 1000001,
+      limitAmount: 1000000,
+      status: 'rejected'
+    });
+
+    // システムログの判定理由が正確に記録されることを検証
+    expect(resultAtLimit.reason).toMatch(/承認/);
+    expect(resultBelowLimit.reason).toMatch(/承認/);
+    expect(resultAboveLimit.reason).toMatch(/超過/);
   });
 });

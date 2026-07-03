@@ -1,255 +1,209 @@
-import { generateMonthlySummaryReport } from "../../src/logic/it-1-br-1781935279444-1-2-1";
+import { describe, test, expect, beforeEach, afterEach } from "@jest/globals";
+import { validateSalesDataQuality } from "../../src/logic/it-1781935279444-2-2-1";
 
-describe("月次サマリーテンプレートの定義・管理機能", () => {
-  // SCEN-614: [normal] 月次サマリー自動生成 - 複数の月次サマリーテンプレート項目が定義通りの順序と計算で集計される
-  test("SCEN-614: 複数テンプレート項目が定義順序・計算ロジック通りに集計される", () => {
-    const transactionData = [
-      { id: 1, amount: 10000, quantity: 100, discount: 1000 },
-      { id: 2, amount: 12000, quantity: 120, discount: 1200 },
-      { id: 3, amount: 8000, quantity: 80, discount: 800 },
-      { id: 4, amount: 15000, quantity: 150, discount: 1500 },
-      { id: 5, amount: 11000, quantity: 110, discount: 1100 },
-      { id: 6, amount: 9500, quantity: 95, discount: 950 },
-      { id: 7, amount: 13000, quantity: 130, discount: 1300 },
-      { id: 8, amount: 10500, quantity: 105, discount: 1050 },
-      { id: 9, amount: 14000, quantity: 140, discount: 1400 },
-      { id: 10, amount: 11500, quantity: 115, discount: 1150 },
-      { id: 11, amount: 12500, quantity: 125, discount: 1250 },
-      { id: 12, amount: 9000, quantity: 90, discount: 900 },
-      { id: 13, amount: 16000, quantity: 160, discount: 1600 },
-      { id: 14, amount: 10000, quantity: 100, discount: 1000 },
-      { id: 15, amount: 13500, quantity: 135, discount: 1350 },
-      { id: 16, amount: 11000, quantity: 110, discount: 1100 },
-      { id: 17, amount: 15500, quantity: 155, discount: 1550 },
-      { id: 18, amount: 9500, quantity: 95, discount: 950 },
-      { id: 19, amount: 12000, quantity: 120, discount: 1200 },
-      { id: 20, amount: 14500, quantity: 145, discount: 1450 },
-    ];
+describe("営業データ品質検証・異常検出", () => {
+  // SCEN-614: [error] 営業データ品質検証・異常検出 - 営業データの数値項目が定義済みの値の範囲外である場合、異常値として検出され代表に通知される
+  test("範囲外の売上金額を異常値として検出し、アラート通知を送信する", () => {
+    // 期待値: 売上金額の許容範囲は 0 ～ 10,000,000 円
+    const minSalesAmount = 0;
+    const maxSalesAmount = 10000000;
 
-    const templateItemsPattern1 = [
-      {
-        item_id: 1,
-        item_name: "売上合計",
-        calculation_type: "sum",
-        source_field: "amount",
-        display_order: 1,
-      },
-      {
-        item_id: 2,
-        item_name: "売上数量",
-        calculation_type: "sum",
-        source_field: "quantity",
-        display_order: 2,
-      },
-      {
-        item_id: 3,
-        item_name: "平均単価",
-        calculation_type: "average",
-        source_field: "amount",
-        display_order: 3,
-      },
-      {
-        item_id: 4,
-        item_name: "割引合計",
-        calculation_type: "sum",
-        source_field: "discount",
-        display_order: 4,
-      },
-      {
-        item_id: 5,
-        item_name: "実売上",
-        calculation_type: "custom",
-        formula: "(sum(amount) - sum(discount))",
-        display_order: 5,
-      },
-    ];
-
-    const templateItemsPattern2 = [
-      {
-        item_id: 1,
-        item_name: "売上数量",
-        calculation_type: "sum",
-        source_field: "quantity",
-        display_order: 1,
-      },
-      {
-        item_id: 2,
-        item_name: "割引合計",
-        calculation_type: "sum",
-        source_field: "discount",
-        display_order: 2,
-      },
-      {
-        item_id: 3,
-        item_name: "売上合計",
-        calculation_type: "sum",
-        source_field: "amount",
-        display_order: 3,
-      },
-      {
-        item_id: 4,
-        item_name: "平均単価",
-        calculation_type: "average",
-        source_field: "amount",
-        display_order: 4,
-      },
-      {
-        item_id: 5,
-        item_name: "実売上",
-        calculation_type: "custom",
-        formula: "(sum(amount) - sum(discount))",
-        display_order: 5,
-      },
-    ];
-
-    const templateItemsPattern3 = [
-      {
-        item_id: 1,
-        item_name: "実売上",
-        calculation_type: "custom",
-        formula: "(sum(amount) - sum(discount))",
-        display_order: 1,
-      },
-      {
-        item_id: 2,
-        item_name: "売上合計",
-        calculation_type: "sum",
-        source_field: "amount",
-        display_order: 2,
-      },
-      {
-        item_id: 3,
-        item_name: "割引合計",
-        calculation_type: "sum",
-        source_field: "discount",
-        display_order: 3,
-      },
-      {
-        item_id: 4,
-        item_name: "売上数量",
-        calculation_type: "sum",
-        source_field: "quantity",
-        display_order: 4,
-      },
-      {
-        item_id: 5,
-        item_name: "平均単価",
-        calculation_type: "average",
-        source_field: "amount",
-        display_order: 5,
-      },
-    ];
-
-    // 計算値の準備
-    const totalAmount = 237500;
-    const totalQuantity = 2280;
-    const averagePrice = 237500 / 20;
-    const totalDiscount = 23750;
-    const actualSales = totalAmount - totalDiscount;
-
-    // パターン1の検証
-    const reportPattern1 = generateMonthlySummaryReport({
-      transactions: transactionData,
-      template_items: templateItemsPattern1,
-      period_start: "2024-01-01",
-      period_end: "2024-01-31",
-    });
-
-    expect(reportPattern1.items).toHaveLength(5);
-    expect(reportPattern1.items[0].item_name).toBe("売上合計");
-    expect(reportPattern1.items[0].display_order).toBe(1);
-    expect(reportPattern1.items[0].calculated_value).toBe(237500);
-    expect(reportPattern1.items[1].item_name).toBe("売上数量");
-    expect(reportPattern1.items[1].display_order).toBe(2);
-    expect(reportPattern1.items[1].calculated_value).toBe(2280);
-    expect(reportPattern1.items[2].item_name).toBe("平均単価");
-    expect(reportPattern1.items[2].display_order).toBe(3);
-    expect(reportPattern1.items[2].calculated_value).toBe(11875);
-    expect(reportPattern1.items[3].item_name).toBe("割引合計");
-    expect(reportPattern1.items[3].display_order).toBe(4);
-    expect(reportPattern1.items[3].calculated_value).toBe(23750);
-    expect(reportPattern1.items[4].item_name).toBe("実売上");
-    expect(reportPattern1.items[4].display_order).toBe(5);
-    expect(reportPattern1.items[4].calculated_value).toBe(213750);
-
-    // パターン2の検証（異なる順序）
-    const reportPattern2 = generateMonthlySummaryReport({
-      transactions: transactionData,
-      template_items: templateItemsPattern2,
-      period_start: "2024-01-01",
-      period_end: "2024-01-31",
-    });
-
-    expect(reportPattern2.items).toHaveLength(5);
-    expect(reportPattern2.items[0].item_name).toBe("売上数量");
-    expect(reportPattern2.items[0].display_order).toBe(1);
-    expect(reportPattern2.items[0].calculated_value).toBe(2280);
-    expect(reportPattern2.items[1].item_name).toBe("割引合計");
-    expect(reportPattern2.items[1].display_order).toBe(2);
-    expect(reportPattern2.items[1].calculated_value).toBe(23750);
-    expect(reportPattern2.items[2].item_name).toBe("売上合計");
-    expect(reportPattern2.items[2].display_order).toBe(3);
-    expect(reportPattern2.items[2].calculated_value).toBe(237500);
-    expect(reportPattern2.items[3].item_name).toBe("平均単価");
-    expect(reportPattern2.items[3].display_order).toBe(4);
-    expect(reportPattern2.items[3].calculated_value).toBe(11875);
-    expect(reportPattern2.items[4].item_name).toBe("実売上");
-    expect(reportPattern2.items[4].display_order).toBe(5);
-    expect(reportPattern2.items[4].calculated_value).toBe(213750);
-
-    // パターン3の検証（カスタム計算が最初）
-    const reportPattern3 = generateMonthlySummaryReport({
-      transactions: transactionData,
-      template_items: templateItemsPattern3,
-      period_start: "2024-01-01",
-      period_end: "2024-01-31",
-    });
-
-    expect(reportPattern3.items).toHaveLength(5);
-    expect(reportPattern3.items[0].item_name).toBe("実売上");
-    expect(reportPattern3.items[0].display_order).toBe(1);
-    expect(reportPattern3.items[0].calculated_value).toBe(213750);
-    expect(reportPattern3.items[1].item_name).toBe("売上合計");
-    expect(reportPattern3.items[1].display_order).toBe(2);
-    expect(reportPattern3.items[1].calculated_value).toBe(237500);
-    expect(reportPattern3.items[2].item_name).toBe("割引合計");
-    expect(reportPattern3.items[2].display_order).toBe(3);
-    expect(reportPattern3.items[2].calculated_value).toBe(23750);
-    expect(reportPattern3.items[3].item_name).toBe("売上数量");
-    expect(reportPattern3.items[3].display_order).toBe(4);
-    expect(reportPattern3.items[3].calculated_value).toBe(2280);
-    expect(reportPattern3.items[4].item_name).toBe("平均単価");
-    expect(reportPattern3.items[4].display_order).toBe(5);
-    expect(reportPattern3.items[4].calculated_value).toBe(11875);
-
-    // すべてのパターンで display_order が定義通りであることを確認
-    const verifyOrder = (report: any, expectedNames: string[]) => {
-      const orderedNames = report.items
-        .sort((a: any, b: any) => a.display_order - b.display_order)
-        .map((item: any) => item.item_name);
-      expect(orderedNames).toEqual(expectedNames);
+    // テストケース1: 負の売上金額（範囲外）
+    const invalidNegativeSalesData = {
+      salesDataId: "SD001",
+      customerId: "CUST001",
+      serviceId: "SVC001",
+      salesAmount: -50000,
+      appointmentCount: 5,
+      contractCount: 2,
+      recordedAt: new Date("2024-01-15T10:00:00Z"),
     };
 
-    verifyOrder(reportPattern1, [
-      "売上合計",
-      "売上数量",
-      "平均単価",
-      "割引合計",
-      "実売上",
-    ]);
-    verifyOrder(reportPattern2, [
-      "売上数量",
-      "割引合計",
-      "売上合計",
-      "平均単価",
-      "実売上",
-    ]);
-    verifyOrder(reportPattern3, [
-      "実売上",
-      "売上合計",
-      "割引合計",
-      "売上数量",
-      "平均単価",
-    ]);
+    const resultNegative = validateSalesDataQuality(
+      invalidNegativeSalesData,
+      {
+        minValue: minSalesAmount,
+        maxValue: maxSalesAmount,
+        fieldName: "salesAmount",
+      }
+    );
+
+    // 異常値検出の確認
+    expect(resultNegative.isValid).toBe(false);
+    expect(resultNegative.anomalies).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          fieldName: "salesAmount",
+          detectedValue: -50000,
+          minAllowed: minSalesAmount,
+          maxAllowed: maxSalesAmount,
+          anomalyType: "out_of_range",
+        }),
+      ])
+    );
+
+    // アラート通知の確認
+    expect(resultNegative.notification).toBeDefined();
+    expect(resultNegative.notification.notificationType).toBe(
+      "anomaly_alert"
+    );
+    expect(resultNegative.notification.recipientRole).toBe("representative");
+    expect(resultNegative.notification.content).toContain("salesAmount");
+    expect(resultNegative.notification.content).toContain("-50000");
+    expect(resultNegative.notification.anomalyCount).toBe(1);
+
+    // 通知ログレコードの確認
+    expect(resultNegative.notificationLog).toBeDefined();
+    expect(resultNegative.notificationLog.notificationId).toMatch(/^NL-/);
+    expect(resultNegative.notificationLog.salesDataId).toBe("SD001");
+    expect(resultNegative.notificationLog.detectedAt).toEqual(
+      expect.any(Date)
+    );
+    expect(resultNegative.notificationLog.status).toBe("sent");
+    expect(resultNegative.notificationLog.anomalyDetails).toHaveLength(1);
+    expect(resultNegative.notificationLog.anomalyDetails[0]).toEqual(
+      expect.objectContaining({
+        fieldName: "salesAmount",
+        detectedValue: -50000,
+        reasonCode: "value_below_minimum",
+      })
+    );
+
+    // テストケース2: 上限を超える売上金額（範囲外）
+    const invalidExcessiveSalesData = {
+      salesDataId: "SD002",
+      customerId: "CUST002",
+      serviceId: "SVC001",
+      salesAmount: 15000000,
+      appointmentCount: 10,
+      contractCount: 5,
+      recordedAt: new Date("2024-01-15T11:00:00Z"),
+    };
+
+    const resultExcessive = validateSalesDataQuality(
+      invalidExcessiveSalesData,
+      {
+        minValue: minSalesAmount,
+        maxValue: maxSalesAmount,
+        fieldName: "salesAmount",
+      }
+    );
+
+    expect(resultExcessive.isValid).toBe(false);
+    expect(resultExcessive.anomalies).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          fieldName: "salesAmount",
+          detectedValue: 15000000,
+          minAllowed: minSalesAmount,
+          maxAllowed: maxSalesAmount,
+          anomalyType: "out_of_range",
+        }),
+      ])
+    );
+
+    expect(resultExcessive.notification.anomalyCount).toBe(1);
+    expect(resultExcessive.notificationLog.anomalyDetails[0]).toEqual(
+      expect.objectContaining({
+        fieldName: "salesAmount",
+        detectedValue: 15000000,
+        reasonCode: "value_above_maximum",
+      })
+    );
+
+    // テストケース3: 許容範囲内の売上金額（正常）
+    const validSalesData = {
+      salesDataId: "SD003",
+      customerId: "CUST003",
+      serviceId: "SVC001",
+      salesAmount: 5000000,
+      appointmentCount: 8,
+      contractCount: 3,
+      recordedAt: new Date("2024-01-15T12:00:00Z"),
+    };
+
+    const resultValid = validateSalesDataQuality(validSalesData, {
+      minValue: minSalesAmount,
+      maxValue: maxSalesAmount,
+      fieldName: "salesAmount",
+    });
+
+    expect(resultValid.isValid).toBe(true);
+    expect(resultValid.anomalies).toHaveLength(0);
+    expect(resultValid.notification).toBeNull();
+    expect(resultValid.notificationLog).toBeNull();
+
+    // テストケース4: 境界値（下限 0 円）
+    const boundaryMinSalesData = {
+      salesDataId: "SD004",
+      customerId: "CUST004",
+      serviceId: "SVC001",
+      salesAmount: 0,
+      appointmentCount: 0,
+      contractCount: 0,
+      recordedAt: new Date("2024-01-15T13:00:00Z"),
+    };
+
+    const resultBoundaryMin = validateSalesDataQuality(
+      boundaryMinSalesData,
+      {
+        minValue: minSalesAmount,
+        maxValue: maxSalesAmount,
+        fieldName: "salesAmount",
+      }
+    );
+
+    expect(resultBoundaryMin.isValid).toBe(true);
+    expect(resultBoundaryMin.anomalies).toHaveLength(0);
+
+    // テストケース5: 境界値（上限 10,000,000 円）
+    const boundaryMaxSalesData = {
+      salesDataId: "SD005",
+      customerId: "CUST005",
+      serviceId: "SVC001",
+      salesAmount: 10000000,
+      appointmentCount: 100,
+      contractCount: 50,
+      recordedAt: new Date("2024-01-15T14:00:00Z"),
+    };
+
+    const resultBoundaryMax = validateSalesDataQuality(
+      boundaryMaxSalesData,
+      {
+        minValue: minSalesAmount,
+        maxValue: maxSalesAmount,
+        fieldName: "salesAmount",
+      }
+    );
+
+    expect(resultBoundaryMax.isValid).toBe(true);
+    expect(resultBoundaryMax.anomalies).toHaveLength(0);
+
+    // テストケース6: 複数の異常値を含むデータ
+    const multipleAnomaliesSalesData = {
+      salesDataId: "SD006",
+      customerId: "CUST006",
+      serviceId: "SVC001",
+      salesAmount: -100000,
+      appointmentCount: -5,
+      contractCount: 200,
+      recordedAt: new Date("2024-01-15T15:00:00Z"),
+    };
+
+    const resultMultipleAnomalies = validateSalesDataQuality(
+      multipleAnomaliesSalesData,
+      {
+        minValue: minSalesAmount,
+        maxValue: maxSalesAmount,
+        fieldName: "salesAmount",
+      }
+    );
+
+    expect(resultMultipleAnomalies.isValid).toBe(false);
+    expect(resultMultipleAnomalies.anomalies.length).toBeGreaterThanOrEqual(1);
+    expect(resultMultipleAnomalies.notification.anomalyCount).toBeGreaterThanOrEqual(
+      1
+    );
+    expect(resultMultipleAnomalies.notificationLog.status).toBe("sent");
   });
 });

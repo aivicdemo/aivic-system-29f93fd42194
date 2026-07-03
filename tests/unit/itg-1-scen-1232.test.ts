@@ -1,63 +1,92 @@
-import { generateContractChangeNotificationEmail } from '../../src/logic/it-1781935279444-2-1-1';
+import { describe, test, expect, beforeEach, afterEach } from "@jest/globals";
+import {
+  detectSLAExceeded,
+  type ContractChangeRequest,
+  type SLACheckResult,
+} from "../../src/logic/it-1-br-1781935279444-1-2-1";
 
-describe('営業データ入力時の品質検証ルール定義・実行機能', () => {
+describe("契約変更SLA自動管理機能", () => {
+  let fetchMock: any;
+
+  beforeEach(() => {
+    fetchMock = require("jest-fetch-mock");
+    fetchMock.enableMocks();
+    fetchMock.resetMocks();
+  });
+
+  afterEach(() => {
+    fetchMock.disableMocks();
+  });
+
   // SCEN-1232
-  test('契約変更通知メール自動生成機能 - 契約変更内容が正常に登録され、営業責任者のメールアドレスが存在する場合、通知メールが生成される', () => {
-    // Arrange: テストデータを準備
-    const contractChangeData = {
-      contractId: 'CTR-20240115-001',
-      changeItems: ['請求額', '納期'],
-      changeContent: '月額請求額を100,000円から120,000円に変更。納期を毎月25日から20日に変更',
-      changedAt: new Date('2024-01-15T10:30:00Z'),
-      changedBy: 'OPE-admin-001'
+  test("顧客確認処理が実施されない場合、SLA時間超過検知が正常に動作する", async () => {
+    // Arrange: テストデータとして契約変更申請を作成し、顧客確認待ち状態に設定
+    const contractChangeId = "CC-20250115-001";
+    const customerId = "CUST-001";
+    const slaTresholdMinutes = 60;
+    const currentTime = new Date("2025-01-15T12:00:00Z");
+    const requestCreatedTime = new Date("2025-01-15T10:50:00Z"); // 70分前
+    const elapsedMinutes = 70;
+
+    const contractChangeRequest: ContractChangeRequest = {
+      id: contractChangeId,
+      customerId,
+      status: "awaiting_customer_confirmation",
+      createdAt: requestCreatedTime.toISOString(),
+      changedContent: "契約期間を12ヶ月から24ヶ月に延長",
+      appliedFromDate: "2025-02-01",
+      lastUpdatedAt: requestCreatedTime.toISOString(),
+      customerConfirmedAt: null,
+      slaThresholdMinutes: slaTresholdMinutes,
     };
 
-    const salesResponsibleInfo = {
-      contractId: 'CTR-20240115-001',
-      responsibleName: '山田太郎',
-      emailAddress: 'yamada@customer-company.com',
-      customerName: '顧客企業A'
-    };
-
-    // Act: 契約変更通知メール自動生成機能を実行
-    const generatedEmail = generateContractChangeNotificationEmail(
-      contractChangeData,
-      salesResponsibleInfo
+    // API呼び出しのモック: 通知ログ記録エンドポイント
+    fetchMock.mockResponseOnce(
+      JSON.stringify({
+        logId: "LOG-20250115-SLA-001",
+        status: "recorded",
+        timestamp: currentTime.toISOString(),
+      }),
+      { status: 200 }
     );
 
-    // Assert: 生成されたメールオブジェクトが存在することを確認
-    expect(generatedEmail).toBeDefined();
-    expect(generatedEmail).not.toBeNull();
+    // Act: SLA時間超過検知機能を実行
+    const result: SLACheckResult = await detectSLAExceeded(
+      contractChangeRequest,
+      currentTime
+    );
 
-    // メールの宛先が営業責任者のメールアドレスであることを検証
-    expect(generatedEmail.to).toBe('yamada@customer-company.com');
+    // Assert: 超過検知結果がエラーハンドリング可能な状態で返される
+    expect(result).toHaveProperty("isExceeded");
+    expect(result).toHaveProperty("exceededMinutes");
+    expect(result).toHaveProperty("alertLogId");
+    expect(result).toHaveProperty("notificationStatus");
 
-    // メール件名に契約変更の旨が記載されていることを検証
-    expect(generatedEmail.subject).toMatch(/契約変更/);
-    expect(generatedEmail.subject).toMatch(/CTR-20240115-001/);
+    // Assert: SLA超過が正確に検知される（実経過70分 > 閾値60分）
+    expect(result.isExceeded).toBe(true);
+    expect(result.exceededMinutes).toBe(10);
 
-    // メール本文に契約変更内容が正しく含まれていることを検証
-    expect(generatedEmail.body).toMatch(/請求額/);
-    expect(generatedEmail.body).toMatch(/100,000円/);
-    expect(generatedEmail.body).toMatch(/120,000円/);
-    expect(generatedEmail.body).toMatch(/納期/);
-    expect(generatedEmail.body).toMatch(/25日/);
-    expect(generatedEmail.body).toMatch(/20日/);
+    // Assert: アラート/通知ログが正常に記録される
+    expect(result.alertLogId).toBe("LOG-20250115-SLA-001");
+    expect(result.notificationStatus).toBe("recorded");
 
-    // メール本文に顧客名が含まれていることを検証
-    expect(generatedEmail.body).toMatch(/顧客企業A/);
+    // Assert: 超過フラグがtrueに設定される
+    expect(result.slaExceededFlag).toBe(true);
 
-    // メール本文に営業責任者の名前が含まれていることを検証
-    expect(generatedEmail.body).toMatch(/山田太郎/);
+    // Assert: API呼び出しが正確に実行された
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/api/notifications/sla-alert"),
+      expect.objectContaining({
+        method: "POST",
+      })
+    );
 
-    // メール送信タイプが'契約変更通知'であることを検証
-    expect(generatedEmail.type).toBe('contract_change_notification');
+    // Assert: 管理者への通知準備完了ステータス
+    expect(result).toHaveProperty("adminNotificationReady");
+    expect(result.adminNotificationReady).toBe(true);
 
-    // メール生成タイムスタンプが存在し、現在時刻付近であることを検証
-    expect(generatedEmail.generatedAt).toBeDefined();
-    expect(typeof generatedEmail.generatedAt).toBe('object');
-
-    // メール本文の言語が日本語であることを検証
-    expect(generatedEmail.language).toBe('ja');
+    // Assert: 顧客未確認の状態が維持される
+    expect(result.customerConfirmationStatus).toBe("not_confirmed");
   });
 });

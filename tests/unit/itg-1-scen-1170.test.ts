@@ -1,149 +1,73 @@
-import { validateSalesDataQuality } from "../../src/logic/it-1781935279444-2-2-1";
+import { compareReportDataWithSourceData } from '../../src/logic/it-1781935279444-2-2-1';
 
-describe("営業データ品質検証 - 金額項目の異常値検出", () => {
+describe('レポート数値とソースデータの照合機能 - 許容誤差範囲内の数値差分を一致として判定', () => {
   // SCEN-1170
-  test("負数・異常に大きい値・正常値の金額項目を検証し、異常フラグと詳細を返す", () => {
-    // テストデータ: 負数の金額値
-    const negativeAmountRecord = {
-      id: "rec_001",
-      customerId: "cust_A",
-      serviceId: "svc_001",
-      amount: -50000,
-      appointmentCount: 5,
-      contractCount: 2,
-      recordDate: "2024-01-15",
-    };
+  test('許容誤差範囲内（±0.1%）の数値差分は一致として正しく判定され、範囲外の差分は不一致として判定される', () => {
+    // 基準値: 1,000,000円
+    const source_data_value = 1000000;
+    // 許容誤差: 0.1% = ±1,000円
+    const tolerance_percent = 0.1;
 
-    // テストデータ: 異常に大きい金額値
-    const largeAmountRecord = {
-      id: "rec_002",
-      customerId: "cust_B",
-      serviceId: "svc_002",
-      amount: 999999999999,
-      appointmentCount: 10,
-      contractCount: 3,
-      recordDate: "2024-01-16",
-    };
+    // ケース1: 許容誤差範囲内（+500円）
+    const report_value_within_upper = 1000500;
+    const result_within_upper = compareReportDataWithSourceData({
+      source_data_value,
+      report_value: report_value_within_upper,
+      tolerance_percent,
+    });
+    expect(result_within_upper.is_matched).toBe(true);
+    expect(result_within_upper.difference).toBe(500);
+    expect(result_within_upper.tolerance_upper_bound).toBe(1001000);
+    expect(result_within_upper.tolerance_lower_bound).toBe(999000);
 
-    // テストデータ: 正常な金額値
-    const normalAmountRecord = {
-      id: "rec_003",
-      customerId: "cust_C",
-      serviceId: "svc_003",
-      amount: 100000,
-      appointmentCount: 3,
-      contractCount: 1,
-      recordDate: "2024-01-17",
-    };
+    // ケース2: 許容誤差上限値（+1,000円）
+    const report_value_at_upper = 1001000;
+    const result_at_upper = compareReportDataWithSourceData({
+      source_data_value,
+      report_value: report_value_at_upper,
+      tolerance_percent,
+    });
+    expect(result_at_upper.is_matched).toBe(true);
+    expect(result_at_upper.difference).toBe(1000);
 
-    // 異常検出ロジック実行
-    const result_negative = validateSalesDataQuality(negativeAmountRecord);
-    const result_large = validateSalesDataQuality(largeAmountRecord);
-    const result_normal = validateSalesDataQuality(normalAmountRecord);
+    // ケース3: 許容誤差下限値（-1,000円）
+    const report_value_at_lower = 999000;
+    const result_at_lower = compareReportDataWithSourceData({
+      source_data_value,
+      report_value: report_value_at_lower,
+      tolerance_percent,
+    });
+    expect(result_at_lower.is_matched).toBe(true);
+    expect(result_at_lower.difference).toBe(-1000);
 
-    // 負数レコードの検証
-    expect(result_negative.isValid).toBe(false);
-    expect(result_negative.errors).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          fieldName: "amount",
-          errorCode: "NEGATIVE_AMOUNT",
-          message: "金額が負数です",
-        }),
-      ])
-    );
+    // ケース4: 許容誤差範囲を超える値（+2,000円）
+    const report_value_beyond_upper = 1002000;
+    const result_beyond_upper = compareReportDataWithSourceData({
+      source_data_value,
+      report_value: report_value_beyond_upper,
+      tolerance_percent,
+    });
+    expect(result_beyond_upper.is_matched).toBe(false);
+    expect(result_beyond_upper.difference).toBe(2000);
 
-    // 異常に大きい値レコードの検証
-    expect(result_large.isValid).toBe(false);
-    expect(result_large.errors).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          fieldName: "amount",
-          errorCode: "AMOUNT_OUT_OF_RANGE",
-          message: "金額が許容範囲を超えています",
-        }),
-      ])
-    );
+    // ケース5: 許容誤差範囲を超える値（-2,000円）
+    const report_value_beyond_lower = 998000;
+    const result_beyond_lower = compareReportDataWithSourceData({
+      source_data_value,
+      report_value: report_value_beyond_lower,
+      tolerance_percent,
+    });
+    expect(result_beyond_lower.is_matched).toBe(false);
+    expect(result_beyond_lower.difference).toBe(-2000);
 
-    // 正常なレコードの検証
-    expect(result_normal.isValid).toBe(true);
-    expect(result_normal.errors).toEqual([]);
-
-    // 複数異常値を含むレコード（負数かつ正常な他フィールド）
-    const multiAnomalyRecord = {
-      id: "rec_004",
-      customerId: "cust_D",
-      serviceId: "svc_004",
-      amount: -100000,
-      appointmentCount: 5,
-      contractCount: 2,
-      recordDate: "2024-01-18",
-    };
-
-    const result_multiAnomaly = validateSalesDataQuality(multiAnomalyRecord);
-    expect(result_multiAnomaly.isValid).toBe(false);
-    expect(result_multiAnomaly.errors.length).toBeGreaterThan(0);
-    expect(result_multiAnomaly.errors).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          fieldName: "amount",
-          errorCode: "NEGATIVE_AMOUNT",
-        }),
-      ])
-    );
-
-    // 複数の異常値を含むレコード（許容範囲超過の大きな値）
-    const extremeAnomalyRecord = {
-      id: "rec_005",
-      customerId: "cust_E",
-      serviceId: "svc_005",
-      amount: 9999999999999,
-      appointmentCount: 100,
-      contractCount: 50,
-      recordDate: "2024-01-19",
-    };
-
-    const result_extremeAnomaly = validateSalesDataQuality(
-      extremeAnomalyRecord
-    );
-    expect(result_extremeAnomaly.isValid).toBe(false);
-    expect(result_extremeAnomaly.errors).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          fieldName: "amount",
-          errorCode: "AMOUNT_OUT_OF_RANGE",
-        }),
-      ])
-    );
-
-    // 許容範囲内の最大値（100万円）
-    const maxNormalRecord = {
-      id: "rec_006",
-      customerId: "cust_F",
-      serviceId: "svc_006",
-      amount: 1000000,
-      appointmentCount: 20,
-      contractCount: 5,
-      recordDate: "2024-01-20",
-    };
-
-    const result_maxNormal = validateSalesDataQuality(maxNormalRecord);
-    expect(result_maxNormal.isValid).toBe(true);
-    expect(result_maxNormal.errors).toEqual([]);
-
-    // 許容範囲内の最小値（0円）
-    const zeroAmountRecord = {
-      id: "rec_007",
-      customerId: "cust_G",
-      serviceId: "svc_007",
-      amount: 0,
-      appointmentCount: 0,
-      contractCount: 0,
-      recordDate: "2024-01-21",
-    };
-
-    const result_zero = validateSalesDataQuality(zeroAmountRecord);
-    expect(result_zero.isValid).toBe(true);
-    expect(result_zero.errors).toEqual([]);
+    // ケース6: 完全一致（差分0円）
+    const report_value_exact = 1000000;
+    const result_exact = compareReportDataWithSourceData({
+      source_data_value,
+      report_value: report_value_exact,
+      tolerance_percent,
+    });
+    expect(result_exact.is_matched).toBe(true);
+    expect(result_exact.difference).toBe(0);
   });
 });

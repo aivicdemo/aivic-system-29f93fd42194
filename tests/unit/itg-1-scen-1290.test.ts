@@ -1,106 +1,111 @@
-import { calculateBillingAmountByCustomerService } from '../../src/logic/it-1-2-1';
+import { describe, test, expect, beforeEach, afterEach } from "@jest/globals";
+import {
+  validateInvoiceZeroAmount,
+} from "../../src/logic/it-1781935279444-2-1-1";
 
-describe('営業成果データから請求対象項目を自動抽出し、顧客ごと・サービスごとの請求額を集計する機能', () => {
-  // SCEN-1290
-  test('割引適用により請求額が最小請求額を下回る場合に、最小請求額が確定額として選択される', () => {
-    // 前提: 顧客マスタに最小請求額が設定されている顧客を選択する
-    // 当該顧客に対して複数のサービスを適用し、基本料金を設定する
-    // 割引条件を設定する（期間限定割引、数量割引など）
-    
-    const input = {
-      customerId: 'CUST001',
-      customerName: '顧客A',
-      minimumBillingAmount: 100000, // 最小請求額: 100,000円
-      services: [
-        {
-          serviceId: 'SVC001',
-          serviceName: 'サービスA',
-          baseAmount: 150000, // 基本料金: 150,000円
-          quantity: 1,
-          unitPrice: 150000
-        },
-        {
-          serviceId: 'SVC002',
-          serviceName: 'サービスB',
-          baseAmount: 80000, // 基本料金: 80,000円
-          quantity: 1,
-          unitPrice: 80000
-        }
-      ],
-      discounts: [
-        {
-          discountId: 'DISC001',
-          discountType: 'period', // 期間限定割引
-          discountRate: 0.5 // 50%割引
-        },
-        {
-          discountId: 'DISC002',
-          discountType: 'quantity', // 数量割引
-          discountRate: 0.3 // 30%割引
-        }
-      ],
-      billingPeriod: '2024-01'
+describe("SCEN-1290: 請求金額ゼロの妥当性自動検証", () => {
+  let mockValidationResults: Array<{
+    invoiceId: string;
+    amount: number;
+    validationStatus: string;
+    validationMessage: string;
+    validatedAt: string;
+    warningLevel: string;
+  }> = [];
+
+  beforeEach(() => {
+    mockValidationResults = [];
+  });
+
+  afterEach(() => {
+    mockValidationResults = [];
+  });
+
+  test("SCEN-1290", () => {
+    // 初期状態: テスト環境を初期化
+    const invoiceId = "INV-2024-001";
+    const customerId = "CUST-123";
+    const serviceId = "SVC-456";
+    const invoiceAmount = 0;
+    const invoiceDate = "2024-01-15T10:00:00Z";
+    const createdAt = "2024-01-15T09:30:00Z";
+
+    // 請求金額がゼロ（0円）のデータレコードを作成
+    const zeroAmountInvoiceRecord = {
+      invoiceId: invoiceId,
+      customerId: customerId,
+      serviceId: serviceId,
+      amount: invoiceAmount,
+      invoiceDate: invoiceDate,
+      createdAt: createdAt,
+      contractId: "CONTRACT-789",
+      billingCycle: "2024-01",
     };
 
-    // 期待値計算:
-    // 基本請求額 = 150,000 + 80,000 = 230,000円
-    // 割引1適用後 = 230,000 × (1 - 0.5) = 115,000円
-    // 割引2適用後 = 115,000 × (1 - 0.3) = 80,500円
-    // 割引後請求額 80,500円 < 最小請求額 100,000円
-    // → 確定額 = 最小請求額 = 100,000円
+    // 妥当性自動検証機能を実行
+    const validationResult = validateInvoiceZeroAmount(
+      zeroAmountInvoiceRecord
+    );
 
-    const result = calculateBillingAmountByCustomerService(input);
+    // 検証プロセスがゼロ金額のレコードを処理することを確認
+    expect(validationResult).toBeDefined();
+    expect(validationResult.processedInvoiceId).toBe(invoiceId);
+    expect(validationResult.processedAmount).toBe(0);
 
-    // 基本請求額の検証
-    expect(result.subtotalAmount).toBe(230000);
+    // 検証結果に警告またはエラーステータスが適切に設定されていることを確認
+    expect(validationResult.validationStatus).toMatch(/warning|error/i);
+    expect(
+      ["WARNING", "ERROR"].includes(validationResult.validationStatus)
+    ).toBe(true);
 
-    // 割引1適用後の検証
-    expect(result.amountAfterFirstDiscount).toBe(115000);
+    // 検証結果に詳細メッセージが含まれることを確認
+    expect(validationResult.validationMessage).toBeDefined();
+    expect(validationResult.validationMessage.length).toBeGreaterThan(0);
+    expect(validationResult.validationMessage).toMatch(/金額|ゼロ|0/);
 
-    // 割引2適用後の検証（割引適用後の請求額）
-    expect(result.discountedAmount).toBe(80500);
+    // 検証結果のタイムスタンプが正確に記録されていることを検証
+    const validatedTimestamp = new Date(
+      validationResult.validatedAt
+    ).getTime();
+    const beforeTimestamp = new Date("2024-01-15T09:00:00Z").getTime();
+    const afterTimestamp = new Date("2024-01-15T11:00:00Z").getTime();
+    expect(validatedTimestamp).toBeGreaterThanOrEqual(beforeTimestamp);
+    expect(validatedTimestamp).toBeLessThanOrEqual(afterTimestamp);
 
-    // 最小請求額と比較して確定額が決定されたことを検証
-    expect(result.isBelowMinimumBilling).toBe(true);
+    // 検証結果の詳細情報が記録されていることを確認
+    expect(validationResult.validationDetail).toBeDefined();
+    expect(validationResult.validationDetail.customerId).toBe(customerId);
+    expect(validationResult.validationDetail.serviceId).toBe(serviceId);
+    expect(validationResult.validationDetail.invoiceAmount).toBe(0);
 
-    // 最終確定額が最小請求額と一致することを検証
-    expect(result.finalBillingAmount).toBe(100000);
+    // 検証結果がデータベースに記録されるシミュレーション
+    mockValidationResults.push({
+      invoiceId: validationResult.processedInvoiceId,
+      amount: validationResult.processedAmount,
+      validationStatus: validationResult.validationStatus,
+      validationMessage: validationResult.validationMessage,
+      validatedAt: validationResult.validatedAt,
+      warningLevel: validationResult.validationStatus === "WARNING" ? "WARN" : "ERR",
+    });
 
-    // ログに割引適用時の処理と最小請求額への調整内容が記録されていることを検証
-    expect(result.logs).toEqual([
-      {
-        message: '基本請求額を計算しました',
-        amount: 230000,
-        timestamp: expect.any(String)
-      },
-      {
-        message: '割引1を適用しました',
-        discountType: 'period',
-        discountRate: 0.5,
-        amount: 115000,
-        timestamp: expect.any(String)
-      },
-      {
-        message: '割引2を適用しました',
-        discountType: 'quantity',
-        discountRate: 0.3,
-        amount: 80500,
-        timestamp: expect.any(String)
-      },
-      {
-        message: '請求額が最小請求額を下回っているため、最小請求額を適用します',
-        discountedAmount: 80500,
-        minimumBillingAmount: 100000,
-        finalBillingAmount: 100000,
-        timestamp: expect.any(String)
-      }
-    ]);
+    // 検証結果ログを確認し、ゼロ金額レコードに対する検証結果が記録されているか検査
+    expect(mockValidationResults.length).toBe(1);
+    const recordedResult = mockValidationResults[0];
+    expect(recordedResult.invoiceId).toBe(invoiceId);
+    expect(recordedResult.amount).toBe(0);
+    expect(["WARNING", "ERROR"].includes(recordedResult.validationStatus)).toBe(
+      true
+    );
 
-    // 顧客ID、請求期間の検証
-    expect(result.customerId).toBe('CUST001');
-    expect(result.billingPeriod).toBe('2024-01');
+    // 検証結果の永続化確認（タイムスタンプと詳細情報）
+    expect(recordedResult.validatedAt).toBe(validationResult.validatedAt);
+    expect(recordedResult.validationMessage).toBe(
+      validationResult.validationMessage
+    );
 
-    // 適用されたサービス数の検証
-    expect(result.appliedServiceCount).toBe(2);
+    // 複数の検証条件チェック
+    expect(validationResult.isPersisted).toBe(true);
+    expect(validationResult.processingDurationMs).toBeGreaterThan(0);
+    expect(validationResult.processingDurationMs).toBeLessThan(5000);
   });
 });

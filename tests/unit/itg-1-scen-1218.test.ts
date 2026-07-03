@@ -1,69 +1,70 @@
-import { validateFinalApprovalForResponse } from '../../src/logic/it-1-2-1';
+import { describe, test, expect, beforeEach, afterEach } from "@jest/globals";
+import { checkContractChangeConfirmationAndNotify } from "../../src/logic/it-1-1-1";
 
-describe('営業成果データから請求対象項目を自動抽出し、顧客ごと・サービスごとの請求額を集計する機能', () => {
-  // SCEN-1218: [normal] 回答内容の最終承認検証機能 - 回答内容が契約条件・営業データ・請求ルールと矛盾していず、根拠資料が揃っており、顧客への説明が明確な場合、承認として判定される
-  test('should approve response when all validation criteria are met', () => {
-    const contractData = {
-      contract_id: 'CT-001',
-      customer_id: 'CUS-001',
-      service_id: 'SVC-001',
-      billing_unit_price: 100000,
-      billing_calculation_method: 'per_appointment',
-      discount_rate: 0.1,
-      contract_start_date: '2024-01-01',
-      contract_end_date: '2024-12-31',
+describe("営業成果データの自動検証ルール定義と異常検出機能", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  afterEach(() => {
+    jest.clearAllMocks();
+  });
+
+  // SCEN-1218
+  test("should not send reminder notification when confirmation is completed within set overtime limit", () => {
+    // 契約変更レコード作成
+    const contractChangeId = "CC-001";
+    const contractId = "C-001";
+    const customerId = "CUST-001";
+    const changeContent = "納期を2024-02-15から2024-02-28に変更";
+    const changeDate = new Date("2024-01-15T10:00:00Z");
+    
+    // 設定超過時間: 60分
+    const overtimeLimitMinutes = 60;
+    
+    // 確認期限: 現在時刻から60分後
+    const confirmationDeadline = new Date("2024-01-15T11:00:00Z");
+    
+    // 確認処理完了時刻: 現在時刻から30分経過時点
+    const confirmationCompletedAt = new Date("2024-01-15T10:30:00Z");
+    
+    // 催促通知送信ロジック実行時刻（確認後に催促ロジックをトリガー）
+    const reminderCheckTime = new Date("2024-01-15T10:35:00Z");
+    
+    const contractChangeData = {
+      contractChangeId: contractChangeId,
+      contractId: contractId,
+      customerId: customerId,
+      changeContent: changeContent,
+      changeDate: changeDate,
+      confirmationDeadline: confirmationDeadline,
+      confirmationStatus: "pending" as const,
+      createdAt: changeDate,
     };
 
-    const salesData = {
-      sales_id: 'SALES-001',
-      customer_id: 'CUS-001',
-      service_id: 'SVC-001',
-      appointment_count: 50,
-      contract_count: 10,
-      customer_response_rate: 0.8,
-      sales_month: '2024-10',
+    // 確認処理実行
+    const confirmationResult = {
+      contractChangeId: contractChangeId,
+      confirmedAt: confirmationCompletedAt,
+      confirmationStatus: "confirmed" as const,
     };
 
-    const billingRule = {
-      rule_id: 'RULE-001',
-      service_id: 'SVC-001',
-      base_calculation: 'appointment_count',
-      multiplier: 100000,
-      minimum_billing_amount: 500000,
-      maximum_billing_amount: 5000000,
-      discount_applicable: true,
-    };
+    // 催促通知送信ロジックを実行
+    const reminderNotificationResult = checkContractChangeConfirmationAndNotify({
+      contractChangeId: contractChangeId,
+      confirmationDeadline: confirmationDeadline,
+      confirmationStatus: "confirmed",
+      confirmationCompletedAt: confirmationCompletedAt,
+      overtimeLimitMinutes: overtimeLimitMinutes,
+      currentCheckTime: reminderCheckTime,
+    });
 
-    const responseContent = {
-      response_id: 'RESP-001',
-      customer_id: 'CUS-001',
-      question_category: 'billing_calculation',
-      response_text: '当月のアポイント件数は50件であり、ご契約の単価100,000円を乗じて5,000,000円となります。割引率10%を適用し、最終請求額は4,500,000円です。',
-      calculated_billing_amount: 4500000,
-      supporting_documents: [
-        { document_type: 'contract', document_id: 'DOC-001', attached: true },
-        { document_type: 'sales_record', document_id: 'DOC-002', attached: true },
-        { document_type: 'billing_rule', document_id: 'DOC-003', attached: true },
-      ],
-      explanation_clarity_score: 95,
-    };
-
-    const validationInput = {
-      response_content: responseContent,
-      contract_data: contractData,
-      sales_data: salesData,
-      billing_rule: billingRule,
-    };
-
-    const result = validateFinalApprovalForResponse(validationInput);
-
-    expect(result.approval_status).toBe('approved');
-    expect(result.contract_validation_result).toBe('consistent');
-    expect(result.sales_data_validation_result).toBe('consistent');
-    expect(result.billing_rule_validation_result).toBe('consistent');
-    expect(result.supporting_documents_validation_result).toBe('complete');
-    expect(result.explanation_clarity_validation_result).toBe('clear');
-    expect(result.final_approval_decision).toBe(true);
-    expect(result.calculated_amount_verification).toBe(4500000);
+    // 期待結果: 催促通知が送信されていないこと
+    expect(reminderNotificationResult.shouldSendReminder).toBe(false);
+    expect(reminderNotificationResult.reminderSent).toBe(false);
+    expect(reminderNotificationResult.notificationLogs).toEqual([]);
+    expect(reminderNotificationResult.reasonNotSent).toBe(
+      "confirmation_completed_within_limit"
+    );
   });
 });

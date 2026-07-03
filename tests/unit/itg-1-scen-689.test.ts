@@ -1,71 +1,69 @@
-import { validateSalesDataRange } from "../../src/logic/it-1781935279444-2-2-1";
+import { filterApprovedReportsForDistribution } from '../../src/logic/it-1-1-1';
 
-describe("営業データ値の範囲検証機能", () => {
-  // SCEN-689: [error] 営業データ値の範囲検証機能 - 数値項目が最大値を超過している場合に範囲外エラーが検出される
-  test("数値項目が最大値を超過した場合、範囲外エラーが検出されてエラーメッセージが表示され、保存が拒否される", () => {
-    // 前提: 営業データ入力画面が表示され、数値項目の入力フィールドが利用可能
-    // 発生条件: 売上金額フィールドに最大値 9999999 を超える値 10000000 を入力して保存ボタンをクリック
-    // 期待結果: 範囲外エラーが検出され、エラーメッセージが表示される。データ保存が拒否される。
-
-    const salesData = {
-      customerId: "CUST-001",
-      serviceName: "営業サポート",
-      appointmentCount: 5,
-      contractCount: 2,
-      salesAmount: 10000000, // 最大値 9999999 を超過
-      dataDate: "2024-01-15",
+describe('営業成果データの自動検証ルール定義と異常検出機能', () => {
+  // SCEN-689: [edge] レポート自動配信機能 - 未承認のレポートは配信対象から除外される
+  test('未承認のレポートは配信対象から除外され、承認済みレポートのみが配信対象として抽出される', () => {
+    const approved_report = {
+      report_id: 'RPT-001',
+      report_title: '2024年1月営業成果レポート',
+      customer_id: 'CUST-A001',
+      approval_status: 'approved',
+      approved_at: '2024-01-31T14:30:00Z',
+      created_at: '2024-01-31T09:00:00Z',
     };
 
-    // エラーケース: 最大値超過
-    expect(() => validateSalesDataRange(salesData)).toThrow(/最大値/);
-
-    // 正常系: 最大値以内の値
-    const validSalesData = {
-      customerId: "CUST-001",
-      serviceName: "営業サポート",
-      appointmentCount: 5,
-      contractCount: 2,
-      salesAmount: 9999999, // 最大値と同じ値
-      dataDate: "2024-01-15",
+    const unapproved_report_1 = {
+      report_id: 'RPT-002',
+      report_title: '2024年1月営業成果レポート（修正版）',
+      customer_id: 'CUST-B001',
+      approval_status: 'pending',
+      approved_at: null,
+      created_at: '2024-01-31T10:15:00Z',
     };
 
-    const validResult = validateSalesDataRange(validSalesData);
-    expect(validResult.isValid).toBe(true);
-    expect(validResult.errors).toEqual([]);
-
-    // 境界値テスト: 最大値を1超過
-    const boundaryViolationData = {
-      customerId: "CUST-002",
-      serviceName: "営業支援",
-      appointmentCount: 10,
-      contractCount: 3,
-      salesAmount: 10000000, // 最大値を1超過
-      dataDate: "2024-01-16",
+    const unapproved_report_2 = {
+      report_id: 'RPT-003',
+      report_title: '2024年1月営業成果レポート（確認中）',
+      customer_id: 'CUST-C001',
+      approval_status: 'rejected',
+      approved_at: null,
+      created_at: '2024-01-31T11:45:00Z',
     };
 
-    expect(() => validateSalesDataRange(boundaryViolationData)).toThrow(
-      /最大値/
-    );
+    const all_reports = [
+      approved_report,
+      unapproved_report_1,
+      unapproved_report_2,
+    ];
 
-    // エラーログ確認: エラーが検出される場合、エラーオブジェクトにエラー情報が含まれることを確認
-    const errorData = {
-      customerId: "CUST-003",
-      serviceName: "営業管理",
-      appointmentCount: 15,
-      contractCount: 5,
-      salesAmount: 50000000, // 大幅に超過
-      dataDate: "2024-01-17",
-    };
+    const distribution_list = filterApprovedReportsForDistribution(all_reports);
 
-    try {
-      validateSalesDataRange(errorData);
-      fail("エラーが発生すべき");
-    } catch (error) {
-      expect(error).toMatchObject({
-        message: expect.stringMatching(/最大値/),
-        errorCode: "RANGE_EXCEEDED",
-        field: "salesAmount",
-      });
+    expect(distribution_list).toHaveLength(1);
+
+    expect(distribution_list[0]).toEqual({
+      report_id: 'RPT-001',
+      report_title: '2024年1月営業成果レポート',
+      customer_id: 'CUST-A001',
+      approval_status: 'approved',
+      approved_at: '2024-01-31T14:30:00Z',
+      created_at: '2024-01-31T09:00:00Z',
+    });
+
+    const report_ids_in_distribution = distribution_list.map((r) => r.report_id);
+    expect(report_ids_in_distribution).toContain('RPT-001');
+    expect(report_ids_in_distribution).not.toContain('RPT-002');
+    expect(report_ids_in_distribution).not.toContain('RPT-003');
+
+    const unapproved_ids = all_reports
+      .filter((r) => r.approval_status !== 'approved')
+      .map((r) => r.report_id);
+    for (const unapproved_id of unapproved_ids) {
+      expect(report_ids_in_distribution).not.toContain(unapproved_id);
     }
+
+    const all_in_distribution_are_approved = distribution_list.every(
+      (r) => r.approval_status === 'approved',
+    );
+    expect(all_in_distribution_are_approved).toBe(true);
   });
 });

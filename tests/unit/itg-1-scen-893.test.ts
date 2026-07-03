@@ -1,190 +1,122 @@
-import { extractBillingRulesAndDiscounts } from "../../src/logic/it-1781935279444-1-1-1";
+import { describe, test, expect } from '@jest/globals';
+import { validateBillingAmount } from '../../src/logic/it-1-2-1';
 
-describe("営業データ項目のメタデータ管理機能", () => {
-  // SCEN-893: [normal] 適用請求ルール・割引基準の明確化
-  test("月次締め業務で顧客ごと・サービスごとに適用される請求ルールと割引基準が正確に抽出される", () => {
-    // Arrange
-    const customers = [
-      {
-        customerId: "CUST_A",
-        customerName: "顧客A",
-        contractStatus: "active",
-      },
-      {
-        customerId: "CUST_B",
-        customerName: "顧客B",
-        contractStatus: "active",
-      },
-      {
-        customerId: "CUST_C",
-        customerName: "顧客C",
-        contractStatus: "active",
-      },
-    ];
+describe('営業成果データから請求対象項目を自動抽出し、顧客ごと・サービスごとの請求額を集計する機能', () => {
+  // SCEN-893: [error] 請求額計算結果検証機能 - 請求額が異常値を示す場合に修正指示が生成される
+  test('請求額が異常値を示す場合に修正指示が生成される', () => {
+    // 正常な請求額（参考値）
+    const normalBillingInput = {
+      customerId: 'CUST001',
+      serviceId: 'SVC001',
+      baseAmount: 100000,
+      discountRate: 0.1,
+      appliedDiscount: 10000,
+      finalAmount: 90000
+    };
 
-    const services = [
-      { serviceId: "SVC_1", serviceName: "サービス1" },
-      { serviceId: "SVC_2", serviceName: "サービス2" },
-      { serviceId: "SVC_3", serviceName: "サービス3" },
-    ];
+    const normalResult = validateBillingAmount(normalBillingInput);
+    expect(normalResult.isValid).toBe(true);
+    expect(normalResult.correctionMessages).toEqual([]);
 
-    const billingRules = [
-      {
-        customerId: "CUST_A",
-        serviceId: "SVC_1",
-        basePrice: 100000,
-        discountRate: 0.1,
-        discountReason: "volume_discount",
-        minBillingAmount: 50000,
-        maxBillingAmount: 500000,
-      },
-      {
-        customerId: "CUST_B",
-        serviceId: "SVC_2",
-        basePrice: 80000,
-        discountRate: 0.05,
-        discountReason: "early_payment",
-        minBillingAmount: 40000,
-        maxBillingAmount: 400000,
-      },
-      {
-        customerId: "CUST_C",
-        serviceId: "SVC_3",
-        basePrice: 150000,
-        discountRate: 0.0,
-        discountReason: "none",
-        minBillingAmount: 75000,
-        maxBillingAmount: 750000,
-      },
-      {
-        customerId: "CUST_A",
-        serviceId: "SVC_2",
-        basePrice: 120000,
-        discountRate: 0.08,
-        discountReason: "promotional",
-        minBillingAmount: 60000,
-        maxBillingAmount: 600000,
-      },
-      {
-        customerId: "CUST_B",
-        serviceId: "SVC_1",
-        basePrice: 90000,
-        discountRate: 0.03,
-        discountReason: "contract_renewal",
-        minBillingAmount: 45000,
-        maxBillingAmount: 450000,
-      },
-    ];
+    // 異常値パターン1: 負の金額
+    const negativeAmountInput = {
+      customerId: 'CUST001',
+      serviceId: 'SVC001',
+      baseAmount: 100000,
+      discountRate: 0.1,
+      appliedDiscount: 10000,
+      finalAmount: -90000
+    };
 
-    const billingCycleStartDate = new Date("2024-01-01T00:00:00Z");
-    const billingCycleEndDate = new Date("2024-01-31T23:59:59Z");
+    const negativeResult = validateBillingAmount(negativeAmountInput);
+    expect(negativeResult.isValid).toBe(false);
+    expect(negativeResult.correctionMessages.length).toBeGreaterThan(0);
+    expect(negativeResult.correctionMessages[0]).toMatch(/負の金額/);
+    expect(negativeResult.correctionMessages[0]).toMatch(/CUST001/);
 
-    // Act
-    const result = extractBillingRulesAndDiscounts({
-      customers,
-      services,
-      billingRules,
-      billingCycleStartDate,
-      billingCycleEndDate,
-    });
+    // 異常値パターン2: 異常に大きい金額
+    const excessiveAmountInput = {
+      customerId: 'CUST002',
+      serviceId: 'SVC002',
+      baseAmount: 999999999,
+      discountRate: 0.05,
+      appliedDiscount: 50000000,
+      finalAmount: 949999999
+    };
 
-    // Assert: 抽出結果の構造検証
-    expect(result).toHaveProperty("extractedRulesCount");
-    expect(result).toHaveProperty("customerServiceCombinations");
-    expect(result).toHaveProperty("uniqueCustomers");
-    expect(result).toHaveProperty("uniqueServices");
-    expect(result).toHaveProperty("totalCombinations");
+    const excessiveResult = validateBillingAmount(excessiveAmountInput);
+    expect(excessiveResult.isValid).toBe(false);
+    expect(excessiveResult.correctionMessages.length).toBeGreaterThan(0);
+    expect(excessiveResult.correctionMessages[0]).toMatch(/異常に大きい/);
 
-    // Assert: 抽出件数検証
-    expect(result.extractedRulesCount).toBe(5);
-    expect(result.totalCombinations).toBe(5);
+    // 異常値パターン3: NaN
+    const nanAmountInput = {
+      customerId: 'CUST003',
+      serviceId: 'SVC003',
+      baseAmount: 100000,
+      discountRate: 0.1,
+      appliedDiscount: 10000,
+      finalAmount: NaN
+    };
 
-    // Assert: 顧客ごとの請求ルール抽出検証
-    expect(result.uniqueCustomers).toEqual(
-      expect.arrayContaining(["CUST_A", "CUST_B", "CUST_C"])
+    const nanResult = validateBillingAmount(nanAmountInput);
+    expect(nanResult.isValid).toBe(false);
+    expect(nanResult.correctionMessages.length).toBeGreaterThan(0);
+    expect(nanResult.correctionMessages[0]).toMatch(/NaN/);
+
+    // 異常値パターン4: undefined
+    const undefinedAmountInput = {
+      customerId: 'CUST004',
+      serviceId: 'SVC004',
+      baseAmount: 100000,
+      discountRate: 0.1,
+      appliedDiscount: 10000,
+      finalAmount: undefined as any
+    };
+
+    const undefinedResult = validateBillingAmount(undefinedAmountInput);
+    expect(undefinedResult.isValid).toBe(false);
+    expect(undefinedResult.correctionMessages.length).toBeGreaterThan(0);
+    expect(undefinedResult.correctionMessages[0]).toMatch(/未定義/);
+
+    // 異常値パターン5: 割引率が100%を超える
+    const excessiveDiscountInput = {
+      customerId: 'CUST005',
+      serviceId: 'SVC005',
+      baseAmount: 100000,
+      discountRate: 1.5,
+      appliedDiscount: 150000,
+      finalAmount: -50000
+    };
+
+    const excessiveDiscountResult = validateBillingAmount(excessiveDiscountInput);
+    expect(excessiveDiscountResult.isValid).toBe(false);
+    expect(excessiveDiscountResult.correctionMessages.length).toBeGreaterThan(0);
+    expect(excessiveDiscountResult.correctionMessages[0]).toMatch(/割引率/);
+
+    // 異常値パターン6: 小数点以下の精度が不適切
+    const precisionInput = {
+      customerId: 'CUST006',
+      serviceId: 'SVC006',
+      baseAmount: 100000,
+      discountRate: 0.1,
+      appliedDiscount: 10000,
+      finalAmount: 90000.123456789
+    };
+
+    const precisionResult = validateBillingAmount(precisionInput);
+    expect(precisionResult.isValid).toBe(false);
+    expect(precisionResult.correctionMessages.length).toBeGreaterThan(0);
+    expect(precisionResult.correctionMessages[0]).toMatch(/精度/);
+
+    // 修正指示メッセージの形式確認: 異常値の種類と発生箇所を含む
+    expect(negativeResult.correctionMessages[0]).toContain('負の金額');
+    expect(negativeResult.correctionMessages[0]).toContain('finalAmount');
+
+    // 修正指示メッセージの形式確認: 推奨される修正内容を含む
+    const hasRecommendation = negativeResult.correctionMessages.some(msg =>
+      msg.match(/修正|確認|値を見直す|再計算/)
     );
-    expect(result.uniqueCustomers.length).toBe(3);
-
-    // Assert: サービスごとの請求ルール抽出検証
-    expect(result.uniqueServices).toEqual(
-      expect.arrayContaining(["SVC_1", "SVC_2", "SVC_3"])
-    );
-    expect(result.uniqueServices.length).toBe(3);
-
-    // Assert: 顧客・サービス組み合わせの検証
-    expect(result.customerServiceCombinations).toHaveProperty("CUST_A");
-    expect(result.customerServiceCombinations["CUST_A"]).toHaveProperty("SVC_1");
-    expect(result.customerServiceCombinations["CUST_A"]).toHaveProperty("SVC_2");
-
-    expect(result.customerServiceCombinations).toHaveProperty("CUST_B");
-    expect(result.customerServiceCombinations["CUST_B"]).toHaveProperty("SVC_2");
-    expect(result.customerServiceCombinations["CUST_B"]).toHaveProperty("SVC_1");
-
-    expect(result.customerServiceCombinations).toHaveProperty("CUST_C");
-    expect(result.customerServiceCombinations["CUST_C"]).toHaveProperty("SVC_3");
-
-    // Assert: 顧客A・サービス1の請求ルールと割引基準
-    const custA_svc1 = result.customerServiceCombinations["CUST_A"]["SVC_1"];
-    expect(custA_svc1.basePrice).toBe(100000);
-    expect(custA_svc1.discountRate).toBe(0.1);
-    expect(custA_svc1.discountReason).toBe("volume_discount");
-    expect(custA_svc1.minBillingAmount).toBe(50000);
-    expect(custA_svc1.maxBillingAmount).toBe(500000);
-
-    // Assert: 顧客A・サービス2の請求ルールと割引基準
-    const custA_svc2 = result.customerServiceCombinations["CUST_A"]["SVC_2"];
-    expect(custA_svc2.basePrice).toBe(120000);
-    expect(custA_svc2.discountRate).toBe(0.08);
-    expect(custA_svc2.discountReason).toBe("promotional");
-    expect(custA_svc2.minBillingAmount).toBe(60000);
-    expect(custA_svc2.maxBillingAmount).toBe(600000);
-
-    // Assert: 顧客B・サービス2の請求ルールと割引基準
-    const custB_svc2 = result.customerServiceCombinations["CUST_B"]["SVC_2"];
-    expect(custB_svc2.basePrice).toBe(80000);
-    expect(custB_svc2.discountRate).toBe(0.05);
-    expect(custB_svc2.discountReason).toBe("early_payment");
-    expect(custB_svc2.minBillingAmount).toBe(40000);
-    expect(custB_svc2.maxBillingAmount).toBe(400000);
-
-    // Assert: 顧客B・サービス1の請求ルールと割引基準
-    const custB_svc1 = result.customerServiceCombinations["CUST_B"]["SVC_1"];
-    expect(custB_svc1.basePrice).toBe(90000);
-    expect(custB_svc1.discountRate).toBe(0.03);
-    expect(custB_svc1.discountReason).toBe("contract_renewal");
-    expect(custB_svc1.minBillingAmount).toBe(45000);
-    expect(custB_svc1.maxBillingAmount).toBe(450000);
-
-    // Assert: 顧客C・サービス3の請求ルールと割引基準
-    const custC_svc3 = result.customerServiceCombinations["CUST_C"]["SVC_3"];
-    expect(custC_svc3.basePrice).toBe(150000);
-    expect(custC_svc3.discountRate).toBe(0.0);
-    expect(custC_svc3.discountReason).toBe("none");
-    expect(custC_svc3.minBillingAmount).toBe(75000);
-    expect(custC_svc3.maxBillingAmount).toBe(750000);
-
-    // Assert: 複数顧客間で請求ルールと割引基準が正しく分離されていることを確認
-    expect(custA_svc1.discountRate).not.toBe(custB_svc2.discountRate);
-    expect(custA_svc1.basePrice).not.toBe(custB_svc2.basePrice);
-
-    // Assert: 同一顧客の異なるサービス間で請求ルールと割引基準が正しく適用されていることを確認
-    expect(custA_svc1.discountRate).not.toBe(custA_svc2.discountRate);
-    expect(custA_svc1.basePrice).not.toBe(custA_svc2.basePrice);
-
-    // Assert: 重複なし、漏れなしの検証
-    const allCombinations = [];
-    for (const customerId in result.customerServiceCombinations) {
-      for (const serviceId in result.customerServiceCombinations[customerId]) {
-        allCombinations.push(`${customerId}-${serviceId}`);
-      }
-    }
-    expect(allCombinations.length).toBe(5);
-    expect(new Set(allCombinations).size).toBe(5);
-
-    // Assert: 月次締め日時検証
-    expect(result).toHaveProperty("billingCycleStartDate");
-    expect(result).toHaveProperty("billingCycleEndDate");
-    expect(result.billingCycleStartDate).toEqual(billingCycleStartDate);
-    expect(result.billingCycleEndDate).toEqual(billingCycleEndDate);
+    expect(hasRecommendation).toBe(true);
   });
 });

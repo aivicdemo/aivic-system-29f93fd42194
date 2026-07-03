@@ -1,131 +1,137 @@
-import { generateCorrectionNotification } from "../../src/logic/it-1-1-1";
+import {
+  validateAndRevalidateCorrectedData,
+} from "../../src/logic/it-1781935279444-2-2-1";
 
-describe("営業成果データの自動検証ルール定義と異常検出機能", () => {
-  // SCEN-718: [normal] 修正指示通知生成 - 修正指示内容に項目名・理由・推奨値が全て記載される
-  test("should generate correction notification with all required fields", () => {
-    const validation_results = [
-      {
-        record_id: "rec_001",
-        field_name: "customer_name",
-        error_type: "missing_required_field",
-        error_reason: "顧客名が入力されていません",
-        suggested_value: "サンプル顧客A",
-        severity: "error",
+describe("修正データ自動再検証機能", () => {
+  // SCEN-718
+  test("修正データが品質基準を満たさない場合、不合格判定と追加修正指示が生成される", () => {
+    // Arrange: 品質基準の定義
+    const qualityStandards = {
+      required_fields: ["customer_name", "contact_date", "sales_outcome"],
+      field_formats: {
+        customer_name: /^.{1,100}$/,
+        contact_date: /^\d{4}-\d{2}-\d{2}$/,
+        sales_outcome: /^(appointment|contract|follow_up)$/,
       },
-      {
-        record_id: "rec_001",
+      value_ranges: {
+        appointment_count: { min: 0, max: 999 },
+        contract_value: { min: 0, max: 99999999 },
+      },
+    };
+
+    // 初回検証で不合格となった修正データ
+    const corrected_data_record = {
+      id: "record_001",
+      customer_name: "顧客A",
+      contact_date: "2024/01/15", // 不正形式 (yyyy/mm/dd instead of yyyy-mm-dd)
+      sales_outcome: "appointment",
+      appointment_count: 5,
+      contract_value: 150000,
+      correction_attempt: 1,
+      status: "pending_revalidation",
+      created_at: "2024-01-10T09:00:00Z",
+      corrected_at: "2024-01-14T10:30:00Z",
+    };
+
+    // Act: 修正データの自動再検証実行
+    const revalidation_result = validateAndRevalidateCorrectedData(
+      corrected_data_record,
+      qualityStandards
+    );
+
+    // Assert: 再検証結果が『不合格』であることを確認
+    expect(revalidation_result.validation_status).toBe("failed");
+
+    // 不合格理由が『contact_date形式不正』であることを確認
+    expect(revalidation_result.failed_validations).toContain(
+      expect.objectContaining({
         field_name: "contact_date",
-        error_type: "invalid_data_type",
-        error_reason: "接触日時の形式が不正です（YYYY-MM-DD HH:MM:SS形式で入力してください）",
-        suggested_value: "2024-01-15 10:30:00",
-        severity: "error",
-      },
-      {
-        record_id: "rec_001",
-        field_name: "deal_amount",
-        error_type: "out_of_range",
-        error_reason: "金額が許容範囲を超えています（0〜10000000の範囲で入力してください）",
-        suggested_value: "500000",
-        severity: "warning",
-      },
-      {
-        record_id: "rec_002",
-        field_name: "service_type",
-        error_type: "invalid_enumeration",
-        error_reason: "サービス種別が定義済みリストにありません",
-        suggested_value: "basic_plan",
-        severity: "error",
-      },
-      {
-        record_id: "rec_002",
-        field_name: "appointment_status",
-        error_type: "inconsistent_value",
-        error_reason: "接触日時と成約日時の前後関係が矛盾しています",
-        suggested_value: "pending",
-        severity: "error",
-      },
-    ];
+        error_reason: "format_mismatch",
+      })
+    );
 
-    const notification = generateCorrectionNotification(validation_results);
+    // 追加修正指示が生成されていることを確認
+    expect(revalidation_result.correction_instruction).toBeDefined();
+    expect(revalidation_result.correction_instruction).toEqual(
+      expect.objectContaining({
+        instruction_id: expect.any(String),
+        record_id: "record_001",
+        correction_items: expect.arrayContaining([
+          expect.objectContaining({
+            field_name: "contact_date",
+            current_value: "2024/01/15",
+            expected_format: "YYYY-MM-DD",
+            reason: "Date format must be ISO 8601 format (YYYY-MM-DD)",
+          }),
+        ]),
+        correction_deadline: expect.any(String), // ISO形式の期限日時
+        priority_level: "high",
+      })
+    );
 
-    expect(notification).toBeDefined();
-    expect(notification.notification_id).toBeDefined();
-    expect(notification.generated_at).toBeDefined();
-    expect(notification.correction_items).toBeDefined();
-    expect(Array.isArray(notification.correction_items)).toBe(true);
+    // 修正指示の具体的内容を確認
+    expect(revalidation_result.correction_instruction.correction_items).toHaveLength(
+      1
+    );
+    expect(
+      revalidation_result.correction_instruction.correction_items[0]
+    ).toEqual(
+      expect.objectContaining({
+        field_name: "contact_date",
+        current_value: "2024/01/15",
+        expected_format: "YYYY-MM-DD",
+        reason: "Date format must be ISO 8601 format (YYYY-MM-DD)",
+      })
+    );
 
-    const rec_001_items = notification.correction_items.filter(
-      (item: any) => item.record_id === "rec_001"
+    // 修正期限が設定されていることを確認 (現在から24時間以内)
+    const correction_deadline = new Date(
+      revalidation_result.correction_instruction.correction_deadline
     );
-    expect(rec_001_items.length).toBe(3);
+    const now = new Date("2024-01-14T10:30:00Z");
+    const deadline_hours = (
+      (correction_deadline.getTime() - now.getTime()) /
+      (1000 * 60 * 60)
+    ).toFixed(1);
+    expect(parseFloat(deadline_hours)).toBeLessThanOrEqual(24);
+    expect(parseFloat(deadline_hours)).toBeGreaterThan(0);
 
-    const rec_001_customer_name = rec_001_items.find(
-      (item: any) => item.field_name === "customer_name"
+    // システム管理者への通知が記録されていることを確認
+    expect(revalidation_result.notifications).toBeDefined();
+    expect(revalidation_result.notifications).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          notification_id: expect.any(String),
+          recipient_type: "system_administrator",
+          message_type: "revalidation_failed",
+          record_id: "record_001",
+          correction_attempt: 1,
+          notified_at: expect.any(String),
+        }),
+      ])
     );
-    expect(rec_001_customer_name).toBeDefined();
-    expect(rec_001_customer_name.field_name).toBe("customer_name");
-    expect(rec_001_customer_name.error_reason).toBe(
-      "顧客名が入力されていません"
-    );
-    expect(rec_001_customer_name.suggested_value).toBe("サンプル顧客A");
-    expect(rec_001_customer_name.severity).toBe("error");
 
-    const rec_001_contact_date = rec_001_items.find(
-      (item: any) => item.field_name === "contact_date"
+    // 再検証失敗がログに記録されていることを確認
+    expect(revalidation_result.audit_log).toBeDefined();
+    expect(revalidation_result.audit_log).toEqual(
+      expect.objectContaining({
+        event_type: "revalidation_failed",
+        record_id: "record_001",
+        validation_status: "failed",
+        failed_field_count: 1,
+        correction_attempt_count: 1,
+        timestamp: expect.any(String),
+      })
     );
-    expect(rec_001_contact_date).toBeDefined();
-    expect(rec_001_contact_date.field_name).toBe("contact_date");
-    expect(rec_001_contact_date.error_reason).toBe(
-      "接触日時の形式が不正です（YYYY-MM-DD HH:MM:SS形式で入力してください）"
-    );
-    expect(rec_001_contact_date.suggested_value).toBe("2024-01-15 10:30:00");
-    expect(rec_001_contact_date.severity).toBe("error");
 
-    const rec_001_deal_amount = rec_001_items.find(
-      (item: any) => item.field_name === "deal_amount"
+    // 記録の最終ステータスが『再検証不合格』に更新されていることを確認
+    expect(revalidation_result.updated_record_status).toBe(
+      "revalidation_failed"
     );
-    expect(rec_001_deal_amount).toBeDefined();
-    expect(rec_001_deal_amount.field_name).toBe("deal_amount");
-    expect(rec_001_deal_amount.error_reason).toBe(
-      "金額が許容範囲を超えています（0〜10000000の範囲で入力してください）"
-    );
-    expect(rec_001_deal_amount.suggested_value).toBe("500000");
-    expect(rec_001_deal_amount.severity).toBe("warning");
 
-    const rec_002_items = notification.correction_items.filter(
-      (item: any) => item.record_id === "rec_002"
+    // 次回修正指示の優先度が『高』であることを確認
+    expect(revalidation_result.correction_instruction.priority_level).toBe(
+      "high"
     );
-    expect(rec_002_items.length).toBe(2);
-
-    const rec_002_service_type = rec_002_items.find(
-      (item: any) => item.field_name === "service_type"
-    );
-    expect(rec_002_service_type).toBeDefined();
-    expect(rec_002_service_type.field_name).toBe("service_type");
-    expect(rec_002_service_type.error_reason).toBe(
-      "サービス種別が定義済みリストにありません"
-    );
-    expect(rec_002_service_type.suggested_value).toBe("basic_plan");
-    expect(rec_002_service_type.severity).toBe("error");
-
-    const rec_002_appointment_status = rec_002_items.find(
-      (item: any) => item.field_name === "appointment_status"
-    );
-    expect(rec_002_appointment_status).toBeDefined();
-    expect(rec_002_appointment_status.field_name).toBe("appointment_status");
-    expect(rec_002_appointment_status.error_reason).toBe(
-      "接触日時と成約日時の前後関係が矛盾しています"
-    );
-    expect(rec_002_appointment_status.suggested_value).toBe("pending");
-    expect(rec_002_appointment_status.severity).toBe("error");
-
-    expect(notification.summary).toBeDefined();
-    expect(notification.summary.total_records_with_errors).toBe(2);
-    expect(notification.summary.total_error_count).toBe(5);
-    expect(notification.summary.error_count).toBe(4);
-    expect(notification.summary.warning_count).toBe(1);
-
-    expect(notification.format_version).toBe("1.0");
-    expect(notification.notification_status).toBe("pending");
   });
 });

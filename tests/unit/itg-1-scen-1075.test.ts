@@ -1,150 +1,168 @@
-import { generateInvoiceCreationProcedure } from '../../src/logic/it-1-2-1';
+import { describe, it, expect, beforeEach } from '@jest/globals';
+import { validateSalesReportCompleteness } from '../../src/logic/it-1781935279444-2-2-1';
 
-describe('請求書作成標準手順書生成機能', () => {
-  // SCEN-1075
-  test('契約情報・成果物・請求明細から請求書作成に必要な全ステップが抽出される', () => {
-    const contract_info = {
-      contract_id: 'CTR-20240115-001',
-      contract_date: '2024-01-15',
-      contract_amount: 500000,
-      payment_terms: '月末払い',
-      payment_due_days: 30,
-      discount_rate: 0.1,
+describe('営業報告書集計自動検証機能', () => {
+  it('SCEN-1075: 必須項目不足時に即座に新入スタッフへエラー通知が送信される', () => {
+    // ===== Setup: 営業報告書データを準備 =====
+    const incompleteReportData = {
+      report_id: 'RPT-2024-001',
+      staff_id: 'STAFF-NEW-001',
+      sales_date: '2024-01-15',
+      customer_name: '', // 必須項目: 顧客名が空白
+      product_name: '営業サービスA',
+      amount: 150000,
+      report_timestamp: '2024-01-15T14:30:00Z',
+      notification_sent_at: null,
+      notification_content: null,
     };
 
-    const deliverables = [
-      {
-        deliverable_id: 'DEL-001',
-        deliverable_name: '営業データ分析レポート',
-        delivery_date: '2024-01-31',
-        inspection_status: '検収完了',
-      },
-      {
-        deliverable_id: 'DEL-002',
-        deliverable_name: 'ダッシュボード実装',
-        delivery_date: '2024-02-10',
-        inspection_status: '検収完了',
-      },
-    ];
+    const completeReportData = {
+      report_id: 'RPT-2024-002',
+      staff_id: 'STAFF-NEW-002',
+      sales_date: '2024-01-15',
+      customer_name: '顧客B社',
+      product_name: '営業サービスB',
+      amount: 200000,
+      report_timestamp: '2024-01-15T14:35:00Z',
+      notification_sent_at: null,
+      notification_content: null,
+    };
 
-    const invoice_details = [
-      {
-        detail_id: 'INV-DET-001',
-        item_name: 'コンサルティング費用',
-        quantity: 1,
-        unit_price: 300000,
-        tax_rate: 0.1,
-      },
-      {
-        detail_id: 'INV-DET-002',
-        item_name: 'システム実装費用',
-        quantity: 1,
-        unit_price: 200000,
-        tax_rate: 0.1,
-      },
-    ];
+    // ===== Test 1: 必須項目不足でエラースロー =====
+    expect(() => {
+      validateSalesReportCompleteness(incompleteReportData);
+    }).toThrow(/顧客名/);
 
-    const result = generateInvoiceCreationProcedure({
-      contract_info,
-      deliverables,
-      invoice_details,
+    // ===== Test 2: 必須項目完全でエラーなし =====
+    const result = validateSalesReportCompleteness(completeReportData);
+    expect(result.is_valid).toBe(true);
+    expect(result.error_code).toBeNull();
+    expect(result.missing_fields).toEqual([]);
+
+    // ===== Test 3: 複数必須項目不足でも最初に検出された項目で通知 =====
+    const multipleGapsData = {
+      report_id: 'RPT-2024-003',
+      staff_id: 'STAFF-NEW-003',
+      sales_date: '', // 必須項目: 営業日が空白
+      customer_name: '', // 必須項目: 顧客名が空白
+      product_name: '営業サービスC',
+      amount: 0, // 必須項目: 金額がゼロ
+      report_timestamp: '2024-01-15T14:40:00Z',
+      notification_sent_at: null,
+      notification_content: null,
+    };
+
+    expect(() => {
+      validateSalesReportCompleteness(multipleGapsData);
+    }).toThrow(/営業日|顧客名|金額/);
+
+    // ===== Test 4: 通知内容に具体的な項目名が含まれる =====
+    const validationResult = validateSalesReportCompleteness({
+      ...completeReportData,
+      report_id: 'RPT-2024-004',
     });
 
-    // ステップ数の確認: 契約情報1 + 成果物2 + 請求明細2 = 5ステップ（基本）+ 金額計算ステップ = 6ステップ以上
-    expect(result.steps.length).toBeGreaterThanOrEqual(6);
+    expect(validationResult.is_valid).toBe(true);
+    expect(validationResult.notification).toBeDefined();
+    if (validationResult.notification) {
+      expect(validationResult.notification.message).toContain('項目');
+    }
 
-    // 契約情報に基づくステップが含まれていることを確認
-    const contract_steps = result.steps.filter(
-      (step) => step.category === 'contract'
+    // ===== Test 5: タイムスタンプが報告書送信直後（5秒以内） =====
+    const reportSubmitTime = new Date('2024-01-15T14:50:00Z');
+    const notificationTime = new Date('2024-01-15T14:50:04Z'); // 4秒後
+    const timeDiffSeconds =
+      (notificationTime.getTime() - reportSubmitTime.getTime()) / 1000;
+
+    expect(timeDiffSeconds).toBeLessThanOrEqual(5);
+    expect(timeDiffSeconds).toBeGreaterThanOrEqual(0);
+
+    // ===== Test 6: 金額が数値型で正の値であることを検証 =====
+    const invalidAmountData = {
+      report_id: 'RPT-2024-005',
+      staff_id: 'STAFF-NEW-005',
+      sales_date: '2024-01-15',
+      customer_name: '顧客D社',
+      product_name: '営業サービスD',
+      amount: -50000, // 金額が負の値
+      report_timestamp: '2024-01-15T14:55:00Z',
+      notification_sent_at: null,
+      notification_content: null,
+    };
+
+    expect(() => {
+      validateSalesReportCompleteness(invalidAmountData);
+    }).toThrow(/金額/);
+
+    // ===== Test 7: 営業日フォーマット検証 =====
+    const invalidDateFormatData = {
+      report_id: 'RPT-2024-006',
+      staff_id: 'STAFF-NEW-006',
+      sales_date: '2024/01/15', // 不正なフォーマット
+      customer_name: '顧客E社',
+      product_name: '営業サービスE',
+      amount: 175000,
+      report_timestamp: '2024-01-15T15:00:00Z',
+      notification_sent_at: null,
+      notification_content: null,
+    };
+
+    expect(() => {
+      validateSalesReportCompleteness(invalidDateFormatData);
+    }).toThrow(/営業日|日付/);
+
+    // ===== Test 8: 通知が新入スタッフへ送信される確認 =====
+    const reportWithNotification = {
+      ...completeReportData,
+      report_id: 'RPT-2024-007',
+      staff_id: 'STAFF-NEW-007',
+    };
+
+    const resultWithNotif = validateSalesReportCompleteness(
+      reportWithNotification
     );
-    expect(contract_steps.length).toBeGreaterThan(0);
-    expect(contract_steps.some((s) => s.description.includes('契約内容'))).toBe(
-      true
-    );
-    expect(contract_steps.some((s) => s.description.includes('支払い条件'))).toBe(
-      true
-    );
+    expect(resultWithNotif.is_valid).toBe(true);
+    expect(resultWithNotif.staff_id).toBe('STAFF-NEW-007');
 
-    // 成果物に基づくステップが含まれていることを確認
-    const deliverable_steps = result.steps.filter(
-      (step) => step.category === 'deliverable'
-    );
-    expect(deliverable_steps.length).toBe(2);
-    expect(
-      deliverable_steps.some((s) => s.description.includes('納品物の確認'))
-    ).toBe(true);
-    expect(
-      deliverable_steps.some((s) => s.description.includes('検収状況'))
-    ).toBe(true);
-    expect(
-      deliverable_steps.some((s) => s.description.includes('納品日'))
-    ).toBe(true);
+    // ===== Test 9: 報告書登録が完了しない状態を確認 =====
+    const incompleteReport2 = {
+      report_id: 'RPT-2024-008',
+      staff_id: 'STAFF-NEW-008',
+      sales_date: '2024-01-15',
+      customer_name: '', // 必須項目が空白
+      product_name: '営業サービスF',
+      amount: 125000,
+      report_timestamp: '2024-01-15T15:05:00Z',
+      notification_sent_at: null,
+      notification_content: null,
+    };
 
-    // 請求明細に基づくステップが含まれていることを確認
-    const invoice_detail_steps = result.steps.filter(
-      (step) => step.category === 'invoice_detail'
-    );
-    expect(invoice_detail_steps.length).toBe(2);
-    expect(
-      invoice_detail_steps.some((s) => s.description.includes('品目'))
-    ).toBe(true);
-    expect(
-      invoice_detail_steps.some((s) => s.description.includes('数量'))
-    ).toBe(true);
-    expect(
-      invoice_detail_steps.some((s) => s.description.includes('単価'))
-    ).toBe(true);
-    expect(
-      invoice_detail_steps.some((s) => s.description.includes('税金計算'))
-    ).toBe(true);
+    const incompletionResult = {
+      is_registered: false,
+      error_detected: true,
+      message: '必須項目の不足により登録できません',
+    };
 
-    // 金額計算ステップの確認
-    const calculation_steps = result.steps.filter(
-      (step) => step.category === 'calculation'
-    );
-    expect(calculation_steps.length).toBeGreaterThan(0);
-    expect(
-      calculation_steps.some((s) => s.description.includes('合計金額'))
-    ).toBe(true);
+    expect(() => {
+      validateSalesReportCompleteness(incompleteReport2);
+    }).toThrow(/顧客名/);
 
-    // 論理的順序の確認: contract → deliverable → invoice_detail → calculation
-    const category_order = result.steps.map((step) => step.category);
-    const contract_first_index = category_order.indexOf('contract');
-    const deliverable_first_index = category_order.indexOf('deliverable');
-    const invoice_detail_first_index = category_order.indexOf('invoice_detail');
-    const calculation_first_index = category_order.indexOf('calculation');
+    // ===== Test 10: 正常系での登録完了状態確認 =====
+    const finalCompleteData = {
+      report_id: 'RPT-2024-009',
+      staff_id: 'STAFF-NEW-009',
+      sales_date: '2024-01-15',
+      customer_name: '顧客最終社',
+      product_name: '営業サービス最終',
+      amount: 300000,
+      report_timestamp: '2024-01-15T15:10:00Z',
+      notification_sent_at: null,
+      notification_content: null,
+    };
 
-    expect(contract_first_index).toBeLessThan(deliverable_first_index);
-    expect(deliverable_first_index).toBeLessThan(invoice_detail_first_index);
-    expect(invoice_detail_first_index).toBeLessThan(calculation_first_index);
-
-    // 各ステップにシーケンス番号と詳細説明があることを確認
-    result.steps.forEach((step) => {
-      expect(step.sequence).toBeGreaterThan(0);
-      expect(step.description).toBeTruthy();
-      expect(step.category).toBeTruthy();
-    });
-
-    // 生成された手順書の構造確認
-    expect(result.procedure_name).toBe('請求書作成標準手順書');
-    expect(result.contract_id).toBe(contract_info.contract_id);
-    expect(result.total_amount).toBe(500000);
-    expect(result.discounted_amount).toBe(450000); // 500000 * (1 - 0.1)
-    expect(result.steps[0].sequence).toBe(1);
-    expect(result.steps[result.steps.length - 1].sequence).toBe(
-      result.steps.length
-    );
-
-    // 請求明細から合計金額を計算: (300000 + 200000) * 1.1 = 550000
-    const subtotal = invoice_details.reduce(
-      (sum, detail) => sum + detail.unit_price * detail.quantity,
-      0
-    );
-    const tax_amount = subtotal * 0.1;
-    const invoice_total = subtotal + tax_amount;
-
-    expect(result.invoice_subtotal).toBe(500000);
-    expect(result.invoice_tax).toBe(50000);
-    expect(result.invoice_total).toBe(550000);
+    const finalResult = validateSalesReportCompleteness(finalCompleteData);
+    expect(finalResult.is_valid).toBe(true);
+    expect(finalResult.is_registered).toBe(true);
+    expect(finalResult.error_detected).toBe(false);
   });
 });

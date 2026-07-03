@@ -1,81 +1,177 @@
-import {
-  validateSalesDataQuality,
-  detectDataAnomalies,
-  notifyRepresentativeOfIssues,
-} from "../../src/logic/it-1781935279444-2-2-1";
+import { getContractDiscountTerms } from '../../src/logic/it-1-2-1';
 
-describe("営業データの完全性・正確性を自動検証し、不足データ・誤りを検出・通知する機能", () => {
-  test("SCEN-940: [normal] 営業データ品質検証・異常検出機能 - 必須項目が欠落したデータが不合格と判定され、修正指示が代表に通知される", () => {
-    // 前提: テストデータとして必須項目が一部欠落した営業データを準備
-    const defectiveSalesData = {
-      customer_name: "", // 必須項目が欠落
-      contact_date: "2024-01-15",
-      transaction_amount: 50000,
-      service_type: "consulting",
-      appointment_status: "confirmed",
-      sales_person_id: "SP001",
-      representative_id: "REP001",
-    };
+describe('営業成果データから請求対象項目を自動抽出し、顧客ごと・サービスごとの請求額を集計する機能', () => {
+  test('SCEN-940: [normal] 契約別割引基準の確認機能 - 各契約に適用される割引種別・割引率・適用条件が正確に返却される', () => {
+    // テストデータ: 複数の異なる割引パターンを持つ契約
+    const contracts = [
+      {
+        contractId: 'C001',
+        contractType: 'standard',
+        contractAmount: 100000,
+        startDate: '2024-01-01',
+        endDate: '2024-12-31',
+      },
+      {
+        contractId: 'C002',
+        contractType: 'volume',
+        contractAmount: 500000,
+        startDate: '2024-01-01',
+        endDate: '2024-12-31',
+      },
+      {
+        contractId: 'C003',
+        contractType: 'continuation',
+        contractAmount: 200000,
+        startDate: '2024-03-01',
+        endDate: '2024-08-31',
+      },
+      {
+        contractId: 'C004',
+        contractType: 'campaign',
+        contractAmount: 150000,
+        startDate: '2024-06-01',
+        endDate: '2024-06-30',
+      },
+      {
+        contractId: 'C005',
+        contractType: 'no_discount',
+        contractAmount: 50000,
+        startDate: '2024-01-01',
+        endDate: '2024-12-31',
+      },
+    ];
 
-    // Step 1: データ品質検証を実行
-    const validation_result = validateSalesDataQuality(defectiveSalesData);
+    // 各契約に対する割引基準照会を実行
+    const result_c001 = getContractDiscountTerms({
+      contractId: contracts[0].contractId,
+      contractType: contracts[0].contractType,
+      contractAmount: contracts[0].contractAmount,
+      startDate: contracts[0].startDate,
+      endDate: contracts[0].endDate,
+    });
 
-    // 期待: 必須項目が欠落しているため不合格と判定される
-    expect(validation_result.is_valid).toBe(false);
-    expect(validation_result.validation_status).toBe("failed");
-    expect(validation_result.missing_required_fields).toContain("customer_name");
+    // C001: 標準契約 - 割引率なし
+    expect(result_c001).toEqual({
+      contractId: 'C001',
+      discountType: null,
+      discountRate: 0,
+      applicableStartDate: null,
+      applicableEndDate: null,
+      applicableConditions: null,
+    });
 
-    // Step 2: 異常検出機能を実行
-    const anomaly_detection_result = detectDataAnomalies(defectiveSalesData);
+    // C002: 数量割引 - 契約金額50万円以上で15%割引
+    const result_c002 = getContractDiscountTerms({
+      contractId: contracts[1].contractId,
+      contractType: contracts[1].contractType,
+      contractAmount: contracts[1].contractAmount,
+      startDate: contracts[1].startDate,
+      endDate: contracts[1].endDate,
+    });
 
-    // 期待: 欠落項目の詳細情報が返される
-    expect(anomaly_detection_result.anomalies_found).toBe(true);
-    expect(anomaly_detection_result.anomaly_count).toBe(1);
-    expect(anomaly_detection_result.anomaly_details).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          field_name: "customer_name",
-          issue_type: "missing_required_field",
-          severity_level: "critical",
-        }),
-      ])
-    );
+    expect(result_c002).toEqual({
+      contractId: 'C002',
+      discountType: '数量割引',
+      discountRate: 0.15,
+      applicableStartDate: '2024-01-01',
+      applicableEndDate: '2024-12-31',
+      applicableConditions: {
+        minAmount: 500000,
+        description: '契約金額50万円以上で適用',
+      },
+    });
 
-    // Step 3: 代表ユーザーへの通知を生成
-    const notification_params = {
-      representative_id: "REP001",
-      sales_data_id: "SD20240115001",
-      validation_status: "failed",
-      missing_fields: ["customer_name"],
-      anomalies: anomaly_detection_result.anomaly_details,
-      correction_deadline: "2024-01-16T17:00:00Z",
-    };
+    // C003: 継続割引 - 期間3ヶ月以上で10%割引
+    const result_c003 = getContractDiscountTerms({
+      contractId: contracts[2].contractId,
+      contractType: contracts[2].contractType,
+      contractAmount: contracts[2].contractAmount,
+      startDate: contracts[2].startDate,
+      endDate: contracts[2].endDate,
+    });
 
-    const notification_result = notifyRepresentativeOfIssues(
-      notification_params
-    );
+    expect(result_c003).toEqual({
+      contractId: 'C003',
+      discountType: '継続割引',
+      discountRate: 0.1,
+      applicableStartDate: '2024-03-01',
+      applicableEndDate: '2024-08-31',
+      applicableConditions: {
+        minDurationMonths: 3,
+        description: '3ヶ月以上の継続契約で適用',
+      },
+    });
 
-    // 期待: 通知が代表に送信される
-    expect(notification_result.notification_sent).toBe(true);
-    expect(notification_result.notification_id).toBeDefined();
-    expect(notification_result.recipient_id).toBe("REP001");
-    expect(notification_result.notification_type).toBe("data_quality_alert");
-    expect(notification_result.message).toMatch(/顧客名/);
-    expect(notification_result.message).toMatch(/必須項目/);
-    expect(notification_result.correction_instructions).toContain(
-      "顧客名を入力してください"
-    );
+    // C004: キャンペーン割引 - 期間限定で20%割引
+    const result_c004 = getContractDiscountTerms({
+      contractId: contracts[3].contractId,
+      contractType: contracts[3].contractType,
+      contractAmount: contracts[3].contractAmount,
+      startDate: contracts[3].startDate,
+      endDate: contracts[3].endDate,
+    });
 
-    // Step 4: 通知履歴の検証
-    expect(notification_result.timestamp).toBeDefined();
-    expect(new Date(notification_result.timestamp).getTime()).toBeGreaterThan(
-      0
-    );
+    expect(result_c004).toEqual({
+      contractId: 'C004',
+      discountType: 'キャンペーン割引',
+      discountRate: 0.2,
+      applicableStartDate: '2024-06-01',
+      applicableEndDate: '2024-06-30',
+      applicableConditions: {
+        campaignId: 'CAMP-2024-06',
+        description: '6月限定キャンペーン',
+      },
+    });
 
-    // 期待: 異常検出結果と通知内容に整合性がある
-    expect(notification_result.correction_instructions.length).toBeGreaterThan(
-      0
-    );
-    expect(notification_result.anomaly_summary.critical_count).toBe(1);
+    // C005: 割引なし契約
+    const result_c005 = getContractDiscountTerms({
+      contractId: contracts[4].contractId,
+      contractType: contracts[4].contractType,
+      contractAmount: contracts[4].contractAmount,
+      startDate: contracts[4].startDate,
+      endDate: contracts[4].endDate,
+    });
+
+    expect(result_c005).toEqual({
+      contractId: 'C005',
+      discountType: null,
+      discountRate: 0,
+      applicableStartDate: null,
+      applicableEndDate: null,
+      applicableConditions: null,
+    });
+
+    // エラーテスト: 無効な契約IDが指定された場合
+    expect(() =>
+      getContractDiscountTerms({
+        contractId: '',
+        contractType: 'standard',
+        contractAmount: 100000,
+        startDate: '2024-01-01',
+        endDate: '2024-12-31',
+      })
+    ).toThrow(/契約ID/);
+
+    // エラーテスト: 契約金額が負の値
+    expect(() =>
+      getContractDiscountTerms({
+        contractId: 'C006',
+        contractType: 'standard',
+        contractAmount: -100000,
+        startDate: '2024-01-01',
+        endDate: '2024-12-31',
+      })
+    ).toThrow(/契約金額/);
+
+    // エラーテスト: 開始日が終了日より後
+    expect(() =>
+      getContractDiscountTerms({
+        contractId: 'C007',
+        contractType: 'standard',
+        contractAmount: 100000,
+        startDate: '2024-12-31',
+        endDate: '2024-01-01',
+      })
+    ).toThrow(/日付/);
   });
 });

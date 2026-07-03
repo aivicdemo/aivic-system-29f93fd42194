@@ -1,138 +1,246 @@
-import { recordChangeHistory } from "../../src/logic/it-1-br-1781935279444-1-2-1";
+import { extractAndAggregateChargeItems } from "../../src/logic/it-1-2-1";
 
-describe("月次サマリーテンプレートの定義・管理機能 - 変更履歴・監査ログ自動記録", () => {
-  test("SCEN-1254: [normal] 契約・請求データ更新時に変更内容・変更者・変更日時・差分が自動記録される", () => {
-    // 契約データ変更のテスト
-    const contract_id = "CONTRACT_001";
-    const user_id = "USER_12345";
-    const change_timestamp = new Date("2024-01-15T10:30:00Z");
-    const old_amount = 1000000;
-    const new_amount = 1200000;
+describe("営業成果データから請求対象項目を自動抽出し、顧客ごと・サービスごとの請求額を集計する機能", () => {
+  // SCEN-1254: [edge] 請求対象項目の自動抽出・集計機能 - 顧客またはサービスが複数登録されている場合、すべての組み合わせで正確に集計される
+  test("複数の顧客と複数のサービスの組み合わせが正確に抽出・集計される", () => {
+    const testData = {
+      customers: [
+        { customerId: "CUST_A", customerName: "顧客A", status: "active" },
+        { customerId: "CUST_B", customerName: "顧客B", status: "active" },
+        { customerId: "CUST_C", customerName: "顧客C", status: "active" },
+      ],
+      services: [
+        { serviceId: "SRV_1", serviceName: "サービス1", status: "active" },
+        { serviceId: "SRV_2", serviceName: "サービス2", status: "active" },
+        { serviceId: "SRV_3", serviceName: "サービス3", status: "active" },
+      ],
+      chargeItems: [
+        {
+          customerId: "CUST_A",
+          serviceId: "SRV_1",
+          amount: 100000,
+          quantity: 10,
+          feeRate: 0.1,
+          status: "active",
+        },
+        {
+          customerId: "CUST_A",
+          serviceId: "SRV_2",
+          amount: 150000,
+          quantity: 15,
+          feeRate: 0.1,
+          status: "active",
+        },
+        {
+          customerId: "CUST_A",
+          serviceId: "SRV_3",
+          amount: 80000,
+          quantity: 8,
+          feeRate: 0.1,
+          status: "active",
+        },
+        {
+          customerId: "CUST_B",
+          serviceId: "SRV_1",
+          amount: 120000,
+          quantity: 12,
+          feeRate: 0.1,
+          status: "active",
+        },
+        {
+          customerId: "CUST_B",
+          serviceId: "SRV_2",
+          amount: 200000,
+          quantity: 20,
+          feeRate: 0.1,
+          status: "active",
+        },
+        {
+          customerId: "CUST_B",
+          serviceId: "SRV_3",
+          amount: 90000,
+          quantity: 9,
+          feeRate: 0.1,
+          status: "active",
+        },
+        {
+          customerId: "CUST_C",
+          serviceId: "SRV_1",
+          amount: 110000,
+          quantity: 11,
+          feeRate: 0.1,
+          status: "active",
+        },
+        {
+          customerId: "CUST_C",
+          serviceId: "SRV_2",
+          amount: 170000,
+          quantity: 17,
+          feeRate: 0.1,
+          status: "active",
+        },
+        {
+          customerId: "CUST_C",
+          serviceId: "SRV_3",
+          amount: 95000,
+          quantity: 9,
+          feeRate: 0.12,
+          status: "active",
+        },
+        {
+          customerId: "CUST_A",
+          serviceId: "SRV_1",
+          amount: 50000,
+          quantity: 5,
+          feeRate: 0.1,
+          status: "deleted",
+        },
+      ],
+    };
 
-    const contract_change_result = recordChangeHistory({
-      entity_type: "contract",
-      entity_id: contract_id,
-      changed_by_user_id: user_id,
-      change_timestamp: change_timestamp,
-      field_name: "amount",
-      old_value: old_amount.toString(),
-      new_value: new_amount.toString(),
-    });
+    const result = extractAndAggregateChargeItems(testData);
 
-    expect(contract_change_result.success).toBe(true);
-    expect(contract_change_result.change_history_id).toBeDefined();
-    expect(contract_change_result.entity_type).toBe("contract");
-    expect(contract_change_result.entity_id).toBe(contract_id);
-    expect(contract_change_result.changed_by_user_id).toBe(user_id);
-    expect(contract_change_result.change_timestamp.toISOString()).toBe(
-      "2024-01-15T10:30:00.000Z"
+    expect(result.combinations.length).toBe(9);
+
+    const combinationMap = new Map(
+      result.combinations.map((combo) => [
+        `${combo.customerId}_${combo.serviceId}`,
+        combo,
+      ])
     );
-    expect(contract_change_result.field_name).toBe("amount");
-    expect(contract_change_result.old_value).toBe("1000000");
-    expect(contract_change_result.new_value).toBe("1200000");
-    expect(contract_change_result.difference).toEqual({
-      old_amount: 1000000,
-      new_amount: 1200000,
-      change_amount: 200000,
+
+    expect(combinationMap.has("CUST_A_SRV_1")).toBe(true);
+    expect(combinationMap.get("CUST_A_SRV_1")).toEqual({
+      customerId: "CUST_A",
+      serviceId: "SRV_1",
+      totalAmount: 100000,
+      totalQuantity: 10,
+      totalFee: 10000,
+      chargeItemCount: 1,
     });
 
-    // 請求データ変更のテスト
-    const invoice_id = "INVOICE_002";
-    const user_id_2 = "USER_67890";
-    const change_timestamp_2 = new Date("2024-01-15T11:45:00Z");
-    const old_invoice_date = "2024-01-10";
-    const new_invoice_date = "2024-01-15";
-
-    const invoice_change_result = recordChangeHistory({
-      entity_type: "invoice",
-      entity_id: invoice_id,
-      changed_by_user_id: user_id_2,
-      change_timestamp: change_timestamp_2,
-      field_name: "invoice_date",
-      old_value: old_invoice_date,
-      new_value: new_invoice_date,
+    expect(combinationMap.has("CUST_A_SRV_2")).toBe(true);
+    expect(combinationMap.get("CUST_A_SRV_2")).toEqual({
+      customerId: "CUST_A",
+      serviceId: "SRV_2",
+      totalAmount: 150000,
+      totalQuantity: 15,
+      totalFee: 15000,
+      chargeItemCount: 1,
     });
 
-    expect(invoice_change_result.success).toBe(true);
-    expect(invoice_change_result.change_history_id).toBeDefined();
-    expect(invoice_change_result.entity_type).toBe("invoice");
-    expect(invoice_change_result.entity_id).toBe(invoice_id);
-    expect(invoice_change_result.changed_by_user_id).toBe(user_id_2);
-    expect(invoice_change_result.change_timestamp.toISOString()).toBe(
-      "2024-01-15T11:45:00.000Z"
+    expect(combinationMap.has("CUST_A_SRV_3")).toBe(true);
+    expect(combinationMap.get("CUST_A_SRV_3")).toEqual({
+      customerId: "CUST_A",
+      serviceId: "SRV_3",
+      totalAmount: 80000,
+      totalQuantity: 8,
+      totalFee: 8000,
+      chargeItemCount: 1,
+    });
+
+    expect(combinationMap.has("CUST_B_SRV_1")).toBe(true);
+    expect(combinationMap.get("CUST_B_SRV_1")).toEqual({
+      customerId: "CUST_B",
+      serviceId: "SRV_1",
+      totalAmount: 120000,
+      totalQuantity: 12,
+      totalFee: 12000,
+      chargeItemCount: 1,
+    });
+
+    expect(combinationMap.has("CUST_B_SRV_2")).toBe(true);
+    expect(combinationMap.get("CUST_B_SRV_2")).toEqual({
+      customerId: "CUST_B",
+      serviceId: "SRV_2",
+      totalAmount: 200000,
+      totalQuantity: 20,
+      totalFee: 20000,
+      chargeItemCount: 1,
+    });
+
+    expect(combinationMap.has("CUST_B_SRV_3")).toBe(true);
+    expect(combinationMap.get("CUST_B_SRV_3")).toEqual({
+      customerId: "CUST_B",
+      serviceId: "SRV_3",
+      totalAmount: 90000,
+      totalQuantity: 9,
+      totalFee: 9000,
+      chargeItemCount: 1,
+    });
+
+    expect(combinationMap.has("CUST_C_SRV_1")).toBe(true);
+    expect(combinationMap.get("CUST_C_SRV_1")).toEqual({
+      customerId: "CUST_C",
+      serviceId: "SRV_1",
+      totalAmount: 110000,
+      totalQuantity: 11,
+      totalFee: 11000,
+      chargeItemCount: 1,
+    });
+
+    expect(combinationMap.has("CUST_C_SRV_2")).toBe(true);
+    expect(combinationMap.get("CUST_C_SRV_2")).toEqual({
+      customerId: "CUST_C",
+      serviceId: "SRV_2",
+      totalAmount: 170000,
+      totalQuantity: 17,
+      totalFee: 17000,
+      chargeItemCount: 1,
+    });
+
+    expect(combinationMap.has("CUST_C_SRV_3")).toBe(true);
+    expect(combinationMap.get("CUST_C_SRV_3")).toEqual({
+      customerId: "CUST_C",
+      serviceId: "SRV_3",
+      totalAmount: 95000,
+      totalQuantity: 9,
+      totalFee: 11400,
+      chargeItemCount: 1,
+    });
+
+    const duplicateCheck = new Set(
+      result.combinations.map((combo) => `${combo.customerId}_${combo.serviceId}`)
     );
-    expect(invoice_change_result.field_name).toBe("invoice_date");
-    expect(invoice_change_result.old_value).toBe("2024-01-10");
-    expect(invoice_change_result.new_value).toBe("2024-01-15");
+    expect(duplicateCheck.size).toBe(9);
 
-    // 複数フィールド同時変更のテスト
-    const contract_id_3 = "CONTRACT_003";
-    const user_id_3 = "USER_11111";
-    const change_timestamp_3 = new Date("2024-01-15T09:15:00Z");
+    const expectedTotalAmount =
+      100000 +
+      150000 +
+      80000 +
+      120000 +
+      200000 +
+      90000 +
+      110000 +
+      170000 +
+      95000;
+    const actualTotalAmount = result.combinations.reduce(
+      (sum, combo) => sum + combo.totalAmount,
+      0
+    );
+    expect(actualTotalAmount).toBe(expectedTotalAmount);
 
-    const multi_field_result = recordChangeHistory({
-      entity_type: "contract",
-      entity_id: contract_id_3,
-      changed_by_user_id: user_id_3,
-      change_timestamp: change_timestamp_3,
-      field_name: "status,amount",
-      old_value: "active,800000",
-      new_value: "pending,950000",
+    const expectedTotalQuantity = 10 + 15 + 8 + 12 + 20 + 9 + 11 + 17 + 9;
+    const actualTotalQuantity = result.combinations.reduce(
+      (sum, combo) => sum + combo.totalQuantity,
+      0
+    );
+    expect(actualTotalQuantity).toBe(expectedTotalQuantity);
+
+    const expectedTotalFee =
+      10000 + 15000 + 8000 + 12000 + 20000 + 9000 + 11000 + 17000 + 11400;
+    const actualTotalFee = result.combinations.reduce(
+      (sum, combo) => sum + combo.totalFee,
+      0
+    );
+    expect(actualTotalFee).toBe(expectedTotalFee);
+
+    expect(result.summary).toEqual({
+      totalCombinationCount: 9,
+      totalAmount: expectedTotalAmount,
+      totalQuantity: expectedTotalQuantity,
+      totalFee: expectedTotalFee,
+      excludedItemCount: 1,
     });
-
-    expect(multi_field_result.success).toBe(true);
-    expect(multi_field_result.field_name).toBe("status,amount");
-    expect(multi_field_result.old_value).toBe("active,800000");
-    expect(multi_field_result.new_value).toBe("pending,950000");
-
-    // エラーケース: 必須項目欠落
-    expect(() =>
-      recordChangeHistory({
-        entity_type: "contract",
-        entity_id: "",
-        changed_by_user_id: user_id,
-        change_timestamp: change_timestamp,
-        field_name: "amount",
-        old_value: "1000000",
-        new_value: "1200000",
-      })
-    ).toThrow(/entity_id/);
-
-    expect(() =>
-      recordChangeHistory({
-        entity_type: "contract",
-        entity_id: contract_id,
-        changed_by_user_id: "",
-        change_timestamp: change_timestamp,
-        field_name: "amount",
-        old_value: "1000000",
-        new_value: "1200000",
-      })
-    ).toThrow(/user_id/);
-
-    expect(() =>
-      recordChangeHistory({
-        entity_type: "contract",
-        entity_id: contract_id,
-        changed_by_user_id: user_id,
-        change_timestamp: change_timestamp,
-        field_name: "",
-        old_value: "1000000",
-        new_value: "1200000",
-      })
-    ).toThrow(/field_name/);
-
-    // 無効なエンティティタイプ
-    expect(() =>
-      recordChangeHistory({
-        entity_type: "invalid_type",
-        entity_id: contract_id,
-        changed_by_user_id: user_id,
-        change_timestamp: change_timestamp,
-        field_name: "amount",
-        old_value: "1000000",
-        new_value: "1200000",
-      })
-    ).toThrow(/entity_type/);
   });
 });

@@ -1,39 +1,43 @@
-import { describe, test, expect } from '@jest/globals';
-import { determinePaymentProcessing } from '../../src/logic/it-1781935279444-2-2-1';
+import { surveyCurrentDataItems } from "../../src/logic/it-1781935279444-1-1-1";
 
-describe('営業データの完全性・正確性を自動検証し、不足データ・誤りを検出・通知する機能', () => {
-  test('SCEN-1319: [edge] 支払い処理自動判定 - 請求額がゼロの場合、支払い対象外として処理されスキップ記録が作成される', () => {
-    // Arrange: 請求額がゼロの請求データを準備
-    const billId = 'BILL-000123';
-    const billingAmount = 0;
-    const processingDate = new Date('2024-01-15T09:00:00Z');
-    const invoiceData = {
-      bill_id: billId,
-      customer_id: 'CUST-001',
-      service_id: 'SVC-BASIC',
-      billing_amount: billingAmount,
-      contract_start_date: '2024-01-01',
-      contract_end_date: '2024-01-31',
-      created_at: processingDate.toISOString(),
-    };
+const fetchMock = require("jest-fetch-mock");
 
-    // Act: 支払い処理自動判定を実行
-    const result = determinePaymentProcessing({
-      invoice_data: invoiceData,
-      execution_timestamp: processingDate.toISOString(),
+describe("営業データ項目のメタデータ管理機能", () => {
+  test("SCEN-1319: 営業システムにデータ項目が存在しない場合、空の調査結果が返される", async () => {
+    fetchMock.resetMocks();
+
+    // モック: 営業システムのデータ項目テーブルが空の状態
+    fetchMock.mockResponseOnce(
+      JSON.stringify({
+        status: 200,
+        data: {
+          salesDataItems: [],
+          metadata: [],
+          validationRules: [],
+        },
+      }),
+      { status: 200 }
+    );
+
+    const result = await surveyCurrentDataItems({
+      systemId: "sales_system_001",
+      includeMetadata: true,
+      includeValidationRules: true,
     });
 
-    // Assert: 支払い対象外として処理されたことを確認
-    expect(result.is_payment_required).toBe(false);
-    expect(result.skip_reason).toBe('請求額ゼロ');
+    // 期待値: 空の調査結果が返される
+    expect(result).toEqual({
+      salesDataItems: [],
+      metadata: [],
+      validationRules: [],
+    });
 
-    // スキップ記録が作成されていることを確認
-    expect(result.skip_record).toBeDefined();
-    expect(result.skip_record.bill_id).toBe(billId);
-    expect(result.skip_record.skip_reason).toBe('請求額ゼロ');
-    expect(result.skip_record.processing_timestamp).toBe(processingDate.toISOString());
+    // ステータスコードが200であることを確認
+    expect(fetchMock.mock.calls[0][1]?.method).toBe("GET");
 
-    // スキップ記録の構造を検証
-    expect(result.skip_record.created_at).toBe(processingDate.toISOString());
+    // データ項目が0件であることを確認
+    expect(result.salesDataItems.length).toBe(0);
+    expect(result.metadata.length).toBe(0);
+    expect(result.validationRules.length).toBe(0);
   });
 });

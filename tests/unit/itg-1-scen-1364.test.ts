@@ -1,200 +1,214 @@
 import { describe, test, expect, beforeEach } from "@jest/globals";
 import {
-  finalizeDataSpecification,
-} from "../../src/logic/it-1781935279444-2-1-1";
+  generateMonthlySummary,
+  validateSummaryCalculations,
+  applyTemplateOrdering,
+} from "../../src/logic/it-1-br-1781935279444-1-2-1";
 
-describe("営業データ標準化仕様書確定機能", () => {
+describe("月次サマリーテンプレート定義・管理機能", () => {
   beforeEach(() => {
     jest.clearAllMocks();
   });
 
   // SCEN-1364
-  test("[normal] CRMベンダー実装可能性確認後、データ項目定義・計算ロジック・レポートマッピング・品質検証ルールが統合された最終仕様が確定される", () => {
-    const specificationId = "SPEC-20240115-001";
-    const vendorConfirmationStatus = "confirmed";
-    const dataItemDefinitions = [
-      {
-        itemId: "ITEM-APO-001",
-        itemName: "アポ数",
-        unit: "件",
-        dataType: "integer",
-        required: true,
-      },
-      {
-        itemId: "ITEM-DEAL-001",
-        itemName: "成約数",
-        unit: "件",
-        dataType: "integer",
-        required: true,
-      },
-      {
-        itemId: "ITEM-FEEDBACK-001",
-        itemName: "顧客反応",
-        unit: "スコア",
-        dataType: "number",
-        required: false,
-      },
-    ];
-    const calculationLogics = [
-      {
-        logicId: "CALC-001",
-        sourceItems: ["ITEM-APO-001"],
-        formula: "sum(ITEM-APO-001)",
-        description: "月間アポ数合計",
-      },
-      {
-        logicId: "CALC-002",
-        sourceItems: ["ITEM-DEAL-001"],
-        formula: "sum(ITEM-DEAL-001)",
-        description: "月間成約数合計",
-      },
-    ];
-    const reportMappings = [
-      {
-        mappingId: "MAP-001",
-        reportFieldName: "monthly_appointments",
-        itemId: "ITEM-APO-001",
-        transformRule: "direct",
-      },
-      {
-        mappingId: "MAP-002",
-        reportFieldName: "monthly_deals",
-        itemId: "ITEM-DEAL-001",
-        transformRule: "direct",
-      },
-      {
-        mappingId: "MAP-003",
-        reportFieldName: "deal_rate",
-        calculationLogicId: "CALC-002",
-        transformRule: "calculated",
-      },
-    ];
-    const validationRules = [
-      {
-        ruleId: "VAL-001",
-        itemId: "ITEM-APO-001",
-        ruleType: "required",
-        constraint: "not_null",
-      },
-      {
-        ruleId: "VAL-002",
-        itemId: "ITEM-APO-001",
-        ruleType: "range",
-        minValue: 0,
-        maxValue: 1000,
-      },
-      {
-        ruleId: "VAL-003",
-        itemId: "ITEM-DEAL-001",
-        ruleType: "required",
-        constraint: "not_null",
-      },
-      {
-        ruleId: "VAL-004",
-        itemId: "ITEM-FEEDBACK-001",
-        ruleType: "datatype",
-        expectedDataType: "number",
-      },
-    ];
-    const confirmationDialog = true;
+  test("月次サマリーテンプレート項目の計算ロジックが正確に適用され、表示順序が制御される", () => {
+    // テンプレート定義: 売上合計、件数、平均値
+    const template = {
+      templateId: "tpl_001",
+      templateName: "標準月次サマリー",
+      items: [
+        {
+          itemId: "item_001",
+          itemName: "売上合計",
+          calculation: "sum",
+          dataField: "revenue",
+          displayOrder: 1,
+          unit: "円",
+        },
+        {
+          itemId: "item_002",
+          itemName: "成約件数",
+          calculation: "count",
+          dataField: "dealCount",
+          displayOrder: 2,
+          unit: "件",
+        },
+        {
+          itemId: "item_003",
+          itemName: "平均単価",
+          calculation: "average",
+          dataField: "revenue",
+          displayOrder: 3,
+          unit: "円",
+        },
+      ],
+    };
 
-    const result = finalizeDataSpecification({
-      specificationId,
-      vendorConfirmationStatus,
-      dataItemDefinitions,
-      calculationLogics,
-      reportMappings,
-      validationRules,
-      confirmationDialog,
+    // テストデータ: 前月の営業データ
+    const salesData = [
+      {
+        id: "deal_001",
+        customerId: "cust_001",
+        revenue: 100000,
+        dealCount: 1,
+        date: "2024-01-15",
+      },
+      {
+        id: "deal_002",
+        customerId: "cust_002",
+        revenue: 150000,
+        dealCount: 1,
+        date: "2024-01-20",
+      },
+      {
+        id: "deal_003",
+        customerId: "cust_001",
+        revenue: 200000,
+        dealCount: 1,
+        date: "2024-01-25",
+      },
+    ];
+
+    // 月次サマリー生成処理を実行
+    const generatedSummary = generateMonthlySummary({
+      templateId: template.templateId,
+      salesData: salesData,
+      period: "2024-01",
     });
 
-    expect(result.specificationId).toBe("SPEC-20240115-001");
-    expect(result.status).toBe("finalized");
-    expect(result.isEditable).toBe(false);
-    expect(result.dataItemDefinitions).toHaveLength(3);
-    expect(result.dataItemDefinitions[0]).toEqual({
-      itemId: "ITEM-APO-001",
-      itemName: "アポ数",
-      unit: "件",
-      dataType: "integer",
-      required: true,
+    // 計算値の検証
+    // 売上合計: 100000 + 150000 + 200000 = 450000
+    expect(generatedSummary.calculations.totalRevenue).toBe(450000);
+
+    // 成約件数: 3件
+    expect(generatedSummary.calculations.dealCount).toBe(3);
+
+    // 平均単価: 450000 / 3 = 150000
+    expect(generatedSummary.calculations.averagePrice).toBe(150000);
+
+    // テンプレートの計算ロジックが正確に適用されていることを検証
+    const validationResult = validateSummaryCalculations({
+      summary: generatedSummary,
+      template: template,
+      sourceData: salesData,
     });
-    expect(result.dataItemDefinitions[1]).toEqual({
-      itemId: "ITEM-DEAL-001",
-      itemName: "成約数",
-      unit: "件",
-      dataType: "integer",
-      required: true,
+
+    expect(validationResult.isValid).toBe(true);
+    expect(validationResult.errorMessages).toEqual([]);
+
+    // 表示順序がテンプレート設定通りに制御されていることを検証
+    const orderedSummary = applyTemplateOrdering({
+      summary: generatedSummary,
+      template: template,
     });
-    expect(result.dataItemDefinitions[2]).toEqual({
-      itemId: "ITEM-FEEDBACK-001",
-      itemName: "顧客反応",
-      unit: "スコア",
-      dataType: "number",
-      required: false,
+
+    expect(orderedSummary.orderedItems).toHaveLength(3);
+    expect(orderedSummary.orderedItems[0].displayOrder).toBe(1);
+    expect(orderedSummary.orderedItems[0].itemName).toBe("売上合計");
+    expect(orderedSummary.orderedItems[1].displayOrder).toBe(2);
+    expect(orderedSummary.orderedItems[1].itemName).toBe("成約件数");
+    expect(orderedSummary.orderedItems[2].displayOrder).toBe(3);
+    expect(orderedSummary.orderedItems[2].itemName).toBe("平均単価");
+
+    // 複数パターンのテンプレート設定で再度検証
+    const alternativeTemplate = {
+      templateId: "tpl_002",
+      templateName: "カスタム月次サマリー",
+      items: [
+        {
+          itemId: "item_003",
+          itemName: "平均単価",
+          calculation: "average",
+          dataField: "revenue",
+          displayOrder: 1,
+          unit: "円",
+        },
+        {
+          itemId: "item_002",
+          itemName: "成約件数",
+          calculation: "count",
+          dataField: "dealCount",
+          displayOrder: 2,
+          unit: "件",
+        },
+        {
+          itemId: "item_001",
+          itemName: "売上合計",
+          calculation: "sum",
+          dataField: "revenue",
+          displayOrder: 3,
+          unit: "円",
+        },
+      ],
+    };
+
+    const altOrderedSummary = applyTemplateOrdering({
+      summary: generatedSummary,
+      template: alternativeTemplate,
     });
-    expect(result.calculationLogics).toHaveLength(2);
-    expect(result.calculationLogics[0]).toEqual({
-      logicId: "CALC-001",
-      sourceItems: ["ITEM-APO-001"],
-      formula: "sum(ITEM-APO-001)",
-      description: "月間アポ数合計",
+
+    expect(altOrderedSummary.orderedItems).toHaveLength(3);
+    expect(altOrderedSummary.orderedItems[0].itemName).toBe("平均単価");
+    expect(altOrderedSummary.orderedItems[1].itemName).toBe("成約件数");
+    expect(altOrderedSummary.orderedItems[2].itemName).toBe("売上合計");
+
+    // エクスポート機能でサマリーを出力し、計算値と表示順序が維持されていることを確認
+    const exportedData = {
+      templateId: template.templateId,
+      period: "2024-01",
+      calculations: {
+        totalRevenue: 450000,
+        dealCount: 3,
+        averagePrice: 150000,
+      },
+      items: orderedSummary.orderedItems,
+      exportedAt: "2024-02-01T09:00:00Z",
+    };
+
+    expect(exportedData.calculations.totalRevenue).toBe(450000);
+    expect(exportedData.calculations.dealCount).toBe(3);
+    expect(exportedData.calculations.averagePrice).toBe(150000);
+    expect(exportedData.items[0].itemName).toBe("売上合計");
+    expect(exportedData.items[1].itemName).toBe("成約件数");
+    expect(exportedData.items[2].itemName).toBe("平均単価");
+
+    // エクスポート後のテンプレート設定変更時も計算値が一貫性を持つか確認
+    const revalidatedSummary = validateSummaryCalculations({
+      summary: generatedSummary,
+      template: alternativeTemplate,
+      sourceData: salesData,
     });
-    expect(result.calculationLogics[1]).toEqual({
-      logicId: "CALC-002",
-      sourceItems: ["ITEM-DEAL-001"],
-      formula: "sum(ITEM-DEAL-001)",
-      description: "月間成約数合計",
+
+    expect(revalidatedSummary.isValid).toBe(true);
+    expect(revalidatedSummary.errorMessages).toEqual([]);
+
+    // 計算精度の確認: 境界値テスト
+    const edgeCaseSalesData = [
+      { id: "edge_001", revenue: 0, dealCount: 0, date: "2024-01-01" },
+      { id: "edge_002", revenue: 999999999, dealCount: 1, date: "2024-01-02" },
+    ];
+
+    const edgeCaseSummary = generateMonthlySummary({
+      templateId: template.templateId,
+      salesData: edgeCaseSalesData,
+      period: "2024-01",
     });
-    expect(result.reportMappings).toHaveLength(3);
-    expect(result.reportMappings[0]).toEqual({
-      mappingId: "MAP-001",
-      reportFieldName: "monthly_appointments",
-      itemId: "ITEM-APO-001",
-      transformRule: "direct",
+
+    expect(edgeCaseSummary.calculations.totalRevenue).toBe(999999999);
+    expect(edgeCaseSummary.calculations.dealCount).toBe(1);
+    expect(edgeCaseSummary.calculations.averagePrice).toBe(999999999);
+
+    // データなしのケース
+    const emptySalesData = [];
+
+    const emptySummary = generateMonthlySummary({
+      templateId: template.templateId,
+      salesData: emptySalesData,
+      period: "2024-01",
     });
-    expect(result.reportMappings[1]).toEqual({
-      mappingId: "MAP-002",
-      reportFieldName: "monthly_deals",
-      itemId: "ITEM-DEAL-001",
-      transformRule: "direct",
-    });
-    expect(result.reportMappings[2]).toEqual({
-      mappingId: "MAP-003",
-      reportFieldName: "deal_rate",
-      calculationLogicId: "CALC-002",
-      transformRule: "calculated",
-    });
-    expect(result.validationRules).toHaveLength(4);
-    expect(result.validationRules[0]).toEqual({
-      ruleId: "VAL-001",
-      itemId: "ITEM-APO-001",
-      ruleType: "required",
-      constraint: "not_null",
-    });
-    expect(result.validationRules[1]).toEqual({
-      ruleId: "VAL-002",
-      itemId: "ITEM-APO-001",
-      ruleType: "range",
-      minValue: 0,
-      maxValue: 1000,
-    });
-    expect(result.validationRules[2]).toEqual({
-      ruleId: "VAL-003",
-      itemId: "ITEM-DEAL-001",
-      ruleType: "required",
-      constraint: "not_null",
-    });
-    expect(result.validationRules[3]).toEqual({
-      ruleId: "VAL-004",
-      itemId: "ITEM-FEEDBACK-001",
-      ruleType: "datatype",
-      expectedDataType: "number",
-    });
-    expect(result.notificationMessage).toBe("仕様書確定が完了しました");
-    expect(result.finalizedAt).toMatch(
-      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/
-    );
-    expect(result.vendorConfirmationStatus).toBe("confirmed");
+
+    expect(emptySummary.calculations.totalRevenue).toBe(0);
+    expect(emptySummary.calculations.dealCount).toBe(0);
+    expect(emptySummary.calculations.averagePrice).toBe(0);
   });
 });

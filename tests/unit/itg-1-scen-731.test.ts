@@ -1,88 +1,197 @@
-import { validateSalesDataForMonthlyReport } from "../../src/logic/it-1781935279444-2-2-1";
+import { validateSalesActivityData } from "../../src/logic/it-1781935279444-2-1-1";
 
-describe("月次レポート生成前の最終検証機能", () => {
-  // SCEN-731: [edge] 月次レポート生成前の最終検証機能 - 数値項目の異常値（負数が想定されない項目に負数がある場合）を検出する
-  test("売上金額フィールドの負数値を検出し、エラーフラグを付与し、詳細ログを記録し、レコードをフラグ付けして件数をカウントする", () => {
-    const salesDataRecords = [
-      {
-        record_id: "REC001",
-        customer_id: "CUST001",
-        sales_amount: 50000,
-        appointment_count: 5,
-        contract_count: 2,
-        service_type: "service_a",
-        record_date: "2024-01-10",
-      },
-      {
-        record_id: "REC002",
-        customer_id: "CUST002",
-        sales_amount: -50000,
-        appointment_count: 3,
-        contract_count: 1,
-        service_type: "service_b",
-        record_date: "2024-01-15",
-      },
-      {
-        record_id: "REC003",
-        customer_id: "CUST003",
-        sales_amount: 75000,
-        appointment_count: 8,
-        contract_count: 3,
-        service_type: "service_a",
-        record_date: "2024-01-20",
-      },
-      {
-        record_id: "REC004",
-        customer_id: "CUST004",
-        sales_amount: -10000,
-        appointment_count: 2,
-        contract_count: 0,
-        service_type: "service_c",
-        record_date: "2024-01-25",
-      },
-    ];
+describe("営業活動データ品質自動検出・通知機能", () => {
+  // SCEN-731: [normal] 営業活動データがすべての必須項目を含み、データ型が正確で通知されない
+  test("すべての必須項目を含み、データ型が正確な営業活動データは検証成功し、エラー通知が発生しない", () => {
+    const salesActivityData = {
+      activity_date: "2024-01-15",
+      sales_rep_name: "田中太郎",
+      customer_name: "株式会社ABC",
+      activity_content: "顧客訪問・商品説明",
+      activity_result: "アポイント確定",
+      activity_amount: 50000,
+    };
 
-    const validationResult = validateSalesDataForMonthlyReport(
-      salesDataRecords
+    const result = validateSalesActivityData(salesActivityData);
+
+    expect(result.is_valid).toBe(true);
+    expect(result.validation_status).toBe("success");
+    expect(result.error_list).toEqual([]);
+    expect(result.admin_error_notification).toBe(false);
+    expect(result.user_alert_notification).toBe(false);
+    expect(result.error_count).toBe(0);
+  });
+
+  test("必須項目の営業活動日が欠落している場合、検証失敗しエラー通知が発生する", () => {
+    const salesActivityData = {
+      sales_rep_name: "田中太郎",
+      customer_name: "株式会社ABC",
+      activity_content: "顧客訪問・商品説明",
+      activity_result: "アポイント確定",
+      activity_amount: 50000,
+    };
+
+    expect(() => validateSalesActivityData(salesActivityData)).toThrow(
+      /営業活動日/
     );
+  });
 
-    expect(validationResult.total_records).toBe(4);
-    expect(validationResult.anomaly_count).toBe(2);
-    expect(validationResult.valid_records_count).toBe(2);
-    expect(validationResult.flagged_records_count).toBe(2);
+  test("必須項目の営業担当者が欠落している場合、検証失敗しエラー通知が発生する", () => {
+    const salesActivityData = {
+      activity_date: "2024-01-15",
+      customer_name: "株式会社ABC",
+      activity_content: "顧客訪問・商品説明",
+      activity_result: "アポイント確定",
+      activity_amount: 50000,
+    };
 
-    const anomalyRecords = validationResult.anomaly_details;
-    expect(anomalyRecords).toHaveLength(2);
+    expect(() => validateSalesActivityData(salesActivityData)).toThrow(
+      /営業担当者/
+    );
+  });
 
-    expect(anomalyRecords[0].record_id).toBe("REC002");
-    expect(anomalyRecords[0].is_anomaly).toBe(true);
-    expect(anomalyRecords[0].anomaly_field).toBe("sales_amount");
-    expect(anomalyRecords[0].anomaly_value).toBe(-50000);
-    expect(anomalyRecords[0].expected_range_min).toBe(0);
-    expect(anomalyRecords[0].expected_range_max).toBe(999999999);
-    expect(anomalyRecords[0].error_message).toMatch(/sales_amount/);
+  test("必須項目の顧客名が欠落している場合、検証失敗しエラー通知が発生する", () => {
+    const salesActivityData = {
+      activity_date: "2024-01-15",
+      sales_rep_name: "田中太郎",
+      activity_content: "顧客訪問・商品説明",
+      activity_result: "アポイント確定",
+      activity_amount: 50000,
+    };
 
-    expect(anomalyRecords[1].record_id).toBe("REC004");
-    expect(anomalyRecords[1].is_anomaly).toBe(true);
-    expect(anomalyRecords[1].anomaly_field).toBe("sales_amount");
-    expect(anomalyRecords[1].anomaly_value).toBe(-10000);
-    expect(anomalyRecords[1].expected_range_min).toBe(0);
-    expect(anomalyRecords[1].expected_range_max).toBe(999999999);
+    expect(() => validateSalesActivityData(salesActivityData)).toThrow(
+      /顧客名/
+    );
+  });
 
-    expect(validationResult.validation_summary.anomalies_detected).toBe(true);
-    expect(validationResult.validation_summary.critical_error_count).toBe(2);
-    expect(validationResult.validation_summary.validation_status).toBe("flagged");
+  test("必須項目の活動内容が欠落している場合、検証失敗しエラー通知が発生する", () => {
+    const salesActivityData = {
+      activity_date: "2024-01-15",
+      sales_rep_name: "田中太郎",
+      customer_name: "株式会社ABC",
+      activity_result: "アポイント確定",
+      activity_amount: 50000,
+    };
 
-    const processingResult = validationResult.processing_result;
-    expect(processingResult.excluded_from_report_count).toBe(2);
-    expect(processingResult.included_in_report_count).toBe(2);
-    expect(processingResult.flagged_for_review_count).toBe(2);
+    expect(() => validateSalesActivityData(salesActivityData)).toThrow(
+      /活動内容/
+    );
+  });
 
-    const validRecordsForReport = validationResult.records_for_monthly_report;
-    expect(validRecordsForReport).toHaveLength(2);
-    expect(validRecordsForReport.map((r: any) => r.record_id)).toEqual([
-      "REC001",
-      "REC003",
-    ]);
+  test("必須項目の活動結果が欠落している場合、検証失敗しエラー通知が発生する", () => {
+    const salesActivityData = {
+      activity_date: "2024-01-15",
+      sales_rep_name: "田中太郎",
+      customer_name: "株式会社ABC",
+      activity_content: "顧客訪問・商品説明",
+      activity_amount: 50000,
+    };
+
+    expect(() => validateSalesActivityData(salesActivityData)).toThrow(
+      /活動結果/
+    );
+  });
+
+  test("営業活動日のデータ型が不正な場合、検証失敗しエラー通知が発生する", () => {
+    const salesActivityData = {
+      activity_date: "2024/01/15",
+      sales_rep_name: "田中太郎",
+      customer_name: "株式会社ABC",
+      activity_content: "顧客訪問・商品説明",
+      activity_result: "アポイント確定",
+      activity_amount: 50000,
+    };
+
+    expect(() => validateSalesActivityData(salesActivityData)).toThrow(
+      /日付形式/
+    );
+  });
+
+  test("活動金額のデータ型が文字列の場合、検証失敗しエラー通知が発生する", () => {
+    const salesActivityData = {
+      activity_date: "2024-01-15",
+      sales_rep_name: "田中太郎",
+      customer_name: "株式会社ABC",
+      activity_content: "顧客訪問・商品説明",
+      activity_result: "アポイント確定",
+      activity_amount: "50000",
+    };
+
+    expect(() => validateSalesActivityData(salesActivityData)).toThrow(
+      /金額/
+    );
+  });
+
+  test("営業担当者名が空文字列の場合、検証失敗しエラー通知が発生する", () => {
+    const salesActivityData = {
+      activity_date: "2024-01-15",
+      sales_rep_name: "",
+      customer_name: "株式会社ABC",
+      activity_content: "顧客訪問・商品説明",
+      activity_result: "アポイント確定",
+      activity_amount: 50000,
+    };
+
+    expect(() => validateSalesActivityData(salesActivityData)).toThrow(
+      /営業担当者/
+    );
+  });
+
+  test("複数の必須項目が欠落している場合、検証失敗し全エラーが通知される", () => {
+    const salesActivityData = {
+      sales_rep_name: "田中太郎",
+      activity_result: "アポイント確定",
+    };
+
+    expect(() => validateSalesActivityData(salesActivityData)).toThrow(
+      /営業活動日|顧客名|活動内容/
+    );
+  });
+
+  test("すべての必須項目を含み、すべてのデータ型が正確な場合、検証成功し管理者通知はfalse", () => {
+    const salesActivityData = {
+      activity_date: "2024-02-28",
+      sales_rep_name: "山田花子",
+      customer_name: "株式会社XYZ",
+      activity_content: "電話営業",
+      activity_result: "興味表示",
+      activity_amount: 0,
+    };
+
+    const result = validateSalesActivityData(salesActivityData);
+
+    expect(result.is_valid).toBe(true);
+    expect(result.admin_error_notification).toBe(false);
+    expect(result.user_alert_notification).toBe(false);
+  });
+
+  test("営業活動日が範囲外の過去日付の場合、検証失敗し警告通知が発生する", () => {
+    const salesActivityData = {
+      activity_date: "1999-01-01",
+      sales_rep_name: "田中太郎",
+      customer_name: "株式会社ABC",
+      activity_content: "顧客訪問・商品説明",
+      activity_result: "アポイント確定",
+      activity_amount: 50000,
+    };
+
+    expect(() => validateSalesActivityData(salesActivityData)).toThrow(
+      /日付範囲/
+    );
+  });
+
+  test("活動金額が負数の場合、検証失敗し警告通知が発生する", () => {
+    const salesActivityData = {
+      activity_date: "2024-01-15",
+      sales_rep_name: "田中太郎",
+      customer_name: "株式会社ABC",
+      activity_content: "顧客訪問・商品説明",
+      activity_result: "アポイント確定",
+      activity_amount: -50000,
+    };
+
+    expect(() => validateSalesActivityData(salesActivityData)).toThrow(
+      /金額範囲/
+    );
   });
 });

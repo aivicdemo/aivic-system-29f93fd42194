@@ -1,237 +1,173 @@
-import { generateQualityChecklistFromMetadata } from "../../src/logic/it-1781935279444-2-1-1";
+import { validateAndTransformSalesData } from '../../src/logic/it-1781935279444-1-1-1';
 
-describe("品質管理ルール・チェックリスト作成機能", () => {
+describe('営業データ項目のメタデータ管理機能 - データ形式互換性検証と自動変換', () => {
   // SCEN-1357
-  test("営業データ項目メタデータから検証項目・実行タイミング・判定基準が正常に抽出されチェックリストが生成される", () => {
-    const input_metadata = [
-      {
-        field_id: "field_001",
-        field_name: "customer_name",
-        data_type: "string",
-        is_required: true,
-        validation_rules: [
-          {
-            rule_id: "rule_001",
-            rule_type: "not_empty",
-            error_message: "顧客名",
-          },
-          {
-            rule_id: "rule_002",
-            rule_type: "max_length",
-            max_length: 100,
-            error_message: "顧客名",
-          },
-        ],
-        execution_timing: ["on_create", "on_update"],
-        judgment_criteria: {
-          min_length: 1,
-          max_length: 100,
-          allowed_chars: "alphanumeric_jp",
-        },
-      },
-      {
-        field_id: "field_002",
-        field_name: "appointment_date",
-        data_type: "date",
-        is_required: true,
-        validation_rules: [
-          {
-            rule_id: "rule_003",
-            rule_type: "date_format",
-            date_format: "YYYY-MM-DD",
-            error_message: "接触日時",
-          },
-          {
-            rule_id: "rule_004",
-            rule_type: "date_range",
-            min_date: "2024-01-01",
-            max_date: "2024-12-31",
-            error_message: "接触日時",
-          },
-        ],
-        execution_timing: ["on_create", "periodic"],
-        judgment_criteria: {
-          format: "YYYY-MM-DD",
-          min_date: "2024-01-01",
-          max_date: "2024-12-31",
-          reference_rule: "current_fiscal_year",
-        },
-      },
-      {
-        field_id: "field_003",
-        field_name: "contract_amount",
-        data_type: "number",
-        is_required: true,
-        validation_rules: [
-          {
-            rule_id: "rule_005",
-            rule_type: "numeric_range",
-            min_value: 0,
-            max_value: 10000000,
-            error_message: "契約金額",
-          },
-          {
-            rule_id: "rule_006",
-            rule_type: "not_negative",
-            error_message: "契約金額",
-          },
-        ],
-        execution_timing: ["on_create", "on_update"],
-        judgment_criteria: {
-          min_value: 0,
-          max_value: 10000000,
-          decimal_places: 2,
-        },
-      },
-      {
-        field_id: "field_004",
-        field_name: "status",
-        data_type: "enum",
-        is_required: true,
-        validation_rules: [
-          {
-            rule_id: "rule_007",
-            rule_type: "enum_value",
-            allowed_values: ["pending", "approved", "rejected"],
-            error_message: "ステータス",
-          },
-        ],
-        execution_timing: ["on_create", "on_update"],
-        judgment_criteria: {
-          allowed_values: ["pending", "approved", "rejected"],
-        },
-      },
-    ];
+  test('[normal] 営業システムのデータ形式が仕様と不一致の場合、必要な変換ルールが特定され、自動的に変換される', () => {
+    // ======== テストデータ準備 ========
+    // 営業システムから出力されたデータ形式（不一致パターン）
+    const inputDataFromSalesSystem = {
+      customerId: '12345',                    // 仕様: number, 入力: string
+      appointmentCount: '5',                  // 仕様: number, 入力: string
+      contractAmount: '1000000',              // 仕様: number (¥単位), 入力: string
+      serviceType: 'SERVICE_A',               // 仕様: enum / ローマ字小文字, 入力: スネークケース
+      activityDate: '2024-01-15',             // 仕様: ISO 8601 フル timestamp, 入力: yyyy-MM-dd のみ
+      customerFeedback: 'positive',           // 仕様: enum (1=positive, 2=neutral, 3=negative), 入力: 文字列
+      responseRate: '0.85',                   // 仕様: 0～1 範囲の number, 入力: string パーセンテージ表記
+    };
 
-    const result = generateQualityChecklistFromMetadata(input_metadata);
+    // 仕様スキーマ定義
+    const specificationSchema = {
+      customerId: { type: 'number', required: true, description: '顧客ID' },
+      appointmentCount: { type: 'number', required: true, description: 'アポ数' },
+      contractAmount: { type: 'number', required: true, unit: 'JPY', description: '契約金額' },
+      serviceType: { type: 'enum', enum: ['service_a', 'service_b', 'service_c'], description: 'サービス種別' },
+      activityDate: { type: 'timestamp', format: 'ISO8601', required: true, description: '営業活動日時' },
+      customerFeedback: { type: 'enum', enum: [1, 2, 3], enumMap: { positive: 1, neutral: 2, negative: 3 }, description: '顧客反応' },
+      responseRate: { type: 'number', min: 0, max: 1, description: '応答率（0～1）' },
+    };
 
-    expect(result).toBeDefined();
-    expect(result.checklist_id).toBeDefined();
-    expect(result.checklist_id).toMatch(/^checklist_/);
+    // ======== 実行 ========
+    const result = validateAndTransformSalesData(inputDataFromSalesSystem, specificationSchema);
 
-    expect(result.items).toBeDefined();
-    expect(Array.isArray(result.items)).toBe(true);
-    expect(result.items.length).toBe(7);
+    // ======== 検証: 不一致検出 ========
+    expect(result.isValid).toBe(false);
+    expect(result.mismatchesDetected).toBe(true);
+    expect(result.mismatchCount).toBe(7); // 全フィールドで不一致
 
-    const item_001_not_empty = result.items.find(
-      (item) => item.rule_id === "rule_001"
-    );
-    expect(item_001_not_empty).toBeDefined();
-    expect(item_001_not_empty.field_id).toBe("field_001");
-    expect(item_001_not_empty.field_name).toBe("customer_name");
-    expect(item_001_not_empty.rule_type).toBe("not_empty");
-    expect(item_001_not_empty.execution_timings).toEqual([
-      "on_create",
-      "on_update",
-    ]);
-    expect(item_001_not_empty.judgment_criteria.min_length).toBe(1);
-    expect(item_001_not_empty.judgment_criteria.max_length).toBe(100);
-    expect(item_001_not_empty.error_keyword).toBe("顧客名");
+    // ======== 検証: 変換ルール特定 ========
+    expect(result.transformationRules).toBeDefined();
+    expect(result.transformationRules.length).toBe(7);
 
-    const item_002_max_length = result.items.find(
-      (item) => item.rule_id === "rule_002"
-    );
-    expect(item_002_max_length).toBeDefined();
-    expect(item_002_max_length.field_id).toBe("field_001");
-    expect(item_002_max_length.rule_type).toBe("max_length");
-    expect(item_002_max_length.judgment_criteria.max_length).toBe(100);
+    // 変換ルール 1: customerId (string → number)
+    const ruleCustomerId = result.transformationRules.find((r: any) => r.fieldName === 'customerId');
+    expect(ruleCustomerId).toBeDefined();
+    expect(ruleCustomerId.sourceType).toBe('string');
+    expect(ruleCustomerId.targetType).toBe('number');
+    expect(ruleCustomerId.transformationLogic).toBe('parseInt');
+    expect(ruleCustomerId.severity).toBe('critical');
 
-    const item_003_date_format = result.items.find(
-      (item) => item.rule_id === "rule_003"
-    );
-    expect(item_003_date_format).toBeDefined();
-    expect(item_003_date_format.field_id).toBe("field_002");
-    expect(item_003_date_format.field_name).toBe("appointment_date");
-    expect(item_003_date_format.rule_type).toBe("date_format");
-    expect(item_003_date_format.execution_timings).toEqual([
-      "on_create",
-      "periodic",
-    ]);
-    expect(item_003_date_format.judgment_criteria.format).toBe("YYYY-MM-DD");
+    // 変換ルール 2: appointmentCount (string → number)
+    const ruleAppointmentCount = result.transformationRules.find((r: any) => r.fieldName === 'appointmentCount');
+    expect(ruleAppointmentCount).toBeDefined();
+    expect(ruleAppointmentCount.sourceType).toBe('string');
+    expect(ruleAppointmentCount.targetType).toBe('number');
+    expect(ruleAppointmentCount.transformationLogic).toBe('parseInt');
 
-    const item_004_date_range = result.items.find(
-      (item) => item.rule_id === "rule_004"
-    );
-    expect(item_004_date_range).toBeDefined();
-    expect(item_004_date_range.rule_type).toBe("date_range");
-    expect(item_004_date_range.judgment_criteria.min_date).toBe("2024-01-01");
-    expect(item_004_date_range.judgment_criteria.max_date).toBe("2024-12-31");
-    expect(item_004_date_range.judgment_criteria.reference_rule).toBe(
-      "current_fiscal_year"
-    );
+    // 変換ルール 3: contractAmount (string → number)
+    const ruleContractAmount = result.transformationRules.find((r: any) => r.fieldName === 'contractAmount');
+    expect(ruleContractAmount).toBeDefined();
+    expect(ruleContractAmount.sourceType).toBe('string');
+    expect(ruleContractAmount.targetType).toBe('number');
+    expect(ruleContractAmount.transformationLogic).toBe('parseFloat');
 
-    const item_005_numeric_range = result.items.find(
-      (item) => item.rule_id === "rule_005"
-    );
-    expect(item_005_numeric_range).toBeDefined();
-    expect(item_005_numeric_range.field_id).toBe("field_003");
-    expect(item_005_numeric_range.field_name).toBe("contract_amount");
-    expect(item_005_numeric_range.rule_type).toBe("numeric_range");
-    expect(item_005_numeric_range.judgment_criteria.min_value).toBe(0);
-    expect(item_005_numeric_range.judgment_criteria.max_value).toBe(10000000);
-    expect(item_005_numeric_range.judgment_criteria.decimal_places).toBe(2);
+    // 変換ルール 4: serviceType (SNAKE_CASE → lowercase with underscore)
+    const ruleServiceType = result.transformationRules.find((r: any) => r.fieldName === 'serviceType');
+    expect(ruleServiceType).toBeDefined();
+    expect(ruleServiceType.sourceType).toBe('string');
+    expect(ruleServiceType.targetType).toBe('string');
+    expect(ruleServiceType.transformationLogic).toBe('lowercase');
+    expect(ruleServiceType.fieldMapping).toEqual({
+      'SERVICE_A': 'service_a',
+      'SERVICE_B': 'service_b',
+      'SERVICE_C': 'service_c',
+    });
 
-    const item_006_not_negative = result.items.find(
-      (item) => item.rule_id === "rule_006"
-    );
-    expect(item_006_not_negative).toBeDefined();
-    expect(item_006_not_negative.rule_type).toBe("not_negative");
-    expect(item_006_not_negative.execution_timings).toEqual([
-      "on_create",
-      "on_update",
-    ]);
+    // 変換ルール 5: activityDate (yyyy-MM-dd → ISO 8601 timestamp)
+    const ruleActivityDate = result.transformationRules.find((r: any) => r.fieldName === 'activityDate');
+    expect(ruleActivityDate).toBeDefined();
+    expect(ruleActivityDate.sourceType).toBe('string');
+    expect(ruleActivityDate.targetType).toBe('string');
+    expect(ruleActivityDate.transformationLogic).toBe('normalizeTimestamp');
+    expect(ruleActivityDate.sourceFormat).toBe('yyyy-MM-dd');
+    expect(ruleActivityDate.targetFormat).toBe('ISO8601');
 
-    const item_007_enum = result.items.find(
-      (item) => item.rule_id === "rule_007"
-    );
-    expect(item_007_enum).toBeDefined();
-    expect(item_007_enum.field_id).toBe("field_004");
-    expect(item_007_enum.field_name).toBe("status");
-    expect(item_007_enum.rule_type).toBe("enum_value");
-    expect(item_007_enum.judgment_criteria.allowed_values).toEqual([
-      "pending",
-      "approved",
-      "rejected",
-    ]);
-    expect(item_007_enum.error_keyword).toBe("ステータス");
+    // 変換ルール 6: customerFeedback (string → enum code)
+    const ruleCustomerFeedback = result.transformationRules.find((r: any) => r.fieldName === 'customerFeedback');
+    expect(ruleCustomerFeedback).toBeDefined();
+    expect(ruleCustomerFeedback.sourceType).toBe('string');
+    expect(ruleCustomerFeedback.targetType).toBe('number');
+    expect(ruleCustomerFeedback.transformationLogic).toBe('enumMapping');
+    expect(ruleCustomerFeedback.enumMap).toEqual({
+      'positive': 1,
+      'neutral': 2,
+      'negative': 3,
+    });
 
-    expect(result.execution_order).toBeDefined();
-    expect(Array.isArray(result.execution_order)).toBe(true);
-    expect(result.execution_order.length).toBe(7);
+    // 変換ルール 7: responseRate (string percentage → number 0-1)
+    const ruleResponseRate = result.transformationRules.find((r: any) => r.fieldName === 'responseRate');
+    expect(ruleResponseRate).toBeDefined();
+    expect(ruleResponseRate.sourceType).toBe('string');
+    expect(ruleResponseRate.targetType).toBe('number');
+    expect(ruleResponseRate.transformationLogic).toBe('parseFloat');
+    expect(ruleResponseRate.normalization).toBe('rangeNormalization');
+    expect(ruleResponseRate.rangeMin).toBe(0);
+    expect(ruleResponseRate.rangeMax).toBe(1);
 
-    const on_create_items = result.execution_order.filter(
-      (order) => order.timing === "on_create"
-    );
-    expect(on_create_items.length).toBeGreaterThan(0);
-    expect(on_create_items[0].priority).toBeLessThanOrEqual(10);
+    // ======== 検証: 変換ルール適用前のコンテキスト ========
+    expect(result.transformationContext).toBeDefined();
+    expect(result.transformationContext.sourceSystemFormat).toBe('legacy_sales_system_v1');
+    expect(result.transformationContext.targetFormat).toBe('billing_standard_v2');
+    expect(result.transformationContext.requiresManualReview).toBe(false);
 
-    const periodic_items = result.execution_order.filter(
-      (order) => order.timing === "periodic"
-    );
-    expect(periodic_items.length).toBeGreaterThan(0);
+    // ======== 実行: 変換ルール適用 ========
+    expect(result.transformedData).toBeDefined();
 
-    expect(result.total_check_count).toBe(7);
-    expect(result.required_field_count).toBe(4);
-    expect(result.generation_timestamp).toBeDefined();
-    expect(result.generation_timestamp).toMatch(
-      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/
-    );
+    // ======== 検証: 変換後のデータ正確性 ========
+    const transformed = result.transformedData;
 
-    expect(result.items.every((item) => item.field_id)).toBe(true);
-    expect(result.items.every((item) => item.field_name)).toBe(true);
-    expect(result.items.every((item) => item.rule_id)).toBe(true);
-    expect(result.items.every((item) => item.rule_type)).toBe(true);
-    expect(result.items.every((item) => Array.isArray(item.execution_timings)))
-      .toBe(true);
-    expect(
-      result.items.every((item) => item.execution_timings.length > 0)
-    ).toBe(true);
-    expect(result.items.every((item) => item.judgment_criteria)).toBe(true);
-    expect(result.items.every((item) => typeof item.error_keyword === "string"))
-      .toBe(true);
+    // customerId: "12345" → 12345 (number)
+    expect(transformed.customerId).toBe(12345);
+    expect(typeof transformed.customerId).toBe('number');
 
-    const rule_ids = result.items.map((item) => item.rule_id);
-    const unique_rule_ids = new Set(rule_ids);
-    expect(unique_rule_ids.size).toBe(rule_ids.length);
+    // appointmentCount: "5" → 5 (number)
+    expect(transformed.appointmentCount).toBe(5);
+    expect(typeof transformed.appointmentCount).toBe('number');
+
+    // contractAmount: "1000000" → 1000000 (number)
+    expect(transformed.contractAmount).toBe(1000000);
+    expect(typeof transformed.contractAmount).toBe('number');
+
+    // serviceType: "SERVICE_A" → "service_a" (lowercase)
+    expect(transformed.serviceType).toBe('service_a');
+    expect(result.transformationRules.find((r: any) => r.fieldName === 'serviceType').appliedSuccessfully).toBe(true);
+
+    // activityDate: "2024-01-15" → "2024-01-15T00:00:00Z" (ISO 8601)
+    expect(transformed.activityDate).toBe('2024-01-15T00:00:00Z');
+    expect(transformed.activityDate).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+
+    // customerFeedback: "positive" → 1 (enum)
+    expect(transformed.customerFeedback).toBe(1);
+    expect(typeof transformed.customerFeedback).toBe('number');
+
+    // responseRate: "0.85" → 0.85 (number, within 0-1 range)
+    expect(transformed.responseRate).toBe(0.85);
+    expect(typeof transformed.responseRate).toBe('number');
+    expect(transformed.responseRate).toBeGreaterThanOrEqual(0);
+    expect(transformed.responseRate).toBeLessThanOrEqual(1);
+
+    // ======== 検証: 変換完了ステータス ========
+    expect(result.transformationStatus).toBe('completed_successfully');
+    expect(result.allTransformationsApplied).toBe(true);
+    expect(result.dataReadyForBillingProcess).toBe(true);
+
+    // ======== 検証: 品質メトリクス ========
+    expect(result.qualityMetrics).toBeDefined();
+    expect(result.qualityMetrics.transformationSuccessRate).toBe(1.0); // 7/7 成功
+    expect(result.qualityMetrics.fieldsTransformedCount).toBe(7);
+    expect(result.qualityMetrics.fieldsFailedCount).toBe(0);
+    expect(result.qualityMetrics.dataValidityScore).toBe(100);
+
+    // ======== 検証: 請求処理対応状況 ========
+    expect(result.readinessForDownstreamProcesses).toBeDefined();
+    expect(result.readinessForDownstreamProcesses.billingCalculationReady).toBe(true);
+    expect(result.readinessForDownstreamProcesses.reportGenerationReady).toBe(true);
+    expect(result.readinessForDownstreamProcesses.blockers).toEqual([]);
+
+    // ======== 検証: 監査ログ生成 ========
+    expect(result.auditLog).toBeDefined();
+    expect(result.auditLog.transformationStartTime).toBeDefined();
+    expect(result.auditLog.transformationEndTime).toBeDefined();
+    expect(result.auditLog.rulesAppliedCount).toBe(7);
+    expect(result.auditLog.dataChecksum).toBeDefined();
   });
 });

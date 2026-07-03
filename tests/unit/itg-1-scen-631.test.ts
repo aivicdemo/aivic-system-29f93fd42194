@@ -1,63 +1,81 @@
-import { describe, test, expect, beforeEach, afterEach } from "@jest/globals";
+import { describe, test, expect, beforeEach } from "@jest/globals";
+import {
+  notifyContractChangeToCustomer,
+  ContractChangeNotificationInput,
+  ContractChangeNotificationOutput,
+} from "../../src/logic/it-1-1-1";
 
-const fetchMock = require("jest-fetch-mock");
-fetchMock.enableMocks();
-
-import { searchSalesActivityData } from "../../src/logic/it-1781935279444-2-1-1";
-
-describe("営業活動データ検索・権限制御機能", () => {
-  beforeEach(() => {
-    fetchMock.resetMocks();
-  });
-
-  afterEach(() => {
-    fetchMock.resetMocks();
-  });
-
-  // SCEN-631: [error] 営業活動データ検索・権限制御機能 - 権限外の顧客データへのアクセス要求がエラーで拒否される
-  test("権限外の顧客データへのアクセス要求がHTTP 403エラーで拒否される", async () => {
-    const user_id = "user_dept_a_001";
-    const user_department = "department_a";
-    const unauthorized_customer_id = "customer_dept_b_001";
-    const search_period_start = "2024-01-01";
-    const search_period_end = "2024-01-31";
-    const access_timestamp = "2024-01-15T11:00:00Z";
-
-    const error_response = {
-      status: 403,
-      error_code: "FORBIDDEN_ACCESS",
-      error_message: "アクセス権限がありません",
-      details: {
-        requested_customer_id: unauthorized_customer_id,
-        user_department: user_department,
-        reason: "要求された顧客がユーザーの所属部門に割り当てられていません"
-      },
-      timestamp: access_timestamp
+describe("営業成果データの自動検証ルール定義と異常検出機能", () => {
+  // SCEN-631: [normal] 契約変更内容の自動通知機能 - 成果物納期が変更された際に顧客企業の営業責任者へメール通知が送信される
+  test("成果物納期が変更された際に顧客企業の営業責任者へメール通知が送信される", () => {
+    const contractChangeInput: ContractChangeNotificationInput = {
+      contract_id: "C-20240115-001",
+      customer_id: "CUST-A001",
+      customer_name: "顧客企業A",
+      customer_representative_email: "tanaka@customer-a.com",
+      customer_representative_name: "田中太郎",
+      change_type: "deliverable_deadline",
+      previous_deadline: "2024-03-31",
+      new_deadline: "2024-04-30",
+      change_date: "2024-01-15T09:30:00Z",
+      change_reason: "納期調整による顧客要望対応",
+      changed_by_user_id: "USR-OP001",
+      changed_by_user_name: "営業オペレーター太郎",
     };
 
-    fetchMock.mockResponseOnce(JSON.stringify(error_response), { status: 403 });
+    const result: ContractChangeNotificationOutput =
+      notifyContractChangeToCustomer(contractChangeInput);
 
-    const search_params = {
-      user_id: user_id,
-      user_department: user_department,
-      customer_id: unauthorized_customer_id,
-      period_start: search_period_start,
-      period_end: search_period_end
-    };
+    // 通知送信成功
+    expect(result.notification_sent).toBe(true);
 
-    try {
-      await searchSalesActivityData(search_params);
-      expect(true).toBe(false);
-    } catch (error: any) {
-      expect(error).toMatch(/アクセス権限/);
-    }
+    // 通知タイプが正確
+    expect(result.notification_type).toBe("deliverable_deadline_change");
 
-    const call_args = fetchMock.mock.calls[0];
-    expect(call_args).toBeDefined();
-    expect(call_args[1]?.method).toBe("POST");
+    // 送信対象メールアドレスが正確
+    expect(result.recipient_email).toBe("tanaka@customer-a.com");
 
-    const request_body = JSON.parse(call_args[1]?.body || "{}");
-    expect(request_body.customer_id).toBe(unauthorized_customer_id);
-    expect(request_body.user_department).toBe("department_a");
+    // メール本文に変更前の納期が含まれる
+    expect(result.email_body).toContain("2024-03-31");
+
+    // メール本文に変更後の納期が含まれる
+    expect(result.email_body).toContain("2024-04-30");
+
+    // メール本文に変更日時が含まれる
+    expect(result.email_body).toContain("2024-01-15");
+
+    // メール本文に変更者の情報が含まれる
+    expect(result.email_body).toContain("営業オペレーター太郎");
+
+    // メール本文に顧客企業名が含まれる
+    expect(result.email_body).toContain("顧客企業A");
+
+    // メール本文に営業責任者名が含まれる
+    expect(result.email_body).toContain("田中太郎");
+
+    // メール送信タイムスタンプが記録される
+    expect(result.notification_timestamp).toBeDefined();
+    expect(typeof result.notification_timestamp).toBe("string");
+
+    // 通知ID（追跡用）が生成される
+    expect(result.notification_id).toBeDefined();
+    expect(result.notification_id.length).toBeGreaterThan(0);
+
+    // 契約IDが通知に紐付けられる
+    expect(result.contract_id).toBe("C-20240115-001");
+
+    // 顧客IDが通知に紐付けられる
+    expect(result.customer_id).toBe("CUST-A001");
+
+    // メール送信ステータスが「送信済み」である
+    expect(result.email_status).toBe("sent");
+
+    // 再試行回数が0である（初回送信成功）
+    expect(result.retry_count).toBe(0);
+
+    // 通知記録が監査ログに記録可能な形式である
+    expect(result.audit_log_entry).toBeDefined();
+    expect(result.audit_log_entry.action).toBe("notify_contract_change");
+    expect(result.audit_log_entry.user_id).toBe("USR-OP001");
   });
 });

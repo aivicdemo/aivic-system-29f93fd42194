@@ -1,78 +1,65 @@
-import { describe, test, expect } from '@jest/globals';
-import { validateReportDataAgainstSource } from '../../src/logic/it-1781935279444-2-2-1';
+import { detectDeliverableChangeAndNotify } from "../../src/logic/it-1-2-1";
 
-describe('営業データの完全性・正確性を自動検証し、不足データ・誤りを検出・通知する機能', () => {
-  // SCEN-1198
-  test('レポート数値とソースデータ照合機能 - 許容誤差範囲内の数値差分は一致判定される', () => {
-    // ソースデータから計算した基準値
-    const sourceDataValue = 1000.0;
-    
-    // 許容誤差範囲内（±0.1%）の下限値を含むレポート数値
-    // 1000 * (1 - 0.001) = 999
-    const reportValueAtLowerBound = 999.0;
-    
-    // 許容誤差範囲内（±0.1%）の上限値を含むレポート数値
-    // 1000 * (1 + 0.001) = 1001
-    const reportValueAtUpperBound = 1001.0;
-    
-    // 許容誤差範囲内の中間値
-    // 1000 * 1.0005 = 1000.5
-    const reportValueInRange = 1000.5;
-    
-    // 下限値境界での差分検証
-    const resultAtLowerBound = validateReportDataAgainstSource(
-      sourceDataValue,
-      reportValueAtLowerBound,
-      0.001
+describe("営業成果データから請求対象項目を自動抽出し、顧客ごと・サービスごとの請求額を集計する機能", () => {
+  test("SCEN-1198: 成果物納期の変更が検知された場合、変更履歴と通知内容が正確に記録される", () => {
+    // テストデータ：初期状態の成果物納期
+    const initialDeliverableId = "DEL-001";
+    const customerId = "CUST-123";
+    const userId = "USER-456";
+    const initialDueDate = new Date("2024-03-15T00:00:00Z");
+    const newDueDate = new Date("2024-04-10T00:00:00Z");
+    const changeTimestamp = new Date("2024-03-14T09:30:00Z");
+
+    // 入力：成果物納期の変更情報
+    const input = {
+      deliverableId: initialDeliverableId,
+      customerId: customerId,
+      previousDueDate: initialDueDate,
+      newDueDate: newDueDate,
+      changedByUserId: userId,
+      changeDetectedAt: changeTimestamp,
+    };
+
+    // 関数実行：変更検知と通知生成
+    const result = detectDeliverableChangeAndNotify(input);
+
+    // 検証1：変更履歴が正確に記録されていることを確認
+    expect(result.changeHistory).toBeDefined();
+    expect(result.changeHistory.deliverableId).toBe(initialDeliverableId);
+    expect(result.changeHistory.customerId).toBe(customerId);
+    expect(result.changeHistory.previousValue).toEqual(initialDueDate);
+    expect(result.changeHistory.newValue).toEqual(newDueDate);
+    expect(result.changeHistory.changedByUserId).toBe(userId);
+    expect(result.changeHistory.changedAt).toEqual(changeTimestamp);
+
+    // 検証2：通知内容が生成されていることを確認
+    expect(result.notification).toBeDefined();
+    expect(result.notification.subject).toContain("成果物納期");
+    expect(result.notification.changeDetails.previousDueDate).toEqual(
+      initialDueDate
     );
-    expect(resultAtLowerBound.status).toBe('一致');
-    expect(resultAtLowerBound.differencePercentage).toBe(-0.1);
-    expect(resultAtLowerBound.isWithinTolerance).toBe(true);
-    expect(resultAtLowerBound.hasError).toBe(false);
-    
-    // 上限値境界での差分検証
-    const resultAtUpperBound = validateReportDataAgainstSource(
-      sourceDataValue,
-      reportValueAtUpperBound,
-      0.001
+    expect(result.notification.changeDetails.newDueDate).toEqual(newDueDate);
+    expect(result.notification.changeDetails.changedByUserId).toBe(userId);
+    expect(result.notification.generatedAt).toEqual(changeTimestamp);
+
+    // 検証3：変更履歴と通知内容の変更情報が一致していることを確認
+    expect(result.notification.changeDetails.previousDueDate).toEqual(
+      result.changeHistory.previousValue
     );
-    expect(resultAtUpperBound.status).toBe('一致');
-    expect(resultAtUpperBound.differencePercentage).toBe(0.1);
-    expect(resultAtUpperBound.isWithinTolerance).toBe(true);
-    expect(resultAtUpperBound.hasError).toBe(false);
-    
-    // 中間値での差分検証
-    const resultInRange = validateReportDataAgainstSource(
-      sourceDataValue,
-      reportValueInRange,
-      0.001
+    expect(result.notification.changeDetails.newDueDate).toEqual(
+      result.changeHistory.newValue
     );
-    expect(resultInRange.status).toBe('一致');
-    expect(resultInRange.differencePercentage).toBe(0.05);
-    expect(resultInRange.isWithinTolerance).toBe(true);
-    expect(resultInRange.hasError).toBe(false);
-    
-    // 許容誤差範囲外（超過）での差分検証
-    // 1000 * 1.002 = 1002 は ±0.1% を超過
-    const reportValueOutOfRange = 1002.0;
-    const resultOutOfRange = validateReportDataAgainstSource(
-      sourceDataValue,
-      reportValueOutOfRange,
-      0.001
+    expect(result.notification.changeDetails.changedByUserId).toBe(
+      result.changeHistory.changedByUserId
     );
-    expect(resultOutOfRange.status).toBe('不一致');
-    expect(resultOutOfRange.differencePercentage).toBe(0.2);
-    expect(resultOutOfRange.isWithinTolerance).toBe(false);
-    expect(resultOutOfRange.hasError).toBe(true);
-    
-    // ソースデータ値がゼロの場合の処理
-    const zeroSourceResult = validateReportDataAgainstSource(
-      0,
-      0,
-      0.001
+    expect(result.notification.generatedAt).toEqual(
+      result.changeHistory.changedAt
     );
-    expect(zeroSourceResult.status).toBe('一致');
-    expect(zeroSourceResult.isWithinTolerance).toBe(true);
-    expect(zeroSourceResult.hasError).toBe(false);
+
+    // 検証4：変更内容の詳細が通知に含まれていることを確認
+    expect(result.notification.subject).toBe("成果物納期が変更されました");
+    expect(result.notification.isChangeDetected).toBe(true);
+    expect(result.changeHistory.recordId).toBeDefined();
+    expect(typeof result.changeHistory.recordId).toBe("string");
   });
 });

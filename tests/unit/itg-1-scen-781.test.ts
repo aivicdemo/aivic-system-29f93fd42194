@@ -1,106 +1,78 @@
-import {
-  identifyLatestContractMaterial,
-} from "../../src/logic/it-1781935279444-1-1-1";
+import { markDocumentsForDisposal } from '../../src/logic/it-1781935279444-1-1-1';
 
-describe("営業データ項目のメタデータ管理機能", () => {
-  // SCEN-781
-  test("契約・提案資料の最新版自動特定機能 - 顧客IDと案件IDを指定して最新版資料を検索", () => {
-    // 契約・提案資料の最新版自動特定機能のテスト
-    // 顧客IDと案件IDを指定して最新版資料を検索し、
-    // 資料名・バージョン・有効期限・変更内容が正しく表示される
+describe('営業データ項目のメタデータ管理機能 - 旧版資料の廃棄対象自動マーク', () => {
+  test('SCEN-781: 複数の旧バージョンが存在する場合、すべてを廃棄対象にマーク', () => {
+    const document_id = 'doc_12345';
+    const latest_version = 'v2.0';
+    const latest_version_id = 'docver_v2_0';
+    const disposal_planned_date = '2026-02-28';
 
-    // 入力パラメータ
-    const customer_id = "CUST-20240115-001";
-    const project_id = "PROJ-20240115-001";
-
-    // モック対象: 複数バージョンが存在する契約資料
-    const mock_materials = [
+    const input_documents = [
       {
-        material_id: "MAT-001-v3",
-        material_name: "基本契約書（標準版）",
-        version: "3.0",
-        effective_from: "2024-02-01",
-        effective_to: "2025-01-31",
-        change_summary:
-          "消費税率改定対応、振込手数料条項追加、解約予告期間延長",
-        release_date: "2024-01-15T09:00:00Z",
-        is_latest: true,
+        document_version_id: 'docver_v1_0',
+        document_id: document_id,
+        version_number: 'v1.0',
+        created_at: '2024-01-10T09:00:00Z',
+        is_disposal_target: false,
+        disposal_planned_date: null,
       },
       {
-        material_id: "MAT-001-v2",
-        material_name: "基本契約書（標準版）",
-        version: "2.0",
-        effective_from: "2023-11-01",
-        effective_to: "2024-01-31",
-        change_summary: "条項文言修正、別紙様式更新",
-        release_date: "2023-10-20T14:30:00Z",
-        is_latest: false,
+        document_version_id: 'docver_v1_1',
+        document_id: document_id,
+        version_number: 'v1.1',
+        created_at: '2024-02-15T10:30:00Z',
+        is_disposal_target: false,
+        disposal_planned_date: null,
       },
       {
-        material_id: "MAT-001-v1",
-        material_name: "基本契約書（標準版）",
-        version: "1.0",
-        effective_from: "2023-01-01",
-        effective_to: "2023-10-31",
-        change_summary: "初版作成",
-        release_date: "2022-12-15T10:00:00Z",
-        is_latest: false,
+        document_version_id: 'docver_v1_2',
+        document_id: document_id,
+        version_number: 'v1.2',
+        created_at: '2024-03-20T14:00:00Z',
+        is_disposal_target: false,
+        disposal_planned_date: null,
+      },
+      {
+        document_version_id: latest_version_id,
+        document_id: document_id,
+        version_number: latest_version,
+        created_at: '2025-01-25T11:00:00Z',
+        is_disposal_target: false,
+        disposal_planned_date: null,
       },
     ];
 
-    // 関数を実行
-    const result = identifyLatestContractMaterial({
-      customer_id,
-      project_id,
-      materials: mock_materials,
+    const result = markDocumentsForDisposal({
+      documents: input_documents,
+      latest_version_id: latest_version_id,
+      disposal_planned_date: disposal_planned_date,
     });
 
-    // 期待結果検証
+    expect(result.total_documents).toBe(4);
+    expect(result.marked_for_disposal_count).toBe(3);
+    expect(result.latest_version_preserved).toBe(true);
 
-    // 1. 最新版資料が正確に特定されていること
-    expect(result.latest_material).toBeDefined();
-    expect(result.latest_material.material_id).toBe("MAT-001-v3");
+    expect(result.documents[0].is_disposal_target).toBe(true);
+    expect(result.documents[0].disposal_planned_date).toBe(disposal_planned_date);
 
-    // 2. 資料名が正しく表示されること
-    expect(result.latest_material.material_name).toBe("基本契約書（標準版）");
+    expect(result.documents[1].is_disposal_target).toBe(true);
+    expect(result.documents[1].disposal_planned_date).toBe(disposal_planned_date);
 
-    // 3. バージョンが正しく表示されること
-    expect(result.latest_material.version).toBe("3.0");
+    expect(result.documents[2].is_disposal_target).toBe(true);
+    expect(result.documents[2].disposal_planned_date).toBe(disposal_planned_date);
 
-    // 4. 有効期限が正しく表示されること
-    expect(result.latest_material.effective_from).toBe("2024-02-01");
-    expect(result.latest_material.effective_to).toBe("2025-01-31");
+    expect(result.documents[3].is_disposal_target).toBe(false);
+    expect(result.documents[3].disposal_planned_date).toBe(null);
 
-    // 5. 変更内容が正しく表示されること
-    expect(result.latest_material.change_summary).toBe(
-      "消費税率改定対応、振込手数料条項追加、解約予告期間延長"
-    );
+    const marked_versions = result.documents
+      .filter((doc) => doc.is_disposal_target === true)
+      .map((doc) => doc.version_number);
+    expect(marked_versions).toEqual(['v1.0', 'v1.1', 'v1.2']);
+    expect(marked_versions.length).toBe(3);
 
-    // 6. 複数バージョンが存在する場合、最新版が最上位に表示されていること
-    expect(result.all_versions).toHaveLength(3);
-    expect(result.all_versions[0].version).toBe("3.0");
-    expect(result.all_versions[0].is_latest).toBe(true);
-    expect(result.all_versions[1].version).toBe("2.0");
-    expect(result.all_versions[1].is_latest).toBe(false);
-    expect(result.all_versions[2].version).toBe("1.0");
-    expect(result.all_versions[2].is_latest).toBe(false);
-
-    // 7. リリース日時順にソートされていること
-    expect(result.all_versions[0].release_date).toBe("2024-01-15T09:00:00Z");
-    expect(result.all_versions[1].release_date).toBe("2023-10-20T14:30:00Z");
-    expect(result.all_versions[2].release_date).toBe("2022-12-15T10:00:00Z");
-
-    // 8. 検索結果が顧客IDと案件IDに紐付いていること
-    expect(result.customer_id).toBe("CUST-20240115-001");
-    expect(result.project_id).toBe("PROJ-20240115-001");
-
-    // 9. 有効期限内の判定が正しいこと（有効期限内 = true）
-    expect(result.is_effective).toBe(true);
-
-    // 10. 古いバージョンについても情報が保持されていること
-    const v2_material = result.all_versions.find((m) => m.version === "2.0");
-    expect(v2_material).toBeDefined();
-    expect(v2_material?.material_name).toBe("基本契約書（標準版）");
-    expect(v2_material?.change_summary).toBe("条項文言修正、別紙様式更新");
+    const all_disposal_dated = result.documents
+      .filter((doc) => doc.is_disposal_target === true)
+      .every((doc) => doc.disposal_planned_date === disposal_planned_date);
+    expect(all_disposal_dated).toBe(true);
   });
 });

@@ -1,139 +1,89 @@
-import { detectAndRegisterContractChange } from '../../src/logic/it-1-2-1';
+import { describe, test, expect, beforeEach } from "@jest/globals";
+import {
+  updateContractAndQueueBillingData,
+} from "../../src/logic/it-1-2-1";
 
-describe('営業成果データから請求対象項目を自動抽出し、顧客ごと・サービスごとの請求額を集計する機能', () => {
-  test('SCEN-1224: 成果物納期の手動変更が自動で検知され、契約変更管理システムに自動登録される', () => {
-    // 前提条件: 既存の営業案件と成果物納期情報が存在
-    const caseId = 'CASE-2024-001';
-    const customerId = 'CUST-ABC-001';
-    const serviceName = 'システム開発・保守サービス';
-    
-    // 変更前の納期: 2024-06-15
-    const deliveryDateBefore = new Date('2024-06-15T00:00:00Z');
-    
-    // 変更後の納期: 当日（2024-03-17）から30日後 = 2024-04-16
-    const today = new Date('2024-03-17T09:00:00Z');
-    const thirtyDaysLater = new Date('2024-04-16T09:00:00Z');
-    
-    // 変更を実行
-    const changeResult = detectAndRegisterContractChange({
-      caseId,
-      customerId,
-      serviceName,
-      changeType: 'delivery_date_update',
-      previousValue: deliveryDateBefore.toISOString(),
-      newValue: thirtyDaysLater.toISOString(),
-      changedAt: today,
-      changedByUserId: 'USER-REP-001',
-      changedByUserName: '営業代行企業 代表者',
+describe("営業成果データから請求対象項目を自動抽出し、顧客ごと・サービスごとの請求額を集計する機能", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  // SCEN-1224
+  test("契約・請求データリアルタイム更新機能 - 変更確定直後の即座の更新処理が正確に実行される（タイミング境界値）", () => {
+    const contractId = "CT-001";
+    const oldAmount = 100000;
+    const newAmount = 120000;
+    const changeConfirmedAt = new Date("2024-01-15T14:59:59.999Z");
+
+    const result = updateContractAndQueueBillingData({
+      contractId,
+      oldAmount,
+      newAmount,
+      changeConfirmedAt,
     });
 
-    // 成功判定: 変更が正常に検知・登録された
-    expect(changeResult.success).toBe(true);
-
-    // 登録されたレコードのID（連携確認用）
-    expect(changeResult.registeredContractChangeId).toBeDefined();
-    expect(typeof changeResult.registeredContractChangeId).toBe('string');
-
-    // 変更内容の正確性確認
-    expect(changeResult.registeredChange).toEqual({
-      contractChangeId: expect.any(String),
-      caseId,
-      customerId,
-      serviceName,
-      changeType: 'delivery_date_update',
-      previousDeliveryDate: deliveryDateBefore.toISOString(),
-      newDeliveryDate: thirtyDaysLater.toISOString(),
-      detectedAt: today.toISOString(),
-      changedByUserId: 'USER-REP-001',
-      changedByUserName: '営業代行企業 代表者',
+    // 1. 変更確定直後、リアルタイムデータベース更新ログに記録されることを確認
+    expect(result.realtimeDbUpdated).toBe(true);
+    expect(result.updateLogEntry).toMatchObject({
+      contractId: "CT-001",
+      oldAmount: 100000,
+      newAmount: 120000,
     });
 
-    // 契約変更管理システムへの自動登録が完了
-    expect(changeResult.registrationStatus).toBe('registered');
+    // 2. 請求データ自動生成キューに新規レコードが追加されたか確認
+    expect(result.billingQueueEntry).toBeDefined();
+    expect(result.billingQueueEntry?.contractId).toBe("CT-001");
+    expect(result.billingQueueEntry?.status).toBe("pending");
 
-    // タイムスタンプが正確に記録されていることを確認
-    const registeredTimestamp = new Date(changeResult.registeredChange.detectedAt);
-    expect(registeredTimestamp.getTime()).toBe(today.getTime());
+    // 3. キュー内の更新内容を検証
+    expect(result.billingQueueEntry?.changeDetails).toMatchObject({
+      contractId: "CT-001",
+      previousAmount: 100000,
+      currentAmount: 120000,
+      changeType: "amount_update",
+    });
 
-    // 変更前後の納期が正確に反映されていることを確認
-    const prevDate = new Date(changeResult.registeredChange.previousDeliveryDate);
-    const newDate = new Date(changeResult.registeredChange.newDeliveryDate);
-    const daysDelay = (newDate.getTime() - prevDate.getTime()) / (1000 * 60 * 60 * 24);
-    expect(daysDelay).toBe(-60); // 元々2024-06-15だったものを2024-04-16に前倒したため -60日
+    // 4. 更新タイムスタンプが確定時刻から2秒以内であることを確認
+    const updateTimestamp = new Date(result.billingQueueEntry?.timestamp!);
+    const timeDiffMs =
+      updateTimestamp.getTime() - changeConfirmedAt.getTime();
+    expect(timeDiffMs).toBeLessThanOrEqual(2000);
+    expect(timeDiffMs).toBeGreaterThanOrEqual(0);
 
-    // 変更内容が契約変更管理システムで検索可能な状態を確認
-    expect(changeResult.searchableInSystem).toBe(true);
+    // 5. 請求画面でフィルタリング（更新日時：直近1分）を適用し、該当レコードが表示されるか確認
+    const filterFromTime = new Date(
+      changeConfirmedAt.getTime() - 60 * 1000
+    ).toISOString();
+    const filterToTime = new Date(
+      changeConfirmedAt.getTime() + 60 * 1000
+    ).toISOString();
 
-    // エラーケース: 必須情報の欠落時
-    expect(() =>
-      detectAndRegisterContractChange({
-        caseId: '',
-        customerId,
-        serviceName,
-        changeType: 'delivery_date_update',
-        previousValue: deliveryDateBefore.toISOString(),
-        newValue: thirtyDaysLater.toISOString(),
-        changedAt: today,
-        changedByUserId: 'USER-REP-001',
-        changedByUserName: '営業代行企業 代表者',
-      })
-    ).toThrow(/案件ID/);
+    const filteredRecords = result.filteredBillingRecords?.filter(
+      (rec) =>
+        rec.timestamp >= filterFromTime && rec.timestamp <= filterToTime
+    );
 
-    expect(() =>
-      detectAndRegisterContractChange({
-        caseId,
-        customerId: '',
-        serviceName,
-        changeType: 'delivery_date_update',
-        previousValue: deliveryDateBefore.toISOString(),
-        newValue: thirtyDaysLater.toISOString(),
-        changedAt: today,
-        changedByUserId: 'USER-REP-001',
-        changedByUserName: '営業代行企業 代表者',
-      })
-    ).toThrow(/顧客ID/);
+    expect(filteredRecords).toBeDefined();
+    expect(filteredRecords!.length).toBeGreaterThan(0);
+    expect(filteredRecords![0]?.contractId).toBe("CT-001");
 
-    expect(() =>
-      detectAndRegisterContractChange({
-        caseId,
-        customerId,
-        serviceName,
-        changeType: 'delivery_date_update',
-        previousValue: deliveryDateBefore.toISOString(),
-        newValue: '',
-        changedAt: today,
-        changedByUserId: 'USER-REP-001',
-        changedByUserName: '営業代行企業 代表者',
-      })
-    ).toThrow(/新納期/);
+    // 6. 更新前後で契約マスタと請求テンプレートの整合性を確認
+    expect(result.contractMasterConsistency).toBe(true);
+    expect(result.billingTemplateConsistency).toBe(true);
+    expect(result.integrityCheck).toMatchObject({
+      contractAmount: 120000,
+      billingTemplateAmount: 120000,
+      reconciled: true,
+    });
 
-    expect(() =>
-      detectAndRegisterContractChange({
-        caseId,
-        customerId,
-        serviceName,
-        changeType: 'delivery_date_update',
-        previousValue: deliveryDateBefore.toISOString(),
-        newValue: thirtyDaysLater.toISOString(),
-        changedAt: today,
-        changedByUserId: '',
-        changedByUserName: '営業代行企業 代表者',
-      })
-    ).toThrow(/変更者/);
-
-    // 日付形式が無効な場合
-    expect(() =>
-      detectAndRegisterContractChange({
-        caseId,
-        customerId,
-        serviceName,
-        changeType: 'delivery_date_update',
-        previousValue: 'invalid-date',
-        newValue: thirtyDaysLater.toISOString(),
-        changedAt: today,
-        changedByUserId: 'USER-REP-001',
-        changedByUserName: '営業代行企業 代表者',
-      })
-    ).toThrow(/日付形式/);
+    // 7. 更新ログにタイムスタンプが正確に記録されていることを確認
+    expect(result.updateLogEntry?.timestamp).toBeDefined();
+    const logTimestamp = new Date(result.updateLogEntry!.timestamp);
+    expect(logTimestamp.getTime()).toBeLessThanOrEqual(
+      changeConfirmedAt.getTime() + 2000
+    );
+    expect(logTimestamp.getTime()).toBeGreaterThanOrEqual(
+      changeConfirmedAt.getTime()
+    );
   });
 });

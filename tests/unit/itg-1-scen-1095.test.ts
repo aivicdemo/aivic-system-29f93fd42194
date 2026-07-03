@@ -1,128 +1,228 @@
-import { validateBillingEntryInput } from '../../src/logic/it-1781935279444-2-1-1';
+import { validateSalesDataQuality } from "../../src/logic/it-1781935279444-2-2-1";
 
-describe('営業データ入力時の品質検証ルール定義・実行機能', () => {
-  // SCEN-1095: [error] 請求書作成入力値検証 - 請求対象項目の必須フィールドが空の場合、エラーを検出・通知すること
-  test('請求書作成時に必須フィールドが空の場合はバリデーションエラーを検出・通知し、請求書を作成しない', () => {
-    // 正常なデータセット（ベースライン）
-    const validBillingData = {
-      customerId: 'CUST-001',
-      customerName: '顧客A',
-      billingAmount: 100000,
-      billingDate: '2024-01-15',
-      serviceType: 'Service-X',
-      invoiceNumber: 'INV-2024-001',
+describe("バックオフィス業務データ品質検証機能", () => {
+  // SCEN-1095: [error] 必須営業データが欠落している場合に異常を検出してエスカレーションする
+  test("必須営業データ欠落時にエラーをスローし、エスカレーション処理が実行される", () => {
+    // 必須フィールドが揃ったテストデータ
+    const validSalesData = {
+      customerId: "CUST-001",
+      productCode: "PROD-A001",
+      amount: 50000,
+      transactionDate: "2024-01-15",
+      transactionId: "TRX-001",
+      quantity: 5,
+      unitPrice: 10000,
+      status: "pending",
     };
 
-    // 成功パターン：すべての必須フィールドが入力されている場合
-    const validResult = validateBillingEntryInput(validBillingData);
+    // 必須フィールド「customerId」を欠落させたテストデータ
+    const missingCustomerIdData = {
+      // customerId: 欠落
+      productCode: "PROD-A001",
+      amount: 50000,
+      transactionDate: "2024-01-15",
+      transactionId: "TRX-001",
+      quantity: 5,
+      unitPrice: 10000,
+      status: "pending",
+    };
+
+    // 必須フィールド「amount」を欠落させたテストデータ
+    const missingAmountData = {
+      customerId: "CUST-001",
+      productCode: "PROD-A001",
+      // amount: 欠落
+      transactionDate: "2024-01-15",
+      transactionId: "TRX-001",
+      quantity: 5,
+      unitPrice: 10000,
+      status: "pending",
+    };
+
+    // 必須フィールド「transactionDate」を欠落させたテストデータ
+    const missingTransactionDateData = {
+      customerId: "CUST-001",
+      productCode: "PROD-A001",
+      amount: 50000,
+      // transactionDate: 欠落
+      transactionId: "TRX-001",
+      quantity: 5,
+      unitPrice: 10000,
+      status: "pending",
+    };
+
+    // 複数必須フィールドを欠落させたテストデータ
+    const multipleFieldsMissingData = {
+      customerId: "CUST-001",
+      // productCode: 欠落
+      // amount: 欠落
+      transactionDate: "2024-01-15",
+      transactionId: "TRX-001",
+      quantity: 5,
+      unitPrice: 10000,
+      status: "pending",
+    };
+
+    // ハッピーパス: 必須フィールドが全て揃っている場合、検証成功
+    const validResult = validateSalesDataQuality(validSalesData);
     expect(validResult).toEqual({
       isValid: true,
+      status: "合格",
       errors: [],
+      escalationNeeded: false,
+      escalationStatus: null,
+      transactionId: "TRX-001",
+      customerId: "CUST-001",
     });
 
-    // エラーパターン1：顧客名が空の場合
-    const missingCustomerName = {
-      ...validBillingData,
-      customerName: '',
-    };
-    expect(() => validateBillingEntryInput(missingCustomerName)).toThrow(/顧客名/);
+    // エラーケース1: customerId 欠落時にエラーをスロー
+    expect(() => validateSalesDataQuality(missingCustomerIdData as any)).toThrow(
+      /customerId/
+    );
 
-    // エラーパターン2：請求金額が空（null）の場合
-    const missingBillingAmount = {
-      ...validBillingData,
-      billingAmount: null,
-    };
-    expect(() => validateBillingEntryInput(missingBillingAmount)).toThrow(/請求金額/);
+    // エラーケース2: amount 欠落時にエラーをスロー
+    expect(() => validateSalesDataQuality(missingAmountData as any)).toThrow(
+      /amount/
+    );
 
-    // エラーパターン3：請求日付が空の場合
-    const missingBillingDate = {
-      ...validBillingData,
-      billingDate: '',
-    };
-    expect(() => validateBillingEntryInput(missingBillingDate)).toThrow(/請求日/);
+    // エラーケース3: transactionDate 欠落時にエラーをスロー
+    expect(() => validateSalesDataQuality(missingTransactionDateData as any)).toThrow(
+      /transactionDate/
+    );
 
-    // エラーパターン4：顧客IDが空の場合
-    const missingCustomerId = {
-      ...validBillingData,
-      customerId: '',
-    };
-    expect(() => validateBillingEntryInput(missingCustomerId)).toThrow(/顧客ID/);
+    // エラーケース4: 複数フィールド欠落時にはスローされるが、メッセージは最初の欠落フィールドを示す
+    expect(() =>
+      validateSalesDataQuality(multipleFieldsMissingData as any)
+    ).toThrow(/productCode|amount/);
 
-    // エラーパターン5：サービス種別が空の場合
-    const missingServiceType = {
-      ...validBillingData,
-      serviceType: '',
-    };
-    expect(() => validateBillingEntryInput(missingServiceType)).toThrow(/サービス種別/);
+    // 欠落検出時のエスカレーション処理: transactionId 存在時
+    try {
+      validateSalesDataQuality(missingCustomerIdData as any);
+    } catch (error) {
+      // エラー発生時、エスカレーション記録が内部で自動生成される
+      // エラーメッセージが「必須項目」というキーワードを含むことを確認
+      expect((error as Error).message).toMatch(/必須項目|必須フィールド|欠落/);
+    }
 
-    // エラーパターン6：請求金額が0以下の場合（範囲チェック）
-    const invalidBillingAmount = {
-      ...validBillingData,
-      billingAmount: 0,
-    };
-    expect(() => validateBillingEntryInput(invalidBillingAmount)).toThrow(/金額/);
-
-    // エラーパターン7：請求日付の形式が不正な場合
-    const invalidBillingDateFormat = {
-      ...validBillingData,
-      billingDate: '2024/01/15', // ISO形式ではない
-    };
-    expect(() => validateBillingEntryInput(invalidBillingDateFormat)).toThrow(/日付形式/);
-
-    // エラーパターン8：複数の必須フィールドが空の場合
-    const multipleMissingFields = {
-      customerId: '',
-      customerName: '',
-      billingAmount: null,
-      billingDate: '',
-      serviceType: 'Service-X',
-      invoiceNumber: 'INV-2024-001',
-    };
-    expect(() => validateBillingEntryInput(multipleMissingFields)).toThrow(/必須項目/);
-
-    // 境界値テスト：金額が最小有効値の場合
-    const minValidAmount = {
-      ...validBillingData,
-      billingAmount: 1,
-    };
-    const minResult = validateBillingEntryInput(minValidAmount);
-    expect(minResult).toEqual({
-      isValid: true,
-      errors: [],
+    // エスカレーション処理確認: 欠落データを含むレコードのステータス更新シミュレーション
+    const escalationResult = validateSalesDataQuality({
+      ...validSalesData,
+      status: "escalation_needed", // エスカレーション対象ステータス
     });
 
-    // 境界値テスト：金額が大きい場合
-    const largeAmount = {
-      ...validBillingData,
-      billingAmount: 9999999,
-    };
-    const largeResult = validateBillingEntryInput(largeAmount);
-    expect(largeResult).toEqual({
-      isValid: true,
-      errors: [],
-    });
+    // エスカレーション処理が実行された場合、ステータスが「要確認」または「エスカレーション済」に更新される
+    if (escalationResult.escalationNeeded) {
+      expect(escalationResult.escalationStatus).toMatch(
+        /要確認|エスカレーション済|escalation_pending|escalated/
+      );
+    }
 
-    // 日付が有効な ISO 形式の場合
-    const validIsoDate = {
-      ...validBillingData,
-      billingDate: '2024-12-31',
+    // データ型不正検査: amount が数値でない場合
+    const invalidAmountTypeData = {
+      customerId: "CUST-001",
+      productCode: "PROD-A001",
+      amount: "invalid_number", // 数値ではなく文字列
+      transactionDate: "2024-01-15",
+      transactionId: "TRX-001",
+      quantity: 5,
+      unitPrice: 10000,
+      status: "pending",
     };
-    const dateResult = validateBillingEntryInput(validIsoDate);
-    expect(dateResult).toEqual({
-      isValid: true,
-      errors: [],
-    });
 
-    // 請求番号が空の場合（オプション項目の場合はスキップ）
-    // 注：invoiceNumber が必須と仮定した場合
-    const missingInvoiceNumber = {
-      customerId: 'CUST-001',
-      customerName: '顧客A',
-      billingAmount: 100000,
-      billingDate: '2024-01-15',
-      serviceType: 'Service-X',
-      invoiceNumber: '',
+    expect(() => validateSalesDataQuality(invalidAmountTypeData as any)).toThrow(
+      /amount|型|データ型/
+    );
+
+    // 金額が負の異常値の場合
+    const negativeAmountData = {
+      customerId: "CUST-001",
+      productCode: "PROD-A001",
+      amount: -50000, // 負の金額は異常
+      transactionDate: "2024-01-15",
+      transactionId: "TRX-001",
+      quantity: 5,
+      unitPrice: 10000,
+      status: "pending",
     };
-    expect(() => validateBillingEntryInput(missingInvoiceNumber)).toThrow(/請求番号/);
+
+    const negativeAmountResult = validateSalesDataQuality(negativeAmountData);
+    expect(negativeAmountResult.isValid).toBe(false);
+    expect(negativeAmountResult.status).toMatch(/不合格|エラー/);
+    expect(negativeAmountResult.errors.length).toBeGreaterThan(0);
+    expect(negativeAmountResult.errors[0]).toMatch(/金額|amount|異常値|範囲/);
+
+    // 日付形式が不正の場合
+    const invalidDateFormatData = {
+      customerId: "CUST-001",
+      productCode: "PROD-A001",
+      amount: 50000,
+      transactionDate: "2024/01/15", // YYYY-MM-DD形式ではない
+      transactionId: "TRX-001",
+      quantity: 5,
+      unitPrice: 10000,
+      status: "pending",
+    };
+
+    expect(() => validateSalesDataQuality(invalidDateFormatData as any)).toThrow(
+      /日付|date|形式/
+    );
+
+    // 量が0以下の異常値の場合
+    const invalidQuantityData = {
+      customerId: "CUST-001",
+      productCode: "PROD-A001",
+      amount: 50000,
+      transactionDate: "2024-01-15",
+      transactionId: "TRX-001",
+      quantity: 0, // 量が0は異常
+      unitPrice: 10000,
+      status: "pending",
+    };
+
+    const invalidQuantityResult = validateSalesDataQuality(invalidQuantityData);
+    expect(invalidQuantityResult.isValid).toBe(false);
+    expect(invalidQuantityResult.errors[0]).toMatch(/quantity|quantity|数量|異常値/);
+
+    // 複数の異常を同時に検出する場合
+    const multipleErrorsData = {
+      customerId: "CUST-001",
+      // productCode: 欠落
+      amount: -50000, // 負の金額
+      transactionDate: "invalid", // 不正な日付
+      transactionId: "TRX-001",
+      quantity: 0, // 不正な数量
+      unitPrice: 10000,
+      status: "pending",
+    };
+
+    const multipleErrorsResult = validateSalesDataQuality(
+      multipleErrorsData as any
+    );
+    expect(multipleErrorsResult.isValid).toBe(false);
+    expect(multipleErrorsResult.errors.length).toBeGreaterThanOrEqual(2);
+
+    // エスカレーション完了後のステータス確認: ステータスが「要確認」に更新される
+    const escalationCompletedData = {
+      customerId: "CUST-002",
+      productCode: "PROD-B002",
+      amount: 75000,
+      transactionDate: "2024-01-20",
+      transactionId: "TRX-002",
+      quantity: 3,
+      unitPrice: 25000,
+      status: "escalation_completed",
+    };
+
+    const escalationCompletedResult = validateSalesDataQuality(
+      escalationCompletedData
+    );
+    expect(escalationCompletedResult.status).toMatch(/合格|completed/);
+    expect(escalationCompletedResult.escalationStatus).toMatch(
+      /completed|完了|済/
+    );
+
+    // 管理者通知が記録されたことを確認: transactionId が通知に含まれる
+    expect(escalationCompletedResult.transactionId).toBe("TRX-002");
+    expect(escalationCompletedResult.customerId).toBe("CUST-002");
   });
 });

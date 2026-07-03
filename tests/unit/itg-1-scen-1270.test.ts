@@ -1,48 +1,86 @@
-import { describe, test, expect } from "@jest/globals";
-import { validateSalesDataCompleteness } from "../../src/logic/it-1781935279444-2-2-1";
+import { approveInvoiceInfo } from '../../src/logic/it-1-2-1';
 
-describe("営業データの完全性・正確性を自動検証し、不足データ・誤りを検出・通知する機能", () => {
+describe('営業成果データから請求対象項目を自動抽出し、顧客ごと・サービスごとの請求額を集計する機能', () => {
   // SCEN-1270
-  test("[normal] 月次営業データ完全性・正確性の自動検証 - 営業データの必須項目がすべて揃っている場合、検証完了として集計完了の可否を正しく判定する", () => {
-    // 必須項目がすべて含まれたテストデータを準備
-    const testData = {
-      sales_date: "2024-01-15",
-      customer_id: "CUST001",
-      product_code: "PROD-A",
-      sales_amount: 150000,
-      sales_rep_id: "REP001",
-      department_code: "DEPT-01",
+  test('[normal] 請求情報最終承認機能 - 承認済みステータスで会計システムへのAPI連携へ進む', async () => {
+    const fetchMock = require('jest-fetch-mock');
+    fetchMock.enableMocks();
+    fetchMock.resetMocks();
+
+    const input_invoice_info = {
+      invoice_id: 'INV-2024-001-CUST-A-SRV-X',
+      customer_id: 'CUST-A',
+      service_id: 'SRV-X',
+      billing_period_start: '2024-01-01',
+      billing_period_end: '2024-01-31',
+      base_amount: 100000,
+      discount_amount: 10000,
+      final_amount: 90000,
+      status: 'pending_approval',
+      approved_by: null,
+      approved_at: null,
+      api_sync_status: 'not_synced',
     };
 
-    // 営業データ検証モジュールに入力してデータ完全性チェックを実行
-    const result = validateSalesDataCompleteness(testData);
+    const expected_accounting_system_payload = {
+      invoice_id: 'INV-2024-001-CUST-A-SRV-X',
+      customer_id: 'CUST-A',
+      service_id: 'SRV-X',
+      billing_period_start: '2024-01-01',
+      billing_period_end: '2024-01-31',
+      final_amount: 90000,
+      sync_timestamp: expect.any(String),
+    };
 
-    // すべての必須項目が揃っていることを確認
-    expect(result).toEqual({
-      is_complete: true,
-      is_valid: true,
-      validation_complete: true,
-      aggregation_ready: true,
-      missing_fields: [],
-      error_messages: [],
+    fetchMock.mockResponseOnce(
+      JSON.stringify({
+        success: true,
+        sync_id: 'SYNC-2024-001-001',
+        received_at: '2024-02-05T09:00:00Z',
+      }),
+      { status: 200 }
+    );
+
+    const result = await approveInvoiceInfo({
+      invoice_id: input_invoice_info.invoice_id,
+      customer_id: input_invoice_info.customer_id,
+      service_id: input_invoice_info.service_id,
+      billing_period_start: input_invoice_info.billing_period_start,
+      billing_period_end: input_invoice_info.billing_period_end,
+      base_amount: input_invoice_info.base_amount,
+      discount_amount: input_invoice_info.discount_amount,
+      final_amount: input_invoice_info.final_amount,
+      current_status: input_invoice_info.status,
+      approved_by_user_id: 'USR-REP-001',
+      approval_timestamp: '2024-02-05T08:30:00Z',
     });
 
-    // 検証完了フラグがtrueとなっていることを確認
-    expect(result.validation_complete).toBe(true);
+    expect(result.status).toBe('approval_success');
+    expect(result.invoice_status).toBe('approved');
+    expect(result.approved_by_user_id).toBe('USR-REP-001');
+    expect(result.approved_at).toBe('2024-02-05T08:30:00Z');
 
-    // 集計完了判定がtrueで返却されることを確認
-    expect(result.aggregation_ready).toBe(true);
+    expect(result.api_sync_initiated).toBe(true);
+    expect(result.api_sync_status).toBe('syncing');
 
-    // 欠落フィールドがないことを確認
-    expect(result.missing_fields.length).toBe(0);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const call_args = fetchMock.mock.calls[0];
+    expect(call_args[0]).toBe('https://accounting-system.example.com/api/v1/invoices/sync');
+    expect(call_args[1].method).toBe('POST');
+    expect(call_args[1].headers['Content-Type']).toBe('application/json');
 
-    // エラーメッセージがないことを確認
-    expect(result.error_messages.length).toBe(0);
+    const sent_payload = JSON.parse(call_args[1].body);
+    expect(sent_payload.invoice_id).toBe(expected_accounting_system_payload.invoice_id);
+    expect(sent_payload.customer_id).toBe(expected_accounting_system_payload.customer_id);
+    expect(sent_payload.service_id).toBe(expected_accounting_system_payload.service_id);
+    expect(sent_payload.final_amount).toBe(expected_accounting_system_payload.final_amount);
+    expect(sent_payload.sync_timestamp).toBeDefined();
 
-    // 完全性チェック結果がtrueであることを確認
-    expect(result.is_complete).toBe(true);
+    expect(result.accounting_system_response.success).toBe(true);
+    expect(result.accounting_system_response.sync_id).toBe('SYNC-2024-001-001');
+    expect(result.accounting_system_response.received_at).toBe('2024-02-05T09:00:00Z');
 
-    // 妥当性チェック結果がtrueであることを確認
-    expect(result.is_valid).toBe(true);
+    expect(result.final_amount).toBe(90000);
+    expect(result.discount_amount).toBe(10000);
   });
 });

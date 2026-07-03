@@ -1,225 +1,119 @@
-import { validateBusinessRulesAndClassifyExceptions } from '../../src/logic/it-1781935279444-2-2-1';
+import { aggregateCustomerPerformanceMetrics } from "../../src/logic/it-1781935279444-1-1-1";
 
-describe('営業データ品質検証ルール定義・実行機能', () => {
-  // SCEN-1112
-  test('新入スタッフの実行結果から検出された例外ケースが優先度に基づいて正しく分類される', () => {
-    // テストデータ: 新入スタッフ用営業データサンプル
-    const staffExecutionResults = [
+describe("顧客別成果指標集計ロジック検証", () => {
+  test("SCEN-1112: アポ数がゼロの場合でも集計ロジックが正常に実行される", () => {
+    // テストデータ: アポ数が0の顧客レコード複数件
+    const testDataWithZeroAppointments = [
       {
-        recordId: 'SALES_001',
-        customerId: 'CUST_A',
-        appointmentCount: 5,
-        contractCount: 2,
-        serviceType: 'TYPE_A',
-        recordDate: '2024-01-15',
-        amount: 50000,
-        status: 'completed',
+        customerId: "CUST_001",
+        customerName: "顧客A",
+        serviceType: "SERVICE_BASIC",
+        appointmentCount: 0,
+        contractedCount: 0,
+        salesAmount: 0,
+        customerSatisfactionScore: 0,
+        month: "2024-01",
       },
       {
-        recordId: 'SALES_002',
-        customerId: 'CUST_B',
-        appointmentCount: -1, // 異常値: 負数
-        contractCount: 1,
-        serviceType: 'TYPE_B',
-        recordDate: '2024-01-16',
-        amount: 75000,
-        status: 'completed',
+        customerId: "CUST_002",
+        customerName: "顧客B",
+        serviceType: "SERVICE_PREMIUM",
+        appointmentCount: 0,
+        contractedCount: 2,
+        salesAmount: 150000,
+        customerSatisfactionScore: 85,
+        month: "2024-01",
       },
       {
-        recordId: 'SALES_003',
-        customerId: '', // 異常値: 必須項目欠落
-        appointmentCount: 3,
-        contractCount: 0,
-        serviceType: 'TYPE_A',
-        recordDate: '2024-01-17',
-        amount: 100000,
-        status: 'pending',
-      },
-      {
-        recordId: 'SALES_004',
-        customerId: 'CUST_C',
-        appointmentCount: 10,
-        contractCount: 15, // 異常値: 商談数より成約数が多い矛盾
-        serviceType: 'INVALID_TYPE', // 異常値: 無効なサービスタイプ
-        recordDate: '2024-01-18',
-        amount: 250000,
-        status: 'completed',
-      },
-      {
-        recordId: 'SALES_005',
-        customerId: 'CUST_D',
-        appointmentCount: 2,
-        contractCount: 1,
-        serviceType: 'TYPE_C',
-        recordDate: 'invalid-date', // 異常値: 不正な日付フォーマット
-        amount: -5000, // 異常値: 負の金額
-        status: 'completed',
+        customerId: "CUST_003",
+        customerName: "顧客C",
+        serviceType: "SERVICE_STANDARD",
+        appointmentCount: 0,
+        contractedCount: 5,
+        salesAmount: 300000,
+        customerSatisfactionScore: 92,
+        month: "2024-01",
       },
     ];
 
-    // 定義した検証ルール（優先度: 高、中、低）
-    const validationRules = [
-      {
-        ruleId: 'RULE_HIGH_01',
-        ruleName: '必須項目チェック',
-        priority: 'HIGH',
-        condition: 'customerId が空文字列である',
-        checkFunction: (record: any) => record.customerId === '',
-      },
-      {
-        ruleId: 'RULE_HIGH_02',
-        ruleName: '金額有効性チェック',
-        priority: 'HIGH',
-        condition: 'amount が負数である',
-        checkFunction: (record: any) => record.amount < 0,
-      },
-      {
-        ruleId: 'RULE_MID_01',
-        ruleName: '商談成約矛盾チェック',
-        priority: 'MEDIUM',
-        condition: 'contractCount が appointmentCount を超過している',
-        checkFunction: (record: any) =>
-          record.contractCount > record.appointmentCount,
-      },
-      {
-        ruleId: 'RULE_MID_02',
-        ruleName: '数値範囲チェック',
-        priority: 'MEDIUM',
-        condition: 'appointmentCount が負数である',
-        checkFunction: (record: any) => record.appointmentCount < 0,
-      },
-      {
-        ruleId: 'RULE_LOW_01',
-        ruleName: 'サービスタイプ妥当性チェック',
-        priority: 'LOW',
-        condition: 'serviceType が有効なマスタに存在しない',
-        checkFunction: (record: any) =>
-          !['TYPE_A', 'TYPE_B', 'TYPE_C'].includes(record.serviceType),
-      },
-      {
-        ruleId: 'RULE_LOW_02',
-        ruleName: '日付フォーマットチェック',
-        priority: 'LOW',
-        condition: 'recordDate が YYYY-MM-DD フォーマットに合致しない',
-        checkFunction: (record: any) =>
-          !/^\d{4}-\d{2}-\d{2}$/.test(record.recordDate),
-      },
-    ];
+    // 集計ロジックを実行
+    const result = aggregateCustomerPerformanceMetrics(testDataWithZeroAppointments);
 
-    // 関数実行
-    const result = validateBusinessRulesAndClassifyExceptions({
-      staffResults: staffExecutionResults,
-      rules: validationRules,
+    // 集計結果のオブジェクト構造が期待通りであることを検証
+    expect(result).toBeDefined();
+    expect(result).toHaveProperty("aggregationTimestamp");
+    expect(result).toHaveProperty("aggregatedMetrics");
+    expect(Array.isArray(result.aggregatedMetrics)).toBe(true);
+
+    // 集計結果の個数が入力と一致することを検証
+    expect(result.aggregatedMetrics).toHaveLength(3);
+
+    // アポ数=0の場合、他の指標値が正しく計算されていることを検証
+    const metric1 = result.aggregatedMetrics.find((m: any) => m.customerId === "CUST_001");
+    expect(metric1).toBeDefined();
+    expect(metric1.appointmentCount).toBe(0);
+    expect(metric1.contractedCount).toBe(0);
+    expect(metric1.salesAmount).toBe(0);
+    expect(metric1.customerSatisfactionScore).toBe(0);
+    expect(metric1.aggregatedTotal).toBe(0);
+    expect(typeof metric1.aggregatedTotal).toBe("number");
+
+    // 顧客Bの指標検証: アポ数0でも他の指標が集計される
+    const metric2 = result.aggregatedMetrics.find((m: any) => m.customerId === "CUST_002");
+    expect(metric2).toBeDefined();
+    expect(metric2.appointmentCount).toBe(0);
+    expect(metric2.contractedCount).toBe(2);
+    expect(metric2.salesAmount).toBe(150000);
+    expect(metric2.customerSatisfactionScore).toBe(85);
+    // 計算式: (契約数 * 50000) + (売上金額) + (満足度スコア * 100) = (2*50000) + 150000 + (85*100) = 100000 + 150000 + 8500 = 258500
+    expect(metric2.aggregatedTotal).toBe(258500);
+
+    // 顧客Cの指標検証: アポ数0でも複数の指標が正しく集計される
+    const metric3 = result.aggregatedMetrics.find((m: any) => m.customerId === "CUST_003");
+    expect(metric3).toBeDefined();
+    expect(metric3.appointmentCount).toBe(0);
+    expect(metric3.contractedCount).toBe(5);
+    expect(metric3.salesAmount).toBe(300000);
+    expect(metric3.customerSatisfactionScore).toBe(92);
+    // 計算式: (契約数 * 50000) + (売上金額) + (満足度スコア * 100) = (5*50000) + 300000 + (92*100) = 250000 + 300000 + 9200 = 559200
+    expect(metric3.aggregatedTotal).toBe(559200);
+
+    // すべての集計結果に必須フィールドが存在することを検証
+    result.aggregatedMetrics.forEach((metric: any) => {
+      expect(metric).toHaveProperty("customerId");
+      expect(metric).toHaveProperty("customerName");
+      expect(metric).toHaveProperty("serviceType");
+      expect(metric).toHaveProperty("appointmentCount");
+      expect(metric).toHaveProperty("contractedCount");
+      expect(metric).toHaveProperty("salesAmount");
+      expect(metric).toHaveProperty("customerSatisfactionScore");
+      expect(metric).toHaveProperty("aggregatedTotal");
+      expect(metric).toHaveProperty("month");
     });
 
-    // assertion 1: 検出された例外ケースの総件数を確認
-    expect(result.detectedExceptions.length).toBe(6);
-
-    // assertion 2: 優先度『高』に分類された例外ケースの件数
-    const highPriorityExceptions = result.detectedExceptions.filter(
-      (ex: any) => ex.priority === 'HIGH'
-    );
-    expect(highPriorityExceptions.length).toBe(2);
-    expect(highPriorityExceptions.map((ex: any) => ex.recordId).sort()).toEqual(
-      ['SALES_003', 'SALES_005']
-    );
-
-    // assertion 3: 優先度『中』に分類された例外ケースの件数
-    const mediumPriorityExceptions = result.detectedExceptions.filter(
-      (ex: any) => ex.priority === 'MEDIUM'
-    );
-    expect(mediumPriorityExceptions.length).toBe(2);
-    expect(mediumPriorityExceptions.map((ex: any) => ex.recordId).sort()).toEqual(
-      ['SALES_002', 'SALES_004']
-    );
-
-    // assertion 4: 優先度『低』に分類された例外ケースの件数
-    const lowPriorityExceptions = result.detectedExceptions.filter(
-      (ex: any) => ex.priority === 'LOW'
-    );
-    expect(lowPriorityExceptions.length).toBe(2);
-    expect(lowPriorityExceptions.map((ex: any) => ex.recordId).sort()).toEqual(
-      ['SALES_004', 'SALES_005']
-    );
-
-    // assertion 5: 優先度別ソート順序を確認
-    const priorityOrder = result.detectedExceptions.map(
-      (ex: any) => ex.priority
-    );
-    const expectedOrder = [
-      'HIGH',
-      'HIGH',
-      'MEDIUM',
-      'MEDIUM',
-      'LOW',
-      'LOW',
-    ];
-    expect(priorityOrder).toEqual(expectedOrder);
-
-    // assertion 6: 各例外ケースの詳細情報と対応するルール条件の合致を検証
-    const exception_SALES_003 = result.detectedExceptions.find(
-      (ex: any) => ex.recordId === 'SALES_003'
-    );
-    expect(exception_SALES_003.priority).toBe('HIGH');
-    expect(exception_SALES_003.violatedRuleIds).toContain('RULE_HIGH_01');
-    expect(exception_SALES_003.description).toMatch(/customerId/);
-
-    const exception_SALES_005 = result.detectedExceptions.find(
-      (ex: any) => ex.recordId === 'SALES_005'
-    );
-    expect(exception_SALES_005.priority).toBe('HIGH');
-    expect(exception_SALES_005.violatedRuleIds).toContain('RULE_HIGH_02');
-    expect(exception_SALES_005.violatedRuleIds).toContain('RULE_LOW_02');
-    expect(exception_SALES_005.description).toMatch(/amount|recordDate/);
-
-    const exception_SALES_002 = result.detectedExceptions.find(
-      (ex: any) => ex.recordId === 'SALES_002'
-    );
-    expect(exception_SALES_002.priority).toBe('MEDIUM');
-    expect(exception_SALES_002.violatedRuleIds).toContain('RULE_MID_02');
-
-    const exception_SALES_004 = result.detectedExceptions.find(
-      (ex: any) => ex.recordId === 'SALES_004'
-    );
-    expect(exception_SALES_004.priority).toBe('MEDIUM');
-    expect(exception_SALES_004.violatedRuleIds).toContain('RULE_MID_01');
-    expect(exception_SALES_004.violatedRuleIds).toContain('RULE_LOW_01');
-
-    // assertion 7: 優先度別の分類結果が後続処理へ正しく連携されるか確認
-    expect(result.priorityClassification.HIGH.count).toBe(2);
-    expect(result.priorityClassification.HIGH.recordIds).toEqual(
-      ['SALES_003', 'SALES_005']
-    );
-
-    expect(result.priorityClassification.MEDIUM.count).toBe(2);
-    expect(result.priorityClassification.MEDIUM.recordIds).toEqual(
-      ['SALES_002', 'SALES_004']
-    );
-
-    expect(result.priorityClassification.LOW.count).toBe(2);
-    expect(result.priorityClassification.LOW.recordIds).toEqual(
-      ['SALES_004', 'SALES_005']
-    );
-
-    // assertion 8: 処理結果が成功状態であることを確認
-    expect(result.processStatus).toBe('success');
-    expect(result.totalRecordsProcessed).toBe(5);
-    expect(result.totalExceptionsDetected).toBe(6);
-    expect(result.readyForBillingProcessing).toBe(false); // 例外があるため請求処理へは進まない
-
-    // assertion 9: 各例外ケースが複数ルール違反の場合、すべての違反ルール ID が記録されているか確認
-    const multiViolationExceptions = result.detectedExceptions.filter(
-      (ex: any) => ex.violatedRuleIds.length > 1
-    );
-    expect(multiViolationExceptions.length).toBe(2); // SALES_004 と SALES_005
-    multiViolationExceptions.forEach((ex: any) => {
-      expect(Array.isArray(ex.violatedRuleIds)).toBe(true);
-      expect(ex.violatedRuleIds.length).toBeGreaterThan(1);
+    // ゼロ除算エラーがないことを検証: aggregatedTotalは数値型で有限値
+    result.aggregatedMetrics.forEach((metric: any) => {
+      expect(typeof metric.aggregatedTotal).toBe("number");
+      expect(isFinite(metric.aggregatedTotal)).toBe(true);
+      expect(isNaN(metric.aggregatedTotal)).toBe(false);
     });
 
-    // assertion 10: 例外ケース分類結果のメタデータが完全であることを確認
-    expect(result.classificationTimestamp).toBeDefined();
-    expect(result.classificationTimestamp).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
-    expect(result.rulesetVersion).toBe(validationRules.length);
+    // 集計処理時刻がISO8601形式で記録されていることを検証
+    expect(typeof result.aggregationTimestamp).toBe("string");
+    expect(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(result.aggregationTimestamp)).toBe(true);
+
+    // 処理結果にエラーログが含まれていないことを検証
+    expect(result).toHaveProperty("errorLog");
+    expect(Array.isArray(result.errorLog)).toBe(true);
+    expect(result.errorLog).toHaveLength(0);
+
+    // 処理ステータスが成功（success）であることを確認
+    expect(result).toHaveProperty("status");
+    expect(result.status).toBe("success");
+
+    // 集計結果がデータベースに正常に保存されたことを示すIDが割り当てられていることを検証
+    expect(result).toHaveProperty("aggregationId");
+    expect(typeof result.aggregationId).toBe("string");
+    expect(result.aggregationId.length).toBeGreaterThan(0);
   });
 });

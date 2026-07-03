@@ -1,72 +1,69 @@
-import { monitorBillingTaskSLAOverdue } from "../../src/logic/it-1-br-1781935279444-1-2-1";
+import { describe, test, expect } from "@jest/globals";
+import { validateDataQualityStandard } from "../../src/logic/it-1781935279444-2-2-1";
 
-describe("月次請求業務SLA管理", () => {
-  test("SCEN-1003: 請求業務がSLA期限を超過した場合、代表に自動通知される", () => {
-    // Arrange: テスト環境で請求業務処理を開始し、SLA期限を現在時刻の2時間前に設定
-    const now = new Date("2024-11-15T14:00:00Z");
-    const slaDeadlineUtc = new Date("2024-11-15T12:00:00Z"); // 2時間前
-    const overageDurationMinutes = 120; // 2時間超過
-
-    const billingTaskInput = {
-      billingTaskId: "BT-202411-001",
-      representativeUserId: "REP-001",
-      representativeEmail: "rep@company.com",
-      billingStatus: "IN_PROGRESS",
-      slaDeadlineUtc: slaDeadlineUtc.toISOString(),
-      currentTimeUtc: now.toISOString(),
-      targetContractId: "CTR-2024-0050",
-      targetCustomerId: "CUST-00123",
-      customerName: "顧客企業A",
-      serviceType: "営業成果報酬",
+describe("営業データの完全性・正確性を自動検証し、不足データ・誤りを検出・通知する機能", () => {
+  // SCEN-1003: [edge] データ品質検証基準確認 - 値の範囲が最小値と最大値が同じ場合でも検証基準が正常に確定される
+  test("最小値と最大値が同じ値に設定された場合、検証基準が正常に確定され、指定値と完全一致するデータのみが妥当と判定される", () => {
+    // Setup: データ品質検証基準の確定パラメータ
+    const validationCriteria = {
+      itemId: "item_001",
+      itemName: "月次営業成果金額",
+      dataType: "number",
+      minValue: 100,
+      maxValue: 100,
+      isRequired: true,
     };
 
-    // 請求業務の処理ステータスを「進行中」に更新
-    // Act: システムのSLA監視スケジューラーを実行し、期限超過チェック処理をトリガー
-    const result = monitorBillingTaskSLAOverdue(billingTaskInput);
+    // 検証基準の確定を実行
+    const confirmedCriteria = validateDataQualityStandard(validationCriteria);
 
-    // Assert: SLA超過フラグが true に更新されたことを確認
-    expect(result.slaOverdueFlag).toBe(true);
-
-    // 通知ログテーブルに代表宛のアラート記録が作成されたことを確認
-    expect(result.notificationCreated).toBe(true);
-
-    // 通知メッセージに請求業務ID、超過時間、対象案件情報が含まれていることを検証
-    expect(result.notificationMessage).toContain("BT-202411-001");
-    expect(result.notificationMessage).toContain("120分");
-    expect(result.notificationMessage).toContain("顧客企業A");
-    expect(result.notificationMessage).toContain("CTR-2024-0050");
-
-    // 通知メッセージ構造体の詳細検証
-    expect(result.notification).toEqual({
-      notificationId: expect.any(String),
-      recipientUserId: "REP-001",
-      recipientEmail: "rep@company.com",
-      notificationType: "SLA_OVERDUE_ALERT",
-      billingTaskId: "BT-202411-001",
-      contractId: "CTR-2024-0050",
-      customerId: "CUST-00123",
-      customerName: "顧客企業A",
-      overageDurationMinutes: 120,
-      slaDeadlineUtc: "2024-11-15T12:00:00Z",
-      currentTimeUtc: "2024-11-15T14:00:00Z",
-      createdAtUtc: expect.any(String),
-      status: "SENT",
+    // 検証基準が正常に確定されたことを確認
+    expect(confirmedCriteria).toEqual({
+      itemId: "item_001",
+      itemName: "月次営業成果金額",
+      dataType: "number",
+      minValue: 100,
+      maxValue: 100,
+      isRequired: true,
+      status: "confirmed",
+      confirmedAt: expect.any(String),
     });
 
-    // 代表ユーザーのメール送受信ログまたは通知履歴に該当通知が記録されていることを確認
-    expect(result.auditLog).toEqual({
-      logId: expect.any(String),
-      userId: "REP-001",
-      action: "SLA_OVERDUE_NOTIFICATION_SENT",
-      billingTaskId: "BT-202411-001",
-      timestamp: expect.any(String),
-      ipAddress: expect.any(String),
+    // 確定された検証基準を使用して実際のデータ品質検証を実行
+    const testDataSet = [
+      { value: 99, expectedValid: false, description: "最小値より小さい" },
+      { value: 100, expectedValid: true, description: "最小値と最大値と完全一致" },
+      { value: 101, expectedValid: false, description: "最大値より大きい" },
+    ];
+
+    testDataSet.forEach((testCase) => {
+      const validationResult = {
+        itemId: "item_001",
+        inputValue: testCase.value,
+        isValid:
+          testCase.value >= confirmedCriteria.minValue &&
+          testCase.value <= confirmedCriteria.maxValue,
+        reason: testCase.description,
+      };
+
+      expect(validationResult.isValid).toBe(testCase.expectedValid);
+
+      // 検証ログに内容が記録されることを確認
+      if (!testCase.expectedValid) {
+        expect(
+          validationResult.inputValue <
+            confirmedCriteria.minValue ||
+            validationResult.inputValue > confirmedCriteria.maxValue
+        ).toBe(true);
+      }
     });
 
-    // 超過時間が正確に計算されていることを確認
-    expect(result.overageDurationMinutes).toBe(120);
+    // エッジケース: 最小値と最大値が同じ場合の動作確認
+    expect(confirmedCriteria.minValue).toBe(confirmedCriteria.maxValue);
+    expect(confirmedCriteria.minValue).toBe(100);
 
-    // 通知が実際に送信状態であることを確認
-    expect(result.notification.status).toBe("SENT");
+    // 確定ステータスが正しく設定されていることを確認
+    expect(confirmedCriteria.status).toBe("confirmed");
+    expect(confirmedCriteria.confirmedAt).toBeTruthy();
   });
 });

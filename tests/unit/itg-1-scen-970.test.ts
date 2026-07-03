@@ -1,77 +1,62 @@
-import { validateSalesDataCompleteness } from "../../src/logic/it-1781935279444-2-2-1";
+import { classifyCustomerInquiry, determineResponseRoute } from '../../src/logic/it-1781935279444-2-1-1';
 
-describe("営業データの完全性・正確性を自動検証し、不足データ・誤りを検出・通知する機能", () => {
-  test("SCEN-970: 営業データの正確性エラー（重複記録など）を検出して修正要件を通知する", () => {
-    // 重複する営業データ（同一顧客ID、取引日、金額）を2件以上登録
-    const duplicateSalesData = [
-      {
-        recordId: "REC-001",
-        customerId: "CUST-12345",
-        transactionDate: "2024-01-15",
-        amount: 50000,
-        serviceType: "service_a",
-        userId: "USER-001",
-      },
-      {
-        recordId: "REC-002",
-        customerId: "CUST-12345",
-        transactionDate: "2024-01-15",
-        amount: 50000,
-        serviceType: "service_a",
-        userId: "USER-001",
-      },
-      {
-        recordId: "REC-003",
-        customerId: "CUST-12345",
-        transactionDate: "2024-01-16",
-        amount: 75000,
-        serviceType: "service_b",
-        userId: "USER-002",
-      },
-    ];
+describe('顧客質問・異議の分類・対応ルート判定 - 境界線上の質問判定', () => {
+  // SCEN-970
+  test('顧客質問が調査と契約確認の境界線上にある場合、優先度ルールに従って唯一の対応ルートが決定される', () => {
+    // 前提: 調査と契約確認の両方の特性を持つ境界線上の質問データ
+    const boundaryInquiry = {
+      inquiry_id: 'INQ-2024-001',
+      customer_id: 'CUST-A001',
+      inquiry_content: '契約内容に記載されていない追加料金について、実際に請求されているが、これは契約上妥当なのか',
+      inquiry_date: new Date('2024-01-15T10:30:00Z'),
+      inquiry_type: 'billing_question',
+    };
 
-    // 請求額自動計算・検証機能を実行し、営業データの品質チェック処理を開始
-    const validationResult = validateSalesDataCompleteness(duplicateSalesData);
+    // ステップ 1: 質問分類エンジンを実行
+    const classification_result = classifyCustomerInquiry(boundaryInquiry);
 
-    // システムが重複記録を検出することを確認
-    expect(validationResult.hasErrors).toBe(true);
-    expect(validationResult.duplicateErrors).toBeDefined();
-    expect(validationResult.duplicateErrors.length).toBe(1);
+    // 分類ロジックが調査フラグと契約確認フラグの両方を検出したことを確認
+    expect(classification_result.requires_investigation).toBe(true);
+    expect(classification_result.requires_contract_review).toBe(true);
+    expect(classification_result.has_billing_discrepancy).toBe(true);
+    expect(classification_result.classification_confidence).toBeGreaterThanOrEqual(0.85);
 
-    // 検出された重複記録のエラー詳細情報を確認
-    const duplicateError = validationResult.duplicateErrors[0];
-    expect(duplicateError.errorType).toBe("重複記録");
-    expect(duplicateError.recordIds).toEqual(["REC-001", "REC-002"]);
-    expect(duplicateError.customerId).toBe("CUST-12345");
-    expect(duplicateError.transactionDate).toBe("2024-01-15");
-    expect(duplicateError.amount).toBe(50000);
-    expect(duplicateError.affectedBillingAmount).toBe(50000);
+    // ステップ 2: 対応ルート判定ロジックを実行
+    const route_decision = determineResponseRoute({
+      inquiry_id: boundaryInquiry.inquiry_id,
+      classification_result: classification_result,
+      priority_rule: 'investigation_first', // 優先度ルール: 調査を優先
+    });
 
-    // 修正要件通知機能が実行され、通知メッセージが生成されることを確認
-    expect(validationResult.notifications).toBeDefined();
-    expect(validationResult.notifications.length).toBeGreaterThan(0);
+    // ステップ 3: 優先度ルールに基づいて最適なルートが決定されたことを確認
+    expect(route_decision.primary_response_route).toBe('investigation');
+    expect(route_decision.secondary_response_route).toBe('contract_review');
+    expect(route_decision.route_count).toBe(1); // 単一ルートが確定
+    expect(route_decision.decision_is_final).toBe(true); // 決定が確定している
 
-    const notification = validationResult.notifications[0];
-    expect(notification.notificationType).toBe("重複記録検出");
-    expect(notification.recipientUserId).toBe("USER-001");
-    expect(notification.content).toContain("重複");
-    expect(notification.content).toContain("CUST-12345");
-    expect(notification.affectedBillingAmount).toBe(50000);
-    expect(notification.recommendedAction).toMatch(/修正/);
+    // ステップ 4: 決定されたルートが顧客質問の本質的な内容と一致していることを検証
+    expect(route_decision.route_justification).toContain('追加料金');
+    expect(route_decision.route_justification).toContain('請求');
+    expect(route_decision.aligned_with_inquiry_content).toBe(true);
 
-    // 通知履歴がシステムに記録され、修正ステータスが「未対応」で初期化されることを確認
-    expect(notification.notificationId).toBeDefined();
-    expect(notification.createdAt).toBeDefined();
-    expect(notification.correctionStatus).toBe("未対応");
-    expect(notification.isRecorded).toBe(true);
+    // ステップ 5: 複数ルートへの振り分けや判定曖昧性が発生していないことを確認
+    expect(route_decision.ambiguity_flag).toBe(false);
+    expect(route_decision.alternative_routes).toEqual([]);
+    expect(route_decision.route_confidence_score).toBe(0.92);
 
-    // 請求額の重複計算を防ぎ、正確な請求額が計算されていることを確認
-    expect(validationResult.correctBillingAmount).toBe(125000);
-    // REC-001, REC-003 のみをカウント（REC-002は重複）: 50000 + 75000 = 125000
+    // ステップ 6: 判定結果がログに記録され、監査証跡が残されていることを確認
+    expect(route_decision.audit_log).toBeDefined();
+    expect(route_decision.audit_log.decision_timestamp).toBe('2024-01-15T10:30:00Z');
+    expect(route_decision.audit_log.decision_timestamp).toMatch(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z/);
+    expect(route_decision.audit_log.classification_data).toBeDefined();
+    expect(route_decision.audit_log.classification_data.requires_investigation).toBe(true);
+    expect(route_decision.audit_log.classification_data.requires_contract_review).toBe(true);
+    expect(route_decision.audit_log.decision_rationale).toContain('priority_rule');
+    expect(route_decision.audit_log.traceable).toBe(true);
 
-    // データ品質エラーの追跡が可能な状態であることを確認
-    expect(validationResult.errorTrackingId).toBeDefined();
-    expect(validationResult.errorLog).toBeDefined();
-    expect(validationResult.errorLog.length).toBeGreaterThan(0);
+    // ステップ 7: 判定結果の整合性を総合確認
+    expect(route_decision.inquiry_id).toBe('INQ-2024-001');
+    expect(route_decision.customer_id).toBe('CUST-A001');
+    expect(route_decision.is_valid_decision).toBe(true);
   });
 });

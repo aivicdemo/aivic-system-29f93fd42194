@@ -1,81 +1,77 @@
-import { describe, it, expect, beforeEach, afterEach } from '@jest/globals';
-import { validateSalesDataCompleteness } from '../../src/logic/it-1781935279444-2-2-1';
+import { validateSalesDataForReporting } from '../../src/logic/it-1781935279444-2-2-1';
 
-describe('月次レポート生成前の最終検証機能', () => {
-  // SCEN-729: [normal] 月次レポート生成前の最終検証機能 - 確定済みデータの完全性・正確性を検証し、不備がない場合にレポート生成可を判定する
-
-  it('確定済みの営業データ100件の完全性・正確性を検証し、不備なしでレポート生成可を判定する', () => {
-    // テストデータベース: 確定済みの営業データ100件を準備
-    const salesDataRecords = Array.from({ length: 100 }, (_, index) => ({
-      recordId: `REC-${String(index + 1).padStart(3, '0')}`,
-      customerId: `CUST-${String((index % 10) + 1).padStart(3, '0')}`,
-      amount: 10000 + index * 100,
-      transactionDate: new Date('2024-01-15').toISOString(),
-      productCode: `PROD-${String((index % 5) + 1).padStart(2, '0')}`,
+describe('営業データ最終検証・レポート生成可否判定機能', () => {
+  test('SCEN-729: 確定済みデータに複数の欠落項目が検出され、修正指示が発行される', () => {
+    // 入力: 確定済みステータスのデータレコード（複数の欠落項目を含む）
+    const input_sales_data = {
+      record_id: 'REC-20240125-001',
+      customer_id: 'CUST-ABC123',
+      service_id: 'SVC-SALES001',
       status: 'confirmed',
-    }));
+      // 必須項目の欠落
+      appointment_count: undefined, // 欠落: アポ数
+      contract_count: undefined,    // 欠落: 成約数
+      contact_date: '2024-01-15',
+      feedback_type: '', // 欠落: 顧客反応タイプ
+      sales_amount: 150000,
+      comments: 'test data',
+      created_at: '2024-01-15T09:00:00Z',
+      created_by: 'SALES-001'
+    };
 
-    // 各データレコードの必須フィールド（顧客ID、金額、日付、商品コード）が全て入力されていることを確認
-    salesDataRecords.forEach((record) => {
-      expect(record.customerId).not.toBeNull();
-      expect(record.customerId).not.toBe('');
-      expect(record.amount).not.toBeNull();
-      expect(typeof record.amount).toBe('number');
-      expect(record.transactionDate).not.toBeNull();
-      expect(record.transactionDate).not.toBe('');
-      expect(record.productCode).not.toBeNull();
-      expect(record.productCode).not.toBe('');
-    });
+    // 実行
+    const result = validateSalesDataForReporting(input_sales_data);
 
-    // 月次レポート生成前の最終検証機能を実行
-    const validationResult = validateSalesDataCompleteness({
-      salesData: salesDataRecords,
-      validationDate: new Date('2024-01-31').toISOString(),
-      batchId: 'BATCH-2024-01',
-    });
+    // 期待結果: 検証失敗、複数の欠落項目を検出
+    expect(result.is_valid).toBe(false);
+    expect(result.status).toBe('validation_failed');
 
-    // データ完全性チェック（NULL値、空文字列がないか）を実行
-    expect(validationResult.completenessCheck).toBeDefined();
-    expect(validationResult.completenessCheck.nullValueCount).toBe(0);
-    expect(validationResult.completenessCheck.emptyStringCount).toBe(0);
-    expect(validationResult.completenessCheck.missingFieldCount).toBe(0);
+    // 欠落項目の数（3項目）
+    expect(result.missing_fields.length).toBe(3);
+    expect(result.missing_fields).toContain('appointment_count');
+    expect(result.missing_fields).toContain('contract_count');
+    expect(result.missing_fields).toContain('feedback_type');
 
-    // データ正確性チェック（金額の妥当性、日付形式の正確性、顧客ID有効性）を実行
-    expect(validationResult.accuracyCheck).toBeDefined();
-    expect(validationResult.accuracyCheck.invalidAmountCount).toBe(0);
-    expect(validationResult.accuracyCheck.invalidDateFormatCount).toBe(0);
-    expect(validationResult.accuracyCheck.invalidCustomerIdCount).toBe(0);
-    expect(validationResult.accuracyCheck.invalidProductCodeCount).toBe(0);
+    // エラーメッセージが生成されていること
+    expect(result.error_message).toMatch(/欠落/);
+    expect(result.error_message).toMatch(/修正/);
 
-    // チェック結果のサマリーレポートを取得
-    expect(validationResult.summary).toBeDefined();
+    // 修正指示レポートが生成されていること
+    expect(result.correction_report).toBeDefined();
+    expect(result.correction_report.missing_items_count).toBe(3);
+    expect(result.correction_report.missing_items_detail).toBeDefined();
+    expect(result.correction_report.missing_items_detail.length).toBe(3);
 
-    // 不備件数が0件であることを確認
-    const totalDefectCount =
-      validationResult.completenessCheck.nullValueCount +
-      validationResult.completenessCheck.emptyStringCount +
-      validationResult.completenessCheck.missingFieldCount +
-      validationResult.accuracyCheck.invalidAmountCount +
-      validationResult.accuracyCheck.invalidDateFormatCount +
-      validationResult.accuracyCheck.invalidCustomerIdCount +
-      validationResult.accuracyCheck.invalidProductCodeCount;
+    // 修正指示の詳細内容を検証
+    const missing_items_detail = result.correction_report.missing_items_detail;
+    const appointment_issue = missing_items_detail.find((item: any) => item.field_name === 'appointment_count');
+    expect(appointment_issue).toBeDefined();
+    expect(appointment_issue.field_label).toBe('アポ数');
+    expect(appointment_issue.requirement_type).toBe('required');
 
-    expect(totalDefectCount).toBe(0);
+    const contract_issue = missing_items_detail.find((item: any) => item.field_name === 'contract_count');
+    expect(contract_issue).toBeDefined();
+    expect(contract_issue.field_label).toBe('成約数');
 
-    // レポート生成可否の判定結果を確認
-    expect(validationResult.canGenerateReport).toBe(true);
-    expect(validationResult.reportGenerationApprovalStatus).toBe('approved');
+    const feedback_issue = missing_items_detail.find((item: any) => item.field_name === 'feedback_type');
+    expect(feedback_issue).toBeDefined();
+    expect(feedback_issue.field_label).toBe('顧客反応タイプ');
 
-    // システムログにレポート生成許可のステータスが記録されていることを確認
-    expect(validationResult.auditLog).toBeDefined();
-    expect(validationResult.auditLog.length).toBeGreaterThan(0);
-    const approvalLog = validationResult.auditLog.find(
-      (log) => log.eventType === 'report_generation_approval'
-    );
-    expect(approvalLog).toBeDefined();
-    expect(approvalLog?.status).toBe('approved');
-    expect(approvalLog?.timestamp).toBeDefined();
-    expect(approvalLog?.approvedRecordCount).toBe(100);
-    expect(approvalLog?.defectRecordCount).toBe(0);
+    // 修正対象者・期限情報が含まれていること
+    expect(result.correction_report.assignee_id).toBeDefined();
+    expect(result.correction_report.assignee_id).toBe('SALES-001');
+    expect(result.correction_report.deadline).toBeDefined();
+
+    // 修正指示の発行状態
+    expect(result.correction_report.issued).toBe(true);
+    expect(result.correction_report.issued_at).toBeDefined();
+
+    // システムログ記録の確認: レポート生成対象外に分類
+    expect(result.report_eligible).toBe(false);
+    expect(result.reason_for_exclusion).toMatch(/欠落/);
+
+    // 最終確定ステータスが保留中であること
+    expect(result.finalization_status).toBe('pending_correction');
+    expect(result.can_generate_report).toBe(false);
   });
 });

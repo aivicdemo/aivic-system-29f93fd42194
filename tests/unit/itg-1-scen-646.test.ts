@@ -1,51 +1,112 @@
-import { describe, test, expect } from '@jest/globals';
-import { validateReportGenerationParameters } from '../../src/logic/it-1781935279444-1-1-1';
+import { detectAnomaliesAndGenerateCorrectionInstructions } from '../../src/logic/it-1781935279444-2-1-1';
 
-describe('営業データ項目メタデータ管理 - レポート生成パラメータ検証', () => {
-  test('SCEN-646: 契約期間開始日と終了日が同一日の場合、境界値として正しく検証される', () => {
-    // Arrange: 契約開始日と終了日が同一日付（2024年1月15日）のパラメータを設定
-    const same_date = '2024-01-15';
-    const report_params = {
-      contract_start_date: same_date,
-      contract_end_date: same_date,
-      customer_id: 'CUST_001',
-      service_id: 'SVC_001',
-      report_template_id: 'TPL_MONTHLY_001',
-      include_optional_fields: false,
-      calculation_logic_version: '1.0'
+describe('営業データの異常値検出・補正指示生成機能', () => {
+  // SCEN-646
+  test('営業データ内の異常値と漏れを検出し、補正指示が自動生成される', () => {
+    // 意図的に異常値と漏れを含むテストデータ
+    const salesData = {
+      customerId: 'C001',
+      contactDate: '2024-13-45', // 無効な日付形式
+      appointmentCount: 5,
+      contractCount: -2, // 負の数
+      revenue: -50000, // 負の金額
+      serviceType: '', // 必須項目の漏れ
+      customerResponse: 'positive',
+      notes: null, // 必須項目の漏れ
     };
 
-    // Act: レポート生成パラメータの検証を実行
-    const validation_result = validateReportGenerationParameters(report_params);
+    // データ検証機能を実行
+    const result = detectAnomaliesAndGenerateCorrectionInstructions(salesData);
 
-    // Assert: バリデーション成功を確認
-    expect(validation_result.is_valid).toBe(true);
-    expect(validation_result.error_messages).toEqual([]);
-    expect(validation_result.error_count).toBe(0);
+    // 異常値が検出されたことを確認
+    expect(result.hasAnomalies).toBe(true);
 
-    // Assert: パラメータが正常に受け入れられていることを確認
-    expect(validation_result.accepted_parameters).toBeDefined();
-    expect(validation_result.accepted_parameters.contract_start_date).toBe('2024-01-15');
-    expect(validation_result.accepted_parameters.contract_end_date).toBe('2024-01-15');
+    // 検出された異常の総数を確認
+    expect(result.detectedIssues.length).toBe(5);
 
-    // Assert: 対象期間が0日間として正常に処理されていることを確認
-    expect(validation_result.period_days).toBe(0);
-    expect(validation_result.period_is_valid).toBe(true);
+    // 異常値の詳細情報が含まれていることを確認
+    const contactDateIssue = result.detectedIssues.find(
+      (issue: any) => issue.fieldName === 'contactDate'
+    );
+    expect(contactDateIssue).toBeDefined();
+    expect(contactDateIssue.issueType).toBe('invalid_format');
+    expect(contactDateIssue.currentValue).toBe('2024-13-45');
+    expect(contactDateIssue.recommendedValue).toMatch(/YYYY-MM-DD/);
 
-    // Assert: データベースに保存されるパラメータが正確に記録されていることを確認
-    expect(validation_result.saved_parameters).toBeDefined();
-    expect(validation_result.saved_parameters.contract_start_date).toBe('2024-01-15');
-    expect(validation_result.saved_parameters.contract_end_date).toBe('2024-01-15');
-    expect(validation_result.saved_parameters.customer_id).toBe('CUST_001');
-    expect(validation_result.saved_parameters.service_id).toBe('SVC_001');
-    expect(validation_result.saved_parameters.report_template_id).toBe('TPL_MONTHLY_001');
+    // 負の契約数の異常を確認
+    const contractCountIssue = result.detectedIssues.find(
+      (issue: any) => issue.fieldName === 'contractCount'
+    );
+    expect(contractCountIssue).toBeDefined();
+    expect(contractCountIssue.issueType).toBe('negative_value');
+    expect(contractCountIssue.currentValue).toBe(-2);
+    expect(contractCountIssue.recommendedValue).toBe(0);
 
-    // Assert: レポート生成が正常に処理されることを確認
-    expect(validation_result.report_generation_enabled).toBe(true);
-    expect(validation_result.same_date_boundary_recognized).toBe(true);
+    // 負の金額の異常を確認
+    const revenueIssue = result.detectedIssues.find(
+      (issue: any) => issue.fieldName === 'revenue'
+    );
+    expect(revenueIssue).toBeDefined();
+    expect(revenueIssue.issueType).toBe('negative_value');
+    expect(revenueIssue.currentValue).toBe(-50000);
+    expect(revenueIssue.recommendedValue).toBeGreaterThanOrEqual(0);
 
-    // Assert: タイムスタンプが記録されていることを確認
-    expect(validation_result.validation_timestamp).toBeDefined();
-    expect(typeof validation_result.validation_timestamp).toBe('string');
+    // 漏れた項目（serviceType）の異常を確認
+    const serviceTypeIssue = result.detectedIssues.find(
+      (issue: any) => issue.fieldName === 'serviceType'
+    );
+    expect(serviceTypeIssue).toBeDefined();
+    expect(serviceTypeIssue.issueType).toBe('missing_value');
+    expect(serviceTypeIssue.currentValue).toBe('');
+
+    // 漏れた項目（notes）の異常を確認
+    const notesIssue = result.detectedIssues.find(
+      (issue: any) => issue.fieldName === 'notes'
+    );
+    expect(notesIssue).toBeDefined();
+    expect(notesIssue.issueType).toBe('missing_value');
+    expect(notesIssue.currentValue).toBeNull();
+
+    // 生成された補正指示を確認
+    expect(result.correctionInstructions).toBeDefined();
+    expect(result.correctionInstructions.length).toBeGreaterThan(0);
+
+    // 補正指示に詳細情報が含まれていることを確認
+    const instruction = result.correctionInstructions[0];
+    expect(instruction.instructionId).toBeDefined();
+    expect(instruction.fieldName).toBeDefined();
+    expect(instruction.issueDescription).toBeDefined();
+    expect(instruction.correctionAction).toBeDefined();
+    expect(instruction.suggestedValue).toBeDefined();
+    expect(instruction.priority).toMatch(/high|medium|low/);
+
+    // 補正指示のステータスが「未対応」であることを確認
+    expect(instruction.status).toBe('pending');
+
+    // 各補正指示に対応期限が設定されていることを確認
+    expect(instruction.dueDate).toBeDefined();
+    const dueDate = new Date(instruction.dueDate);
+    expect(dueDate.getTime()).toBeGreaterThan(new Date('2024-01-01').getTime());
+
+    // 補正指示が優先度に基づいて整理されていることを確認
+    const highPriorityCount = result.correctionInstructions.filter(
+      (instr: any) => instr.priority === 'high'
+    ).length;
+    expect(highPriorityCount).toBeGreaterThan(0);
+
+    // 生成された補正指示の総数が異常の総数と対応していることを確認
+    expect(result.correctionInstructions.length).toBe(result.detectedIssues.length);
+
+    // 補正指示の自動生成タイムスタンプが記録されていることを確認
+    expect(result.generatedAt).toBeDefined();
+    expect(new Date(result.generatedAt).getTime()).toBeLessThanOrEqual(
+      new Date().getTime()
+    );
+
+    // システム全体の検証結果サマリーを確認
+    expect(result.summary).toBeDefined();
+    expect(result.summary.totalIssues).toBe(5);
+    expect(result.summary.criticalIssues).toBeGreaterThanOrEqual(0);
+    expect(result.summary.warningIssues).toBeGreaterThanOrEqual(0);
   });
 });

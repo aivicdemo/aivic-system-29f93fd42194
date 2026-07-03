@@ -1,71 +1,76 @@
-import { initializeMonthlyBillingProcess } from '../../src/logic/it-1-br-1781935279444-1-2-1';
+import { describe, test, expect } from "@jest/globals";
+import {
+  executeValidationApproval,
+} from "../../src/logic/it-1781935279444-2-2-1";
 
-describe('月次サマリーテンプレートの定義・管理機能', () => {
-  test('SCEN-1004: 月次請求業務SLA管理 - トリガー日の午前0時時点で請求業務が自動開始される', () => {
-    // トリガー日: 2024-01-25（月次締め日）
-    const trigger_date = new Date('2024-01-25T00:00:00Z');
-    const before_trigger = new Date('2024-01-24T23:59:59Z');
+describe("営業データ品質検証レポート - 検証結果承認判定", () => {
+  // SCEN-1004: [normal] 検証結果レポート確認・承認判定 - 検証結果レポートが正常かつ完全である場合に承認判定が正確に実行される
+  test("正常かつ完全な検証結果レポートに対して承認判定が正確に実行される", () => {
+    const validationReport = {
+      report_id: "RPT-2024-001",
+      validation_date: new Date("2024-01-15T10:30:00Z"),
+      validator_id: "USR-001",
+      validator_name: "営業オペレーター太郎",
+      total_records: 150,
+      error_records: 0,
+      warning_records: 3,
+      passed_records: 147,
+      data_quality_score: 98.0,
+      required_items_complete: true,
+      data_type_valid: true,
+      range_valid: true,
+      anomaly_detected: false,
+      report_status: "complete",
+    };
 
-    // 手順1: テスト用システム時刻を23時59分59秒に設定してプロセス初期化を試みる
-    const result_before = initializeMonthlyBillingProcess({
-      current_timestamp: before_trigger,
-      trigger_day_of_month: 25,
+    const approver_id = "USR-ADMIN-001";
+    const approver_name = "代表兼営業オペレーター花子";
+    const approval_timestamp = new Date("2024-01-15T11:00:00Z");
+
+    const result = executeValidationApproval({
+      validation_report: validationReport,
+      approver_id: approver_id,
+      approver_name: approver_name,
+      approval_timestamp: approval_timestamp,
     });
 
-    // 期待: トリガー時刻前なので業務開始ログが記録されていない
-    expect(result_before).toEqual({
-      is_triggered: false,
-      process_status: 'WAITING',
-      execution_log: null,
-      start_timestamp: null,
-      initial_validation_result: null,
-    });
+    // 承認ステータスが「承認済み」であることを確認
+    expect(result.approval_status).toBe("承認済み");
 
-    // 手順2: システム時刻を午前0時00分00秒に進める
-    const result_trigger = initializeMonthlyBillingProcess({
-      current_timestamp: trigger_date,
-      trigger_day_of_month: 25,
-    });
+    // 承認ログに承認日時が正確に記録されていることを確認
+    expect(result.approval_log.approval_timestamp).toEqual(approval_timestamp);
 
-    // 期待: トリガー時刻に達したので業務が自動開始される
-    expect(result_trigger.is_triggered).toBe(true);
+    // 承認ログに承認者情報が正確に記録されていることを確認
+    expect(result.approval_log.approver_id).toBe(approver_id);
+    expect(result.approval_log.approver_name).toBe(approver_name);
 
-    // 期待: 開始ログが記録される
-    expect(result_trigger.execution_log).not.toBeNull();
-    expect(result_trigger.execution_log).toEqual({
-      log_id: expect.any(String),
-      event_type: 'BILLING_PROCESS_STARTED',
-      message: 'Monthly billing process auto-initiated at trigger time',
-      recorded_at: expect.any(String),
-    });
+    // 承認ログに承認理由が記録されていることを確認
+    expect(result.approval_log.approval_reason).toBe(
+      "データ品質スコア98.0%、必須項目完全、異常値なし"
+    );
 
-    // 期待: 業務ステータスが『実行中』に遷移
-    expect(result_trigger.process_status).toBe('EXECUTING');
+    // 検証結果レポートのすべての必須項目が含まれていることを確認
+    expect(result.validation_report_summary.total_records).toBe(150);
+    expect(result.validation_report_summary.error_records).toBe(0);
+    expect(result.validation_report_summary.warning_records).toBe(3);
+    expect(result.validation_report_summary.validation_date).toEqual(
+      new Date("2024-01-15T10:30:00Z")
+    );
+    expect(result.validation_report_summary.validator_name).toBe(
+      "営業オペレーター太郎"
+    );
 
-    // 期待: 開始タイムスタンプがトリガー日の午前0時00分00秒以降
-    expect(result_trigger.start_timestamp).not.toBeNull();
-    const start_ts = new Date(result_trigger.start_timestamp as string);
-    expect(start_ts.getTime()).toBeGreaterThanOrEqual(trigger_date.getTime());
-    expect(start_ts.toISOString()).toBe('2024-01-25T00:00:00.000Z');
+    // データ品質スコアが100%に近い値であることを確認
+    expect(result.validation_report_summary.data_quality_score).toBe(98.0);
+    expect(result.validation_report_summary.data_quality_score).toBeGreaterThanOrEqual(
+      90.0
+    );
 
-    // 期待: 初期処理（データ抽出、バリデーション）が正常に実行される
-    expect(result_trigger.initial_validation_result).not.toBeNull();
-    expect(result_trigger.initial_validation_result).toEqual({
-      validation_phase: 'DATA_EXTRACTION_AND_VALIDATION',
-      data_extraction_status: 'COMPLETED',
-      extracted_record_count: expect.any(Number),
-      validation_errors: expect.any(Array),
-      validation_warnings: expect.any(Array),
-      is_ready_for_next_phase: true,
-    });
+    // 承認処理が正常に完了したことを確認
+    expect(result.processing_status).toBe("completed");
+    expect(result.approval_executed).toBe(true);
 
-    // 期待: 抽出されたレコード数が正の整数
-    expect(result_trigger.initial_validation_result.extracted_record_count).toBeGreaterThan(0);
-
-    // 期待: バリデーションエラーが空配列（正常実行時）
-    expect(result_trigger.initial_validation_result.validation_errors).toEqual([]);
-
-    // 期待: 次フェーズへ進行可能状態
-    expect(result_trigger.initial_validation_result.is_ready_for_next_phase).toBe(true);
+    // 承認後のレポートステータスが確定状態に遷移していることを確認
+    expect(result.report_status_after_approval).toBe("confirmed");
   });
 });

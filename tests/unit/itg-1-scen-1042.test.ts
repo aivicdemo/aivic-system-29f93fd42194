@@ -1,28 +1,73 @@
-import { describe, test, expect } from '@jest/globals';
-import { classifyCustomerInquiry } from '../../src/logic/it-1-2-1';
+import { generateMonthlySummaryTemplate } from '../../src/logic/it-1-br-1781935279444-1-2-1';
 
-describe('顧客質問内容の分類と優先度判定', () => {
-  test('SCEN-1042: 請求金額の誤りに関する質問は優先度が高に分類される', () => {
-    // Setup: テストデータの準備
-    const inquiry_content = '請求金額が正しくないようです。前月と比較して金額が大幅に増加しているのですが、理由を教えてください。';
-    const customer_id = 'CUST-001';
-    const inquiry_date = new Date('2024-01-15T09:30:00Z');
+describe('月次サマリーテンプレートの定義・管理', () => {
+  // SCEN-1042
+  test('月次サマリーテンプレートの定義項目が標準化されたテンプレート形式に従って正常に生成される', () => {
+    const input = {
+      reportName: '2024年1月営業成果月次サマリー',
+      targetPeriod: '2024-01-01~2024-01-31',
+      targetDepartments: ['営業部', '営業サポート部'],
+      definedItems: ['売上', '利益率', '顧客数', '案件数'],
+      templateFormat: 'CSV',
+    };
 
-    // Execute: 顧客質問分類エンジンに入力
-    const classification_result = classifyCustomerInquiry({
-      content: inquiry_content,
-      customer_id: customer_id,
-      inquiry_date: inquiry_date
-    });
+    const result = generateMonthlySummaryTemplate(input);
 
-    // Verify: 分類結果を確認
-    expect(classification_result.category).toBe('請求金額の誤り');
-    expect(classification_result.priority).toBe('高');
-    expect(classification_result.priority_score).toBe(95);
+    // テンプレート生成成功の基本構造
+    expect(result).toHaveProperty('templateId');
+    expect(result).toHaveProperty('templateContent');
+    expect(result).toHaveProperty('fileFormat');
+    expect(result).toHaveProperty('fileName');
+    expect(result).toHaveProperty('headers');
+    expect(result).toHaveProperty('itemSequence');
 
-    // Verify: その他の属性を確認
-    expect(classification_result.customer_id).toBe('CUST-001');
-    expect(classification_result.requires_investigation).toBe(true);
-    expect(classification_result.estimated_resolution_time_hours).toBe(4);
+    // ファイル形式の確認
+    expect(result.fileFormat).toBe('CSV');
+
+    // ファイル名の確認（レポート名と期間を含む）
+    expect(result.fileName).toMatch(/2024年1月営業成果月次サマリー/);
+    expect(result.fileName).toMatch(/\.csv$/i);
+
+    // テンプレートヘッダーの確認
+    expect(result.headers).toEqual(['レポート名', '対象期間', '部門', '売上', '利益率', '顧客数', '案件数']);
+
+    // 定義項目の順序確認
+    expect(result.itemSequence).toEqual(['売上', '利益率', '顧客数', '案件数']);
+
+    // テンプレート内容の標準化形式チェック
+    expect(result.templateContent).toContain('レポート名');
+    expect(result.templateContent).toContain('2024年1月営業成果月次サマリー');
+    expect(result.templateContent).toContain('2024-01-01~2024-01-31');
+    expect(result.templateContent).toContain('営業部');
+    expect(result.templateContent).toContain('営業サポート部');
+    expect(result.templateContent).toContain('売上');
+    expect(result.templateContent).toContain('利益率');
+    expect(result.templateContent).toContain('顧客数');
+    expect(result.templateContent).toContain('案件数');
+
+    // ヘッダー行がテンプレート内容に含まれていることを確認
+    expect(result.templateContent).toMatch(/レポート名.*対象期間.*部門.*売上.*利益率.*顧客数.*案件数/);
+
+    // テンプレートが空ではないことを確認
+    expect(result.templateContent.length).toBeGreaterThan(0);
+
+    // CSVフォーマットの確認（改行で複数行）
+    const lines = result.templateContent.split('\n');
+    expect(lines.length).toBeGreaterThan(1);
+
+    // 定義項目がすべて正しい順序で配置されていることを確認
+    const itemIndices = {
+      売上: result.templateContent.indexOf('売上'),
+      利益率: result.templateContent.indexOf('利益率'),
+      顧客数: result.templateContent.indexOf('顧客数'),
+      案件数: result.templateContent.indexOf('案件数'),
+    };
+    expect(itemIndices.売上).toBeLessThan(itemIndices.利益率);
+    expect(itemIndices.利益率).toBeLessThan(itemIndices.顧客数);
+    expect(itemIndices.顧客数).toBeLessThan(itemIndices.案件数);
+
+    // テンプレートIDが生成されていることを確認（ユニークな識別子）
+    expect(result.templateId).toMatch(/^TMPL-/);
+    expect(result.templateId.length).toBeGreaterThan(5);
   });
 });

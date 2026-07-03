@@ -1,115 +1,161 @@
-import { validateSalesData } from "../../src/logic/it-1781935279444-2-2-1";
+import { describe, test, expect, beforeEach } from "@jest/globals";
+import {
+  validateSalesData,
+  ValidationRule,
+  ValidationResult,
+  ValidationError,
+} from "../../src/logic/it-1781935279444-2-2-1";
 
-describe("営業データの完全性・正確性の自動検証", () => {
-  // SCEN-1032: 複数のエラーが検出されたときに差戻しが正確に判定される
-  test("should auto-reject with detailed error reasons when multiple validation errors are detected", () => {
-    // 複数のエラーを含むテストデータ
-    const testData = {
-      validationId: "validation_20240115_001",
-      uploadedAt: "2024-01-15T11:00:00Z",
-      salesRecords: [
-        {
-          recordId: "record_001",
-          customerId: "cust_A001",
-          customerName: "顧客A",
-          amount: "12,34a", // ❌ 金額形式エラー（英字混在）
-          contactDate: "2024-01-10",
-          serviceType: "service_standard",
-          appointmentConfirmed: true,
-        },
-        {
-          recordId: "record_002",
-          customerId: "cust_B002",
-          customerName: "", // ❌ 顧客情報欠落
-          amount: "25000",
-          contactDate: "2024-01-12",
-          serviceType: "service_premium",
-          appointmentConfirmed: false,
-        },
-        {
-          recordId: "record_003",
-          customerId: "cust_C003",
-          customerName: "顧客C",
-          amount: "18000",
-          contactDate: "2024-13-45", // ❌ 日付の不正値
-          serviceType: "service_basic",
-          appointmentConfirmed: true,
-        },
-      ],
-    };
-
-    const result = validateSalesData(testData);
-
-    // 検証結果レポートが生成されていることを確認
-    expect(result).toEqual(
-      expect.objectContaining({
-        validationId: "validation_20240115_001",
-        status: "差戻し",
-        rejectionReason: "複数エラー",
-      })
-    );
-
-    // エラーが3件以上検出されていることを確認
-    expect(result.detectedErrors).toHaveLength(3);
-
-    // エラー1: 金額形式エラー
-    expect(result.detectedErrors[0]).toEqual(
-      expect.objectContaining({
-        recordId: "record_001",
-        errorType: "金額形式",
-        fieldName: "amount",
-        detectedValue: "12,34a",
-        errorMessage: expect.stringContaining("金額"),
-      })
-    );
-
-    // エラー2: 顧客情報欠落
-    expect(result.detectedErrors[1]).toEqual(
-      expect.objectContaining({
-        recordId: "record_002",
-        errorType: "必須項目欠落",
+describe("営業データの完全性・正確性を自動検証し、不足データ・誤りを検出・通知する機能", () => {
+  // SCEN-1032: [error] 営業データ自動検証ルール定義と異常検出 - 営業データから必須項目が欠落している場合、検証エラーとして検出される
+  test("SCEN-1032: 必須項目欠落時に検証エラーを正常に検出し、エラーメッセージに欠落項目名・対象レコード番号・エラー内容を表示、エラーレベルをErrorに分類、後続ステップをブロック", () => {
+    // Arrange: 必須項目（顧客名、商品ID、売上金額、売上日）を指定した検証ルールを定義
+    const validationRules: ValidationRule[] = [
+      {
+        ruleId: "rule-001",
         fieldName: "customerName",
-        detectedValue: "",
-        errorMessage: expect.stringContaining("顧客"),
-      })
+        fieldLabel: "顧客名",
+        required: true,
+        dataType: "string",
+        minLength: 1,
+        errorLevel: "Error",
+      },
+      {
+        ruleId: "rule-002",
+        fieldName: "productId",
+        fieldLabel: "商品ID",
+        required: true,
+        dataType: "string",
+        pattern: "^[A-Z0-9]{6}$",
+        errorLevel: "Error",
+      },
+      {
+        ruleId: "rule-003",
+        fieldName: "salesAmount",
+        fieldLabel: "売上金額",
+        required: true,
+        dataType: "number",
+        minValue: 0,
+        errorLevel: "Error",
+      },
+      {
+        ruleId: "rule-004",
+        fieldName: "salesDate",
+        fieldLabel: "売上日",
+        required: true,
+        dataType: "string",
+        pattern: "^\\d{4}-\\d{2}-\\d{2}$",
+        errorLevel: "Error",
+      },
+    ];
+
+    // 必須項目の1つ以上が欠落した営業データ（レコード1: 顧客名欠落、レコード2: 商品ID欠落、レコード3: 売上金額欠落）
+    const salesDataWithMissingFields = [
+      {
+        // レコード1: 顧客名(customerName)欠落
+        recordNumber: 1,
+        productId: "PROD01",
+        salesAmount: 50000,
+        salesDate: "2024-01-15",
+      },
+      {
+        // レコード2: 商品ID(productId)欠落
+        recordNumber: 2,
+        customerName: "顧客A",
+        salesAmount: 75000,
+        salesDate: "2024-01-16",
+      },
+      {
+        // レコード3: 売上金額(salesAmount)欠落
+        recordNumber: 3,
+        customerName: "顧客B",
+        productId: "PROD02",
+        salesDate: "2024-01-17",
+      },
+      {
+        // レコード4: 売上日(salesDate)欠落
+        recordNumber: 4,
+        customerName: "顧客C",
+        productId: "PROD03",
+        salesAmount: 100000,
+      },
+    ];
+
+    // Act: 自動検証処理を実行
+    const validationResult: ValidationResult = validateSalesData(
+      salesDataWithMissingFields,
+      validationRules
     );
 
-    // エラー3: 日付不正値
-    expect(result.detectedErrors[2]).toEqual(
-      expect.objectContaining({
-        recordId: "record_003",
-        errorType: "日付形式",
-        fieldName: "contactDate",
-        detectedValue: "2024-13-45",
-        errorMessage: expect.stringContaining("日付"),
-      })
-    );
+    // Assert: 検証結果を確認
+    // 1. 検証が失敗していることを確認（isValid = false）
+    expect(validationResult.isValid).toBe(false);
 
-    // 差戻し判定詳細情報
-    expect(result.rejectionDetails).toEqual(
-      expect.objectContaining({
-        rejectedAt: "2024-01-15T11:00:00Z",
-        rejectionReason: "複数エラー",
-        errorCount: 3,
-        criticalErrorCount: 3,
-        autoRejected: true,
-      })
-    );
+    // 2. エラー数が正確であることを確認（4レコード × 各1欠落 = 4エラー）
+    expect(validationResult.errors.length).toBe(4);
 
-    // ステータスが「差戻し」に更新されていることを確認
-    expect(result.status).toBe("差戻し");
+    // 3. レコード1のエラー：顧客名欠落
+    const record1Error: ValidationError = validationResult.errors.find(
+      (err: ValidationError) => err.recordNumber === 1
+    )!;
+    expect(record1Error).toBeDefined();
+    expect(record1Error.fieldName).toBe("customerName");
+    expect(record1Error.fieldLabel).toBe("顧客名");
+    expect(record1Error.errorMessage).toContain("顧客名");
+    expect(record1Error.errorMessage).toContain("必須項目");
+    expect(record1Error.errorLevel).toBe("Error");
 
-    // 差戻し理由が記録されていることを確認
-    expect(result.rejectionReason).toBe("複数エラー");
+    // 4. レコード2のエラー：商品ID欠落
+    const record2Error: ValidationError = validationResult.errors.find(
+      (err: ValidationError) => err.recordNumber === 2
+    )!;
+    expect(record2Error).toBeDefined();
+    expect(record2Error.fieldName).toBe("productId");
+    expect(record2Error.fieldLabel).toBe("商品ID");
+    expect(record2Error.errorMessage).toContain("商品ID");
+    expect(record2Error.errorMessage).toContain("必須項目");
+    expect(record2Error.errorLevel).toBe("Error");
 
-    // 差戻し日時が記録されていることを確認
-    expect(result.rejectionDetails.rejectedAt).toBe("2024-01-15T11:00:00Z");
+    // 5. レコード3のエラー：売上金額欠落
+    const record3Error: ValidationError = validationResult.errors.find(
+      (err: ValidationError) => err.recordNumber === 3
+    )!;
+    expect(record3Error).toBeDefined();
+    expect(record3Error.fieldName).toBe("salesAmount");
+    expect(record3Error.fieldLabel).toBe("売上金額");
+    expect(record3Error.errorMessage).toContain("売上金額");
+    expect(record3Error.errorMessage).toContain("必須項目");
+    expect(record3Error.errorLevel).toBe("Error");
 
-    // エラー詳細情報がレポートに記載されていることを確認
-    expect(result.detectedErrors.length).toBeGreaterThanOrEqual(3);
-    expect(result.detectedErrors.every((err) => err.recordId)).toBe(true);
-    expect(
-      result.detectedErrors.every((err) => err.errorType && err.fieldName)
-    ).toBe(true);
+    // 6. レコード4のエラー：売上日欠落
+    const record4Error: ValidationError = validationResult.errors.find(
+      (err: ValidationError) => err.recordNumber === 4
+    )!;
+    expect(record4Error).toBeDefined();
+    expect(record4Error.fieldName).toBe("salesDate");
+    expect(record4Error.fieldLabel).toBe("売上日");
+    expect(record4Error.errorMessage).toContain("売上日");
+    expect(record4Error.errorMessage).toContain("必須項目");
+    expect(record4Error.errorLevel).toBe("Error");
+
+    // 7. すべてのエラーレベルが『Error』として分類されていることを確認
+    validationResult.errors.forEach((error: ValidationError) => {
+      expect(error.errorLevel).toBe("Error");
+    });
+
+    // 8. 後続ステップのブロックフラグが有効であることを確認
+    expect(validationResult.shouldBlockSubsequentSteps).toBe(true);
+
+    // 9. エラーサマリーが正しく生成されていることを確認
+    expect(validationResult.errorSummary).toContain("4");
+    expect(validationResult.errorSummary).toContain("必須項目");
+
+    // 10. すべてのエラーが記録番号と欠落項目名を含むことを確認
+    validationResult.errors.forEach((error: ValidationError) => {
+      expect(error.recordNumber).toBeGreaterThan(0);
+      expect(error.recordNumber).toBeLessThanOrEqual(4);
+      expect(error.fieldLabel).toBeTruthy();
+      expect(error.fieldLabel.length).toBeGreaterThan(0);
+    });
   });
 });

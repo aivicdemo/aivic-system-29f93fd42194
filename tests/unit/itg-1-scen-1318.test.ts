@@ -1,153 +1,136 @@
-import { validatePaymentProcessing } from '../../src/logic/it-1781935279444-2-2-1';
+import { extractDataItemsWithoutCalculationLogic } from '../../src/logic/it-1781935279444-1-1-1';
 
-describe('支払い処理自動判定 - 支払い承認基準不満足時の保留と異常通知', () => {
-  test('SCEN-1318: 支払い承認基準のいずれかを満たさない場合、支払い処理が保留され異常通知が発行される', () => {
-    // 支払い承認基準を満たさない請求データを準備
-    const invoiceData = {
-      invoice_id: 'INV-2024-001',
-      customer_id: 'CUST-2024-001',
-      invoice_amount: -5000, // 基準①: 請求額が負数（基準不満足）
-      invoice_date: '2024-01-15',
-      contract_valid: true, // 基準②: 契約有効フラグ=true（基準満足）
-      data_quality_status: 'approved', // 基準③: データ品質ステータス=approved（基準満足）
-      payment_due_date: '2024-02-14',
-      customer_email: 'customer@example.com',
+describe('営業データ項目のメタデータ管理機能 - 計算ロジック未定義項目の抽出', () => {
+  test('SCEN-1318: 計算ロジックが定義されていないデータ項目を漏れなく抽出', () => {
+    // Arrange: テストデータ準備
+    // 計算ロジックが定義されている項目
+    const itemWithLogic1 = {
+      id: 'item_001',
+      name: 'アポ数',
+      unit: '件',
+      dataType: 'integer',
+      calculationLogic: 'COUNT(営業活動 WHERE ステータス = "アポ確定")',
+      reportMapping: 'report_field_001',
     };
 
-    // 支払い処理自動判定機能を実行
-    const result = validatePaymentProcessing(invoiceData);
-
-    // 支払い処理のステータスを確認: 『保留』であることを検証
-    expect(result.payment_status).toBe('保留');
-
-    // 異常通知の発行状況を確認: 通知が生成されていることを検証
-    expect(result.abnormality_notification).toBeDefined();
-    expect(result.abnormality_notification.is_issued).toBe(true);
-
-    // 通知内容に不承認理由が含まれていることを確認
-    expect(result.abnormality_notification.rejection_reason).toContain('請求額');
-    expect(result.abnormality_notification.failed_criteria).toEqual(['invoice_amount']);
-    expect(result.abnormality_notification.failed_criteria_count).toBe(1);
-
-    // 通知に説明メッセージが含まれていることを確認
-    expect(result.abnormality_notification.message).toMatch(/請求額が負数/);
-
-    // 通知のタイムスタンプが記録されていることを確認
-    expect(result.abnormality_notification.issued_at).toBeDefined();
-    expect(typeof result.abnormality_notification.issued_at).toBe('string');
-  });
-
-  test('SCEN-1318-複数基準不満足: 複数の支払い承認基準が満たされない場合、すべての不承認理由が通知に含まれる', () => {
-    // 複数の支払い承認基準を満たさない請求データ
-    const invoiceData = {
-      invoice_id: 'INV-2024-002',
-      customer_id: 'CUST-2024-002',
-      invoice_amount: 0, // 基準①: 請求額がゼロ（基準不満足）
-      invoice_date: '2024-01-15',
-      contract_valid: false, // 基準②: 契約有効フラグ=false（基準不満足）
-      data_quality_status: 'rejected', // 基準③: データ品質ステータス=rejected（基準不満足）
-      payment_due_date: '2024-02-14',
-      customer_email: 'customer@example.com',
+    const itemWithLogic2 = {
+      id: 'item_002',
+      name: '成約数',
+      unit: '件',
+      dataType: 'integer',
+      calculationLogic: 'COUNT(営業活動 WHERE ステータス = "成約")',
+      reportMapping: 'report_field_002',
     };
 
-    const result = validatePaymentProcessing(invoiceData);
-
-    // ステータスが『保留』であることを確認
-    expect(result.payment_status).toBe('保留');
-
-    // 異常通知が発行されていることを確認
-    expect(result.abnormality_notification.is_issued).toBe(true);
-
-    // 複数の不承認基準が記録されていることを確認
-    expect(result.abnormality_notification.failed_criteria_count).toBe(3);
-    expect(result.abnormality_notification.failed_criteria).toContain('invoice_amount');
-    expect(result.abnormality_notification.failed_criteria).toContain('contract_valid');
-    expect(result.abnormality_notification.failed_criteria).toContain('data_quality_status');
-
-    // すべての不承認理由が通知に含まれていることを確認
-    expect(result.abnormality_notification.message).toMatch(/請求額/);
-    expect(result.abnormality_notification.message).toMatch(/契約/);
-    expect(result.abnormality_notification.message).toMatch(/データ品質/);
-  });
-
-  test('SCEN-1318-すべての基準満足: すべての支払い承認基準を満たす場合、支払い処理が承認される', () => {
-    // すべての支払い承認基準を満たす請求データ
-    const invoiceData = {
-      invoice_id: 'INV-2024-003',
-      customer_id: 'CUST-2024-003',
-      invoice_amount: 50000, // 基準①: 請求額が正数（基準満足）
-      invoice_date: '2024-01-15',
-      contract_valid: true, // 基準②: 契約有効フラグ=true（基準満足）
-      data_quality_status: 'approved', // 基準③: データ品質ステータス=approved（基準満足）
-      payment_due_date: '2024-02-14',
-      customer_email: 'customer@example.com',
+    // 計算ロジックが定義されていない項目
+    const itemWithoutLogic1 = {
+      id: 'item_003',
+      name: '顧客反応',
+      unit: null,
+      dataType: 'string',
+      calculationLogic: null,
+      reportMapping: 'report_field_003',
     };
 
-    const result = validatePaymentProcessing(invoiceData);
-
-    // 支払い処理のステータスが『承認』であることを確認
-    expect(result.payment_status).toBe('承認');
-
-    // 異常通知が発行されないことを確認
-    expect(result.abnormality_notification.is_issued).toBe(false);
-    expect(result.abnormality_notification.failed_criteria_count).toBe(0);
-    expect(result.abnormality_notification.failed_criteria).toEqual([]);
-  });
-
-  test('SCEN-1318-境界値: 請求額が最小承認額（1円）の場合、支払い処理が承認される', () => {
-    const invoiceData = {
-      invoice_id: 'INV-2024-004',
-      customer_id: 'CUST-2024-004',
-      invoice_amount: 1, // 基準①: 最小承認額（基準満足）
-      invoice_date: '2024-01-15',
-      contract_valid: true,
-      data_quality_status: 'approved',
-      payment_due_date: '2024-02-14',
-      customer_email: 'customer@example.com',
+    const itemWithoutLogic2 = {
+      id: 'item_004',
+      name: '接触日時',
+      unit: null,
+      dataType: 'datetime',
+      calculationLogic: null,
+      reportMapping: null,
     };
 
-    const result = validatePaymentProcessing(invoiceData);
-
-    expect(result.payment_status).toBe('承認');
-    expect(result.abnormality_notification.is_issued).toBe(false);
-  });
-
-  test('SCEN-1318-エラーハンドリング: 必須フィールドが欠落している場合、適切なエラーが発生する', () => {
-    // 必須フィールド（invoice_id）が欠落
-    const invalidInvoiceData = {
-      customer_id: 'CUST-2024-005',
-      invoice_amount: 50000,
-      invoice_date: '2024-01-15',
-      contract_valid: true,
-      data_quality_status: 'approved',
-      payment_due_date: '2024-02-14',
-      customer_email: 'customer@example.com',
-    } as any;
-
-    expect(() => validatePaymentProcessing(invalidInvoiceData)).toThrow(/請求ID/);
-  });
-
-  test('SCEN-1318-通知内容の検証: 不承認通知に顧客メールアドレスが含まれていることを確認', () => {
-    const invoiceData = {
-      invoice_id: 'INV-2024-006',
-      customer_id: 'CUST-2024-006',
-      invoice_amount: -1000,
-      invoice_date: '2024-01-15',
-      contract_valid: true,
-      data_quality_status: 'approved',
-      payment_due_date: '2024-02-14',
-      customer_email: 'billing@customer.example.com',
+    const itemWithoutLogic3 = {
+      id: 'item_005',
+      name: '商談内容',
+      unit: null,
+      dataType: 'text',
+      calculationLogic: '',
+      reportMapping: 'report_field_005',
     };
 
-    const result = validatePaymentProcessing(invoiceData);
+    const itemWithoutLogic4 = {
+      id: 'item_006',
+      name: '営業担当者名',
+      unit: null,
+      dataType: 'string',
+      calculationLogic: undefined,
+      reportMapping: 'report_field_006',
+    };
 
-    // 不承認通知が発行されていることを確認
-    expect(result.abnormality_notification.is_issued).toBe(true);
+    const allItems = [
+      itemWithLogic1,
+      itemWithoutLogic1,
+      itemWithLogic2,
+      itemWithoutLogic2,
+      itemWithoutLogic3,
+      itemWithoutLogic4,
+    ];
 
-    // 通知にメールアドレスが含まれていることを確認
-    expect(result.abnormality_notification.recipient_email).toBe('billing@customer.example.com');
+    // Act: 計算ロジックが定義されていないデータ項目を抽出
+    const result = extractDataItemsWithoutCalculationLogic(allItems);
 
-    // 通知タイプが『支払い保留』であることを確認
-    expect(result.abnormality_notification.notification_type).toBe('支払い保留');
+    // Assert: 検証
+
+    // 1. 計算ロジックが定義されていないすべての項目が含まれているか確認
+    expect(result.length).toBe(4);
+    expect(result).toContainEqual(
+      expect.objectContaining({
+        id: 'item_003',
+        name: '顧客反応',
+      })
+    );
+    expect(result).toContainEqual(
+      expect.objectContaining({
+        id: 'item_004',
+        name: '接触日時',
+      })
+    );
+    expect(result).toContainEqual(
+      expect.objectContaining({
+        id: 'item_005',
+        name: '商談内容',
+      })
+    );
+    expect(result).toContainEqual(
+      expect.objectContaining({
+        id: 'item_006',
+        name: '営業担当者名',
+      })
+    );
+
+    // 2. 計算ロジックが定義されている項目が誤って含まれていないか確認
+    const resultIds = result.map((item) => item.id);
+    expect(resultIds).not.toContain('item_001');
+    expect(resultIds).not.toContain('item_002');
+
+    // 3. 抽出結果に重複がないことを確認
+    const uniqueIds = new Set(resultIds);
+    expect(uniqueIds.size).toBe(result.length);
+
+    // 4. 抽出結果が空でないことを確認
+    expect(result.length).toBeGreaterThan(0);
+
+    // 5. 抽出結果のデータ項目数が期待値と一致
+    const expectedCount = 4;
+    expect(result.length).toBe(expectedCount);
+
+    // 6. 抽出されたすべての項目が計算ロジック未定義の条件を満たしているか確認
+    result.forEach((item) => {
+      const isLogicUndefined =
+        item.calculationLogic === null ||
+        item.calculationLogic === undefined ||
+        item.calculationLogic === '';
+      expect(isLogicUndefined).toBe(true);
+    });
+
+    // 7. 抽出対象外の項目が計算ロジック定義済みであることを確認
+    expect(itemWithLogic1.calculationLogic).not.toBe(null);
+    expect(itemWithLogic1.calculationLogic).not.toBe(undefined);
+    expect(itemWithLogic1.calculationLogic).not.toBe('');
+    expect(itemWithLogic2.calculationLogic).not.toBe(null);
+    expect(itemWithLogic2.calculationLogic).not.toBe(undefined);
+    expect(itemWithLogic2.calculationLogic).not.toBe('');
   });
 });

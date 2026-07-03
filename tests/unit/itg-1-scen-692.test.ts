@@ -1,43 +1,61 @@
-import { describe, test, expect, beforeEach } from "@jest/globals";
-import {
-  validateSalesDataRange,
-} from "../../src/logic/it-1781935279444-2-2-1";
+import { describe, test, expect } from "@jest/globals";
+import { validateSalesActivityContactDateTime } from "../../src/logic/it-1781935279444-2-1-1";
 
-describe("営業データ値の範囲検証機能", () => {
-  beforeEach(() => {
-    jest.clearAllMocks();
-  });
+describe("営業データ入力時の品質検証ルール定義・実行機能", () => {
+  test("SCEN-692: 接触日時が無効な日付形式の場合に形式誤りが検出される", () => {
+    // 無効な日付形式: 月が13
+    const invalid_contact_datetime_1 = "2024-13-45";
+    expect(() => validateSalesActivityContactDateTime(invalid_contact_datetime_1)).toThrow(/接触日時/);
 
-  // SCEN-692
-  test("数値項目が最大値ちょうどの場合に検証が合格する", () => {
-    // Arrange: 営業データ品質管理・請求自動化システムにログイン
-    // → テスト対象の数値項目の最大値制限を確認する
-    const validationRule = {
-      field_name: "appointment_count",
-      field_type: "number",
-      is_required: true,
-      min_value: 0,
-      max_value: 100,
-    };
+    // 無効な日付形式: 日が32
+    const invalid_contact_datetime_2 = "2024/15/32";
+    expect(() => validateSalesActivityContactDateTime(invalid_contact_datetime_2)).toThrow(/接触日時/);
 
-    // 数値項目に最大値ちょうどの値を入力する
-    const input_data = {
-      appointment_count: 100,
-      contract_id: "CONTRACT_001",
-      customer_id: "CUST_A",
-      reporting_date: "2024-01-15",
-    };
+    // 無効な日付形式: 完全に不正な文字列
+    const invalid_contact_datetime_3 = "invalid-date";
+    expect(() => validateSalesActivityContactDateTime(invalid_contact_datetime_3)).toThrow(/接触日時/);
 
-    // Act: 検証処理を実行する
-    const result = validateSalesDataRange(input_data, validationRule);
+    // 有効な日付形式: YYYY-MM-DD HH:MM:SS
+    const valid_contact_datetime = "2024-01-15 14:30:00";
+    const result_valid = validateSalesActivityContactDateTime(valid_contact_datetime);
+    expect(result_valid).toEqual({
+      is_valid: true,
+      formatted_datetime: "2024-01-15 14:30:00",
+      error_message: null,
+    });
 
-    // Assert: 検証結果を確認する
-    // 期待結果: 数値項目が最大値ちょうどの場合、検証が合格状態となり、
-    // エラーメッセージが表示されず、データが正常に受け入れられること
-    expect(result.is_valid).toBe(true);
-    expect(result.errors).toEqual([]);
-    expect(result.error_message).toBe("");
-    expect(result.field_name).toBe("appointment_count");
-    expect(result.input_value).toBe(100);
+    // 有効な日付形式: ISO 8601
+    const valid_iso_datetime = "2024-01-15T14:30:00Z";
+    const result_iso = validateSalesActivityContactDateTime(valid_iso_datetime);
+    expect(result_iso).toEqual({
+      is_valid: true,
+      formatted_datetime: "2024-01-15T14:30:00Z",
+      error_message: null,
+    });
+
+    // 境界値: 月が00（無効）
+    const boundary_invalid_month = "2024-00-15 10:00:00";
+    expect(() => validateSalesActivityContactDateTime(boundary_invalid_month)).toThrow(/接触日時/);
+
+    // 境界値: 有効な月末日 2024-01-31
+    const boundary_valid_last_day = "2024-01-31 23:59:59";
+    const result_boundary = validateSalesActivityContactDateTime(boundary_valid_last_day);
+    expect(result_boundary).toEqual({
+      is_valid: true,
+      formatted_datetime: "2024-01-31 23:59:59",
+      error_message: null,
+    });
+
+    // 時刻部分が無効: 時が25
+    const invalid_hour = "2024-01-15 25:00:00";
+    expect(() => validateSalesActivityContactDateTime(invalid_hour)).toThrow(/接触日時/);
+
+    // 時刻部分が無効: 分が60
+    const invalid_minute = "2024-01-15 14:60:00";
+    expect(() => validateSalesActivityContactDateTime(invalid_minute)).toThrow(/接触日時/);
+
+    // 時刻部分が無効: 秒が60
+    const invalid_second = "2024-01-15 14:30:60";
+    expect(() => validateSalesActivityContactDateTime(invalid_second)).toThrow(/接触日時/);
   });
 });

@@ -1,101 +1,110 @@
-import { describe, test, expect, beforeEach } from '@jest/globals';
-import { recordContractChangeRejection } from '../../src/logic/it-1781935279444-2-1-1';
+import { validateContractChangeAgreement } from "../../src/logic/it-1-1-1";
 
-describe('契約変更承認・署名記録機能 - 営業責任者が承認を拒否した場合', () => {
-  beforeEach(() => {
-    jest.clearAllMocks();
-  });
-
+describe("営業成果データの自動検証ルール定義と異常検出機能", () => {
   // SCEN-1244
-  test('営業責任者が承認を拒否した場合、拒否理由が記録され、契約変更が反映されない', () => {
-    // テストデータ: 承認待ちステータスの契約変更申請
-    const contractChangeId = 'CC-20240115-001';
-    const customerId = 'CUST-0001';
-    const previousContractAmount = 100000;
-    const newContractAmount = 120000;
-    const changeStatus = 'pending_approval';
-    const rejectionReason = '条件が合致していません';
-    const rejectionUserId = 'USER-SALES-RESP-001';
-    const rejectionTimestamp = new Date('2024-01-15T14:30:00Z');
+  test("複数の変更項目がある場合、すべて検証して部分的な合意状況を検出する", () => {
+    // テストデータ: 複数の変更項目（4項目）を含む契約変更内容
+    const contractChangeInput = {
+      contractId: "CONTRACT-2024-001",
+      customerId: "CUSTOMER-100",
+      changedItems: [
+        {
+          itemId: "CHANGE-ITEM-A",
+          itemName: "基本料金",
+          previousValue: "100000",
+          newValue: "120000",
+          agreementStatus: "AGREED", // 合意
+        },
+        {
+          itemId: "CHANGE-ITEM-B",
+          itemName: "成果報酬率",
+          previousValue: "10%",
+          newValue: "12%",
+          agreementStatus: "NOT_AGREED", // 未合意
+        },
+        {
+          itemId: "CHANGE-ITEM-C",
+          itemName: "納期条件",
+          previousValue: "30日",
+          newValue: "45日",
+          agreementStatus: "AGREED", // 合意
+        },
+        {
+          itemId: "CHANGE-ITEM-D",
+          itemName: "割引基準",
+          previousValue: "5%",
+          newValue: "3%",
+          agreementStatus: "PENDING", // 保留中
+        },
+      ],
+      changeDate: "2024-01-15",
+      customAgreementDeadline: "2024-01-22",
+    };
 
-    // 実行: 営業責任者が契約変更申請を拒否
-    const result = recordContractChangeRejection({
-      contractChangeId,
-      customerId,
-      rejectionReason,
-      rejectionUserId,
-      rejectionTimestamp,
-      currentStatus: changeStatus,
-      previousAmount: previousContractAmount,
-      newAmount: newContractAmount
-    });
+    // 合意状況検証機能を実行
+    const validationResult = validateContractChangeAgreement(
+      contractChangeInput
+    );
 
-    // 検証1: 拒否ステータスが記録される
-    expect(result.status).toBe('rejected');
+    // すべての変更項目が検証されたことを確認
+    expect(validationResult.totalItemsValidated).toBe(4);
 
-    // 検証2: 拒否理由が記録される
-    expect(result.rejectionReason).toBe('条件が合致していません');
+    // 各項目の合意状況が正確に判定されていることを確認
+    expect(validationResult.agreedItemsCount).toBe(2); // A,C が合意
+    expect(validationResult.notAgreedItemsCount).toBe(1); // B が未合意
+    expect(validationResult.pendingItemsCount).toBe(1); // D が保留中
 
-    // 検証3: 拒否ユーザーが記録される
-    expect(result.rejectionUserId).toBe('USER-SALES-RESP-001');
+    // 合意率が正しく計算されていることを確認（合意項目数/全項目数）
+    expect(validationResult.agreementRate).toBe(0.5); // 2/4 = 50%
 
-    // 検証4: 拒否日時が記録される
-    expect(result.rejectionTimestamp).toEqual(new Date('2024-01-15T14:30:00Z'));
+    // 部分的な合意状況として判定していることを確認
+    expect(validationResult.overallStatus).toBe("PARTIAL_AGREEMENT");
 
-    // 検証5: 監査ログに拒否日時と拒否理由が記載される
-    expect(result.auditLog).toBeDefined();
-    expect(result.auditLog.action).toBe('rejected');
-    expect(result.auditLog.reason).toBe('条件が合致していません');
-    expect(result.auditLog.timestamp).toEqual(new Date('2024-01-15T14:30:00Z'));
+    // 検証結果レポートが構造化されていることを確認
+    expect(validationResult.validationReport).toBeDefined();
+    expect(validationResult.validationReport.agreedItems).toEqual([
+      {
+        itemId: "CHANGE-ITEM-A",
+        itemName: "基本料金",
+        status: "AGREED",
+      },
+      {
+        itemId: "CHANGE-ITEM-C",
+        itemName: "納期条件",
+        status: "AGREED",
+      },
+    ]);
 
-    // 検証6: 実際の契約情報は変更されない（金額が旧値のまま）
-    expect(result.contractAmount).toBe(100000);
+    // 未合意項目が明示されていることを確認
+    expect(validationResult.validationReport.notAgreedItems).toEqual([
+      {
+        itemId: "CHANGE-ITEM-B",
+        itemName: "成果報酬率",
+        status: "NOT_AGREED",
+      },
+    ]);
 
-    // 検証7: 請求データは更新されていない
-    expect(result.billingUpdated).toBe(false);
+    // 保留中項目が明示されていることを確認
+    expect(validationResult.validationReport.pendingItems).toEqual([
+      {
+        itemId: "CHANGE-ITEM-D",
+        itemName: "割引基準",
+        status: "PENDING",
+      },
+    ]);
 
-    // 検証8: 契約変更申請レコードが拒否状態で保存される
-    expect(result.contractChangeId).toBe('CC-20240115-001');
-    expect(result.customerId).toBe('CUST-0001');
-  });
+    // タイムスタンプが記録されていることを確認
+    expect(validationResult.validatedAt).toBe("2024-01-15T00:00:00Z");
 
-  // エラーケース: 拒否理由が空の場合
-  test('拒否理由が空の場合、エラーが発生する', () => {
-    const contractChangeId = 'CC-20240115-002';
-    const customerId = 'CUST-0002';
-    const rejectionUserId = 'USER-SALES-RESP-001';
-    const rejectionTimestamp = new Date('2024-01-15T14:35:00Z');
+    // 次のアクション推奨がレポートに含まれていることを確認
+    expect(validationResult.validationReport.nextActions).toContain(
+      "NOT_AGREED_ITEM_RESOLUTION"
+    );
+    expect(validationResult.validationReport.nextActions).toContain(
+      "PENDING_ITEM_FOLLOWUP"
+    );
 
-    expect(() =>
-      recordContractChangeRejection({
-        contractChangeId,
-        customerId,
-        rejectionReason: '',
-        rejectionUserId,
-        rejectionTimestamp,
-        currentStatus: 'pending_approval',
-        previousAmount: 50000,
-        newAmount: 60000
-      })
-    ).toThrow(/拒否理由/);
-  });
-
-  // エラーケース: ステータスが既に「拒否」の場合、重複拒否を防ぐ
-  test('既に拒否済みの契約変更申請を再度拒否しようとした場合、エラーが発生する', () => {
-    const contractChangeId = 'CC-20240115-003';
-    const customerId = 'CUST-0003';
-
-    expect(() =>
-      recordContractChangeRejection({
-        contractChangeId,
-        customerId,
-        rejectionReason: '再度拒否します',
-        rejectionUserId: 'USER-SALES-RESP-002',
-        rejectionTimestamp: new Date('2024-01-15T15:00:00Z'),
-        currentStatus: 'rejected',
-        previousAmount: 80000,
-        newAmount: 95000
-      })
-    ).toThrow(/ステータス/);
+    // 検証が成功していることを確認
+    expect(validationResult.isValidationSuccessful).toBe(true);
   });
 });

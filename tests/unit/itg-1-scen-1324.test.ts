@@ -1,149 +1,136 @@
-import { extractBillableItems, aggregateBillingAmount } from '../../src/logic/it-1-2-1';
+import { describe, test, expect, beforeEach } from "@jest/globals";
+import {
+  createSalesDataMappingSpecification,
+  applySalesDataTransformationRules,
+} from "../../src/logic/it-1781935279444-1-1-1";
 
-describe('営業成果データから請求対象項目を自動抽出し、顧客ごと・サービスごとの請求額を集計する機能', () => {
-  // SCEN-1324: [normal] 請求対象項目の自動抽出と顧客別・サービス別請求額集計 - 請求対象外と判定された営業データ項目が集計対象から除外される
-  test('請求対象外フラグが設定された営業データ項目が自動抽出と集計から完全に除外される', () => {
-    // テストデータ準備: 請求対象外フラグが設定された営業データ項目を複数件準備
-    const salesData = [
-      {
-        id: 'sales_001',
-        customerId: 'cust_A',
-        serviceId: 'svc_001',
-        itemName: 'appointment_count',
-        itemValue: 100,
-        amount: 50000,
-        isBillable: true,
-        recordedAt: '2024-01-15T10:00:00Z',
-      },
-      {
-        id: 'sales_002',
-        customerId: 'cust_A',
-        serviceId: 'svc_001',
-        itemName: 'discount_item',
-        itemValue: 50,
-        amount: 5000,
-        isBillable: false,
-        recordedAt: '2024-01-15T11:00:00Z',
-      },
-      {
-        id: 'sales_003',
-        customerId: 'cust_A',
-        serviceId: 'svc_001',
-        itemName: 'contract_count',
-        itemValue: 30,
-        amount: 45000,
-        isBillable: true,
-        recordedAt: '2024-01-15T12:00:00Z',
-      },
-      {
-        id: 'sales_004',
-        customerId: 'cust_A',
-        serviceId: 'svc_002',
-        itemName: 'internal_adjustment',
-        itemValue: 20,
-        amount: 10000,
-        isBillable: false,
-        recordedAt: '2024-01-15T13:00:00Z',
-      },
-      {
-        id: 'sales_005',
-        customerId: 'cust_A',
-        serviceId: 'svc_002',
-        itemName: 'revenue_from_sales',
-        itemValue: 200,
-        amount: 80000,
-        isBillable: true,
-        recordedAt: '2024-01-15T14:00:00Z',
-      },
-      {
-        id: 'sales_006',
-        customerId: 'cust_B',
-        serviceId: 'svc_001',
-        itemName: 'promo_credit',
-        itemValue: 15,
-        amount: 3000,
-        isBillable: false,
-        recordedAt: '2024-01-15T15:00:00Z',
-      },
-      {
-        id: 'sales_007',
-        customerId: 'cust_B',
-        serviceId: 'svc_001',
-        itemName: 'consultation_count',
-        itemValue: 80,
-        amount: 40000,
-        isBillable: true,
-        recordedAt: '2024-01-15T16:00:00Z',
-      },
-    ];
+describe("営業データ項目のメタデータ管理機能 - マッピング仕様書作成と変換ルール適用", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
 
-    // 請求対象外フラグが『true』に設定されたデータ項目を確認
-    const nonBillableItems = salesData.filter((item) => item.isBillable === false);
-    expect(nonBillableItems).toHaveLength(3);
-    expect(nonBillableItems.map((item) => item.itemName)).toEqual([
-      'discount_item',
-      'internal_adjustment',
-      'promo_credit',
-    ]);
+  // SCEN-1324
+  test("営業システムの1項目が複数の請求・レポート項目にマッピングされる場合、変換ルールが定義される", () => {
+    // 営業システムのテストデータを準備: 「顧客名」項目
+    const salesDataItem = {
+      itemId: "SALES_ITEM_001",
+      itemName: "顧客名",
+      dataType: "string",
+      unit: "名称",
+      description: "営業活動の対象顧客の名称",
+    };
 
-    // 請求対象外と判定された項目を含む営業データセットをシステムに入力
-    // 請求対象項目の自動抽出処理を実行
-    const extractedBillableItems = extractBillableItems(salesData);
+    // マッピング仕様書の作成入力: 複数の対応先項目と変換ルール定義
+    const mappingSpecification = {
+      sourceItemId: "SALES_ITEM_001",
+      sourceItemName: "顧客名",
+      mappings: [
+        {
+          mappingId: "MAP_BILL_001",
+          targetSystem: "billing",
+          targetItemName: "請求先名",
+          transformationRule: {
+            ruleType: "uppercase",
+            maxLength: 50,
+            description: "顧客名を大文字に変換して請求書に出力",
+          },
+        },
+        {
+          mappingId: "MAP_REPORT_001",
+          targetSystem: "reporting",
+          targetItemName: "顧客表示名",
+          transformationRule: {
+            ruleType: "titlecase_with_truncation",
+            maxLength: 30,
+            description: "顧客名をタイトルケースに変換して30文字で切り詰め",
+          },
+        },
+      ],
+    };
 
-    // 抽出結果から請求対象外フラグ『true』の項目が除外されていることを確認
-    expect(extractedBillableItems).toHaveLength(4);
-    const extractedIds = extractedBillableItems.map((item) => item.id);
-    expect(extractedIds).toEqual(['sales_001', 'sales_003', 'sales_005', 'sales_007']);
-    expect(extractedIds).not.toContain('sales_002');
-    expect(extractedIds).not.toContain('sales_004');
-    expect(extractedIds).not.toContain('sales_006');
-
-    // すべての抽出アイテムが請求対象であることを確認
-    extractedBillableItems.forEach((item) => {
-      expect(item.isBillable).toBe(true);
-    });
-
-    // 顧客別・サービス別の請求額集計処理を実行
-    const billingAggregation = aggregateBillingAmount(extractedBillableItems);
-
-    // 集計対象データに請求対象外項目が含まれていないことを確認
-    // cust_A + svc_001: 50000 + 45000 = 95000
-    // cust_A + svc_002: 80000
-    // cust_B + svc_001: 40000
-    const custA_svc001 = billingAggregation.find(
-      (agg) => agg.customerId === 'cust_A' && agg.serviceId === 'svc_001'
+    // マッピング仕様書を作成・保存する
+    const createdSpecification = createSalesDataMappingSpecification(
+      mappingSpecification
     );
-    expect(custA_svc001).toBeDefined();
-    expect(custA_svc001!.totalAmount).toBe(95000);
-    expect(custA_svc001!.itemCount).toBe(2);
 
-    const custA_svc002 = billingAggregation.find(
-      (agg) => agg.customerId === 'cust_A' && agg.serviceId === 'svc_002'
+    // 保存したマッピング仕様書の内容を確認
+    expect(createdSpecification).toBeDefined();
+    expect(createdSpecification.sourceItemId).toBe("SALES_ITEM_001");
+    expect(createdSpecification.sourceItemName).toBe("顧客名");
+    expect(createdSpecification.mappings).toHaveLength(2);
+
+    // 請求書マッピングの検証
+    const billingMapping = createdSpecification.mappings[0];
+    expect(billingMapping.mappingId).toBe("MAP_BILL_001");
+    expect(billingMapping.targetSystem).toBe("billing");
+    expect(billingMapping.targetItemName).toBe("請求先名");
+    expect(billingMapping.transformationRule.ruleType).toBe("uppercase");
+    expect(billingMapping.transformationRule.maxLength).toBe(50);
+
+    // レポートマッピングの検証
+    const reportMapping = createdSpecification.mappings[1];
+    expect(reportMapping.mappingId).toBe("MAP_REPORT_001");
+    expect(reportMapping.targetSystem).toBe("reporting");
+    expect(reportMapping.targetItemName).toBe("顧客表示名");
+    expect(reportMapping.transformationRule.ruleType).toBe(
+      "titlecase_with_truncation"
     );
-    expect(custA_svc002).toBeDefined();
-    expect(custA_svc002!.totalAmount).toBe(80000);
-    expect(custA_svc002!.itemCount).toBe(1);
+    expect(reportMapping.transformationRule.maxLength).toBe(30);
 
-    const custB_svc001 = billingAggregation.find(
-      (agg) => agg.customerId === 'cust_B' && agg.serviceId === 'svc_001'
+    // 営業データの変換処理を実行
+    const salesDataRecord = {
+      itemId: "SALES_ITEM_001",
+      value: "ACME CORPORATION",
+    };
+
+    const transformedData = applySalesDataTransformationRules(
+      salesDataRecord,
+      createdSpecification
     );
-    expect(custB_svc001).toBeDefined();
-    expect(custB_svc001!.totalAmount).toBe(40000);
-    expect(custB_svc001!.itemCount).toBe(1);
 
-    // 請求対象外項目の金額が集計結果に反映されていないことを検証
-    // discount_item (5000), internal_adjustment (10000), promo_credit (3000) は含まれない
-    const totalBilledAmount = billingAggregation.reduce((sum, agg) => sum + agg.totalAmount, 0);
-    expect(totalBilledAmount).toBe(215000); // 95000 + 80000 + 40000
-    const nonBillableAmount = nonBillableItems.reduce((sum, item) => sum + item.amount, 0);
-    expect(nonBillableAmount).toBe(18000); // 5000 + 10000 + 3000
-    expect(totalBilledAmount + nonBillableAmount).toBe(233000); // 元データの合計
+    // 請求書側の変換結果を検証: 大文字変換（50文字上限）
+    expect(transformedData.billing).toBeDefined();
+    expect(transformedData.billing.targetItemName).toBe("請求先名");
+    expect(transformedData.billing.transformedValue).toBe(
+      "ACME CORPORATION"
+    );
+    expect(transformedData.billing.appliedRule).toBe("uppercase");
 
-    // 請求対象項目のみで正しく集計されていることを確認
-    expect(billingAggregation).toHaveLength(3);
-    billingAggregation.forEach((agg) => {
-      expect(agg.totalAmount).toBeGreaterThan(0);
-      expect(agg.itemCount).toBeGreaterThan(0);
-    });
+    // レポート側の変換結果を検証: タイトルケース+30文字切り詰め
+    expect(transformedData.reporting).toBeDefined();
+    expect(transformedData.reporting.targetItemName).toBe("顧客表示名");
+    expect(transformedData.reporting.transformedValue).toBe(
+      "Acme Corporation"
+    );
+    expect(transformedData.reporting.appliedRule).toBe(
+      "titlecase_with_truncation"
+    );
+
+    // マッピング仕様書に全ての変換ルールが記録されているか確認
+    expect(createdSpecification.mappings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          mappingId: "MAP_BILL_001",
+          transformationRule: expect.objectContaining({
+            ruleType: "uppercase",
+            maxLength: 50,
+          }),
+        }),
+        expect.objectContaining({
+          mappingId: "MAP_REPORT_001",
+          transformationRule: expect.objectContaining({
+            ruleType: "titlecase_with_truncation",
+            maxLength: 30,
+          }),
+        }),
+      ])
+    );
+
+    // 処理の追跡可能性: タイムスタンプと処理ログが記録されているか確認
+    expect(transformedData.processLog).toBeDefined();
+    expect(transformedData.processLog.sourceItemId).toBe("SALES_ITEM_001");
+    expect(transformedData.processLog.transformationApplied).toBe(true);
+    expect(transformedData.processLog.mappingsAppliedCount).toBe(2);
+    expect(transformedData.processLog.timestamp).toBeDefined();
   });
 });

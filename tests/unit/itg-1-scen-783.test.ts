@@ -1,66 +1,112 @@
-import { getLatestContractVersionBySalesDocId } from "../../src/logic/it-1781935279444-1-1-1";
+import { describe, test, expect, beforeEach, afterEach } from '@jest/globals';
+import { checkSLAExceedanceAndNotify } from '../../src/logic/it-1781935279444-1-1-1';
 
-describe("営業データ項目のメタデータ管理機能", () => {
-  test("SCEN-783: 同一顧客・案件に複数バージョンが存在する場合、最新バージョンのみが返される", () => {
-    // 同一顧客・案件に対して、異なるバージョンの契約資料を3件事前登録
-    const customerId = "CUST-001";
-    const opportunityId = "OPP-001";
-    const createdAtV1 = new Date("2024-01-10T08:00:00Z");
-    const createdAtV1_5 = new Date("2024-01-15T10:30:00Z");
-    const createdAtV2 = new Date("2024-01-20T14:00:00Z");
+describe('営業データ項目のメタデータ管理機能 - SLA監視', () => {
+  let fetchMock: any;
 
-    const inputData = {
+  beforeEach(() => {
+    fetchMock = require('jest-fetch-mock');
+    fetchMock.enableMocks();
+    fetchMock.resetMocks();
+  });
+
+  afterEach(() => {
+    fetchMock.disableMocks();
+  });
+
+  // SCEN-783: [normal] 資料リリース通知から確認完了までのSLA監視機能
+  test('SLA超過時に代表ユーザーに遅延アラートが正常に送信される', async () => {
+    // テストデータ：資料リリース通知
+    const notificationId = 'notif_20240115_001';
+    const documentId = 'doc_contract_2024_001';
+    const documentName = '基本契約書_2024年版';
+    const customerId = 'cust_abc123';
+    const customerName = '株式会社テスト';
+    
+    // 通知送信時刻（固定値）
+    const notificationSentAt = new Date('2024-01-15T09:00:00Z');
+    
+    // SLA設定：24時間以内に確認完了が必須
+    const slaHours = 24;
+    
+    // SLA超過をシミュレート：通知から26時間経過
+    const currentTime = new Date('2024-01-16T11:00:00Z');
+    const elapsedMs = currentTime.getTime() - notificationSentAt.getTime();
+    const elapsedHours = elapsedMs / (1000 * 60 * 60);
+    const exceedanceHours = elapsedHours - slaHours; // 2時間超過
+    
+    // SLA超過判定：経過時間がSLA制限時間を超過
+    const isExceeded = elapsedHours > slaHours;
+    expect(isExceeded).toBe(true);
+    expect(exceedanceHours).toBe(2);
+    
+    // 代表ユーザー情報
+    const adminUserId = 'user_admin_001';
+    const adminEmail = 'admin@company.example.com';
+    
+    // API モック：アラート送信エンドポイント
+    fetchMock.mockResponseOnce(
+      JSON.stringify({
+        success: true,
+        alertId: 'alert_20240116_sla_001',
+        sentAt: '2024-01-16T11:00:00Z',
+      }),
+      { status: 200 }
+    );
+    
+    // SLA監視機能を実行
+    const alertResult = await checkSLAExceedanceAndNotify({
+      notificationId: notificationId,
+      documentId: documentId,
+      documentName: documentName,
       customerId: customerId,
-      opportunityId: opportunityId,
-      versions: [
-        {
-          id: "DOC-V1-001",
-          versionNumber: "v1.0",
-          createdAt: createdAtV1,
-          isLatest: false,
-          fileName: "contract_v1.0.pdf",
-        },
-        {
-          id: "DOC-V1_5-001",
-          versionNumber: "v1.5",
-          createdAt: createdAtV1_5,
-          isLatest: false,
-          fileName: "contract_v1.5.pdf",
-        },
-        {
-          id: "DOC-V2-001",
-          versionNumber: "v2.0",
-          createdAt: createdAtV2,
-          isLatest: true,
-          fileName: "contract_v2.0.pdf",
-        },
-      ],
-    };
-
-    // 最新版自動特定機能を実行
-    const result = getLatestContractVersionBySalesDocId(inputData);
-
-    // 返却されたレコード件数を検証：1件のみ
-    expect(result.length).toBe(1);
-
-    // 返却されたバージョンが最新版（v2.0）であることを検証
-    expect(result[0].versionNumber).toBe("v2.0");
-
-    // 返却されたドキュメントIDが正しいことを検証
-    expect(result[0].id).toBe("DOC-V2-001");
-
-    // 最新版を示すメタデータが含まれていることを検証
-    expect(result[0].isLatest).toBe(true);
-
-    // 作成日時が最も新しいタイムスタンプであることを検証
-    expect(result[0].createdAt).toEqual(createdAtV2);
-
-    // ファイル名が正しいことを検証
-    expect(result[0].fileName).toBe("contract_v2.0.pdf");
-
-    // 旧バージョン（v1.0、v1.5）が除外されていることを検証
-    const versionNumbers = result.map((item) => item.versionNumber);
-    expect(versionNumbers).not.toContain("v1.0");
-    expect(versionNumbers).not.toContain("v1.5");
+      customerName: customerName,
+      notificationSentAt: notificationSentAt.toISOString(),
+      currentTime: currentTime.toISOString(),
+      slaHours: slaHours,
+      adminUserId: adminUserId,
+      adminEmail: adminEmail,
+    });
+    
+    // 戻り値の構造を検証
+    expect(alertResult).toEqual({
+      isExceeded: true,
+      notificationId: notificationId,
+      exceedanceHours: 2,
+      documentInfo: {
+        documentId: documentId,
+        documentName: documentName,
+      },
+      customerInfo: {
+        customerId: customerId,
+        customerName: customerName,
+      },
+      alertId: 'alert_20240116_sla_001',
+      alertSentAt: '2024-01-16T11:00:00Z',
+      adminUserId: adminUserId,
+      adminEmail: adminEmail,
+    });
+    
+    // API呼び出しが正確に実行されたことを検証
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const callArgs = fetchMock.mock.calls[0];
+    expect(callArgs[0]).toMatch(/\/api\/alert\/send/);
+    expect(callArgs[1].method).toBe('POST');
+    
+    // リクエストボディの内容を検証
+    const requestBody = JSON.parse(callArgs[1].body);
+    expect(requestBody.notificationId).toBe(notificationId);
+    expect(requestBody.exceedanceHours).toBe(2);
+    expect(requestBody.documentName).toBe(documentName);
+    expect(requestBody.customerName).toBe(customerName);
+    expect(requestBody.adminEmail).toBe(adminEmail);
+    
+    // アラート内容が必須情報をすべて含んでいることを検証
+    expect(alertResult.alertId).toBeDefined();
+    expect(alertResult.alertSentAt).toBeDefined();
+    expect(alertResult.notificationId).toBe(notificationId);
+    expect(alertResult.exceedanceHours).toBe(2);
+    expect(alertResult.documentInfo.documentName).toBe(documentName);
+    expect(alertResult.customerInfo.customerName).toBe(customerName);
   });
 });

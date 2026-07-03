@@ -1,64 +1,139 @@
-import { calculateContractBillingAmount } from '../../src/logic/it-1-2-1';
+import { describe, test, expect } from "@jest/globals";
+import { validateBillingCalculationAgainstProcedure } from "../../src/logic/it-1781935279444-2-1-1";
 
-describe('契約別請求額計算機能 - 割引率検証', () => {
-  // SCEN-962
-  test('割引率が100%を超える不正な入力値に対してエラーを返す', () => {
-    const invalid_discount_rates = [150, 200, 999, 101, 110];
+describe("営業データ入力時の品質検証ルール定義・実行機能", () => {
+  // SCEN-962: [normal] 請求額計算結果の手順書照合検証
+  test("計算された請求額が手順書のルールに完全に合致し、乖離が検出されない", () => {
+    // パターン1: 通常取引（割引なし、税率10%）
+    const normalTransaction = {
+      salesAmount: 100000,
+      discountRate: 0,
+      taxRate: 0.1,
+      procedureBaseAmount: 100000,
+      procedureExpectedBillingAmount: 110000,
+    };
 
-    invalid_discount_rates.forEach((discount_rate) => {
-      expect(() =>
-        calculateContractBillingAmount({
-          contract_id: 'CTR-001',
-          service_id: 'SVC-001',
-          base_amount: 100000,
-          discount_rate: discount_rate,
-          quantity: 1,
-          unit_price: 100000,
-        })
-      ).toThrow(/割引率/);
-    });
+    const resultNormal = validateBillingCalculationAgainstProcedure(
+      normalTransaction
+    );
 
-    // 正常系: 割引率が100%以下の場合は処理される
-    const result = calculateContractBillingAmount({
-      contract_id: 'CTR-001',
-      service_id: 'SVC-001',
-      base_amount: 100000,
-      discount_rate: 20,
-      quantity: 1,
-      unit_price: 100000,
-    });
+    expect(resultNormal.calculatedBillingAmount).toBe(110000);
+    expect(resultNormal.procedureExpectedBillingAmount).toBe(110000);
+    expect(resultNormal.discrepancyDetected).toBe(false);
+    expect(resultNormal.validationStatus).toBe("compliant");
+    expect(resultNormal.calculationSteps).toEqual([
+      {
+        stepName: "base_calculation",
+        value: 100000,
+        procedureCompliant: true,
+      },
+      {
+        stepName: "tax_application",
+        value: 110000,
+        procedureCompliant: true,
+      },
+    ]);
 
-    expect(result).toEqual({
-      contract_id: 'CTR-001',
-      service_id: 'SVC-001',
-      base_amount: 100000,
-      discount_rate: 20,
-      discount_amount: 20000,
-      billing_amount: 80000,
-    });
+    // パターン2: 割引適用（割引率10%、税率10%）
+    const discountedTransaction = {
+      salesAmount: 100000,
+      discountRate: 0.1,
+      taxRate: 0.1,
+      procedureBaseAmount: 90000,
+      procedureExpectedBillingAmount: 99000,
+    };
 
-    // 境界値: 割引率が0%の場合
-    const result_zero_discount = calculateContractBillingAmount({
-      contract_id: 'CTR-002',
-      service_id: 'SVC-002',
-      base_amount: 50000,
-      discount_rate: 0,
-      quantity: 1,
-      unit_price: 50000,
-    });
+    const resultDiscounted = validateBillingCalculationAgainstProcedure(
+      discountedTransaction
+    );
 
-    expect(result_zero_discount.billing_amount).toBe(50000);
+    expect(resultDiscounted.calculatedBillingAmount).toBe(99000);
+    expect(resultDiscounted.procedureExpectedBillingAmount).toBe(99000);
+    expect(resultDiscounted.discrepancyDetected).toBe(false);
+    expect(resultDiscounted.validationStatus).toBe("compliant");
+    expect(resultDiscounted.calculationSteps).toEqual([
+      {
+        stepName: "discount_application",
+        value: 90000,
+        procedureCompliant: true,
+      },
+      {
+        stepName: "tax_application",
+        value: 99000,
+        procedureCompliant: true,
+      },
+    ]);
 
-    // 境界値: 割引率が100%の場合
-    const result_full_discount = calculateContractBillingAmount({
-      contract_id: 'CTR-003',
-      service_id: 'SVC-003',
-      base_amount: 75000,
-      discount_rate: 100,
-      quantity: 1,
-      unit_price: 75000,
-    });
+    // パターン3: 税率変動（税率8%）
+    const differentTaxTransaction = {
+      salesAmount: 100000,
+      discountRate: 0,
+      taxRate: 0.08,
+      procedureBaseAmount: 100000,
+      procedureExpectedBillingAmount: 108000,
+    };
 
-    expect(result_full_discount.billing_amount).toBe(0);
+    const resultDifferentTax = validateBillingCalculationAgainstProcedure(
+      differentTaxTransaction
+    );
+
+    expect(resultDifferentTax.calculatedBillingAmount).toBe(108000);
+    expect(resultDifferentTax.procedureExpectedBillingAmount).toBe(108000);
+    expect(resultDifferentTax.discrepancyDetected).toBe(false);
+    expect(resultDifferentTax.validationStatus).toBe("compliant");
+    expect(resultDifferentTax.calculationSteps).toEqual([
+      {
+        stepName: "base_calculation",
+        value: 100000,
+        procedureCompliant: true,
+      },
+      {
+        stepName: "tax_application",
+        value: 108000,
+        procedureCompliant: true,
+      },
+    ]);
+
+    // パターン4: 複合適用（割引15%、税率10%）
+    const complexTransaction = {
+      salesAmount: 200000,
+      discountRate: 0.15,
+      taxRate: 0.1,
+      procedureBaseAmount: 170000,
+      procedureExpectedBillingAmount: 187000,
+    };
+
+    const resultComplex = validateBillingCalculationAgainstProcedure(
+      complexTransaction
+    );
+
+    expect(resultComplex.calculatedBillingAmount).toBe(187000);
+    expect(resultComplex.procedureExpectedBillingAmount).toBe(187000);
+    expect(resultComplex.discrepancyDetected).toBe(false);
+    expect(resultComplex.validationStatus).toBe("compliant");
+    expect(resultComplex.calculationSteps).toEqual([
+      {
+        stepName: "discount_application",
+        value: 170000,
+        procedureCompliant: true,
+      },
+      {
+        stepName: "tax_application",
+        value: 187000,
+        procedureCompliant: true,
+      },
+    ]);
+
+    // すべてのパターンで乖離検出アラートが発生していないことを確認
+    expect(resultNormal.alertsGenerated).toBe(false);
+    expect(resultDiscounted.alertsGenerated).toBe(false);
+    expect(resultDifferentTax.alertsGenerated).toBe(false);
+    expect(resultComplex.alertsGenerated).toBe(false);
+
+    // 詳細ログが手順書規定に従っていることを確認
+    expect(resultNormal.detailedLog).toContain("calculation compliant");
+    expect(resultDiscounted.detailedLog).toContain("calculation compliant");
+    expect(resultDifferentTax.detailedLog).toContain("calculation compliant");
+    expect(resultComplex.detailedLog).toContain("calculation compliant");
   });
 });

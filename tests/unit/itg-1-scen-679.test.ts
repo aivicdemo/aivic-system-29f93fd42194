@@ -1,147 +1,212 @@
-import { describe, test, expect, beforeEach, afterEach } from '@jest/globals';
-import { generateAndDistributeReports } from '../../src/logic/it-1-2-1';
+import {
+  aggregateMonthlyReportByCustomerAndService,
+} from "../../src/logic/it-1-br-1781935279444-1-2-1";
 
-const fetchMock = require('jest-fetch-mock');
-
-describe('営業成果データから請求対象項目を自動抽出し、顧客ごと・サービスごとの請求額を集計する機能', () => {
-  beforeEach(() => {
-    fetchMock.enableMocks();
-    fetchMock.resetMocks();
-  });
-
-  afterEach(() => {
-    fetchMock.disableMocks();
-  });
-
-  // SCEN-679: [normal] レポート自動配信機能 - 配信対象顧客が複数の場合、全顧客に同時配信される
-  test('複数の配信対象顧客に対して同時刻でレポートが配信され、各顧客が正確な内容を受け取ることを検証', () => {
-    const execution_timestamp = '2024-01-15T09:00:00Z';
-    const customer_1_id = 'CUST001';
-    const customer_2_id = 'CUST002';
-    const customer_3_id = 'CUST003';
-    const report_id = 'REPORT202401001';
-    const service_1 = 'SERVICE_A';
-    const service_2 = 'SERVICE_B';
-
-    const distribution_request = {
-      report_id: report_id,
-      execution_timestamp: execution_timestamp,
-      customers: [
-        {
-          customer_id: customer_1_id,
-          service_types: [service_1, service_2],
-          email: 'contact@customer1.jp',
-          report_content: {
-            apo_count: 15,
-            contract_count: 3,
-            service_A_billing_amount: 450000,
-            service_B_billing_amount: 300000,
-            total_billing_amount: 750000,
-          },
-        },
-        {
-          customer_id: customer_2_id,
-          service_types: [service_1],
-          email: 'contact@customer2.jp',
-          report_content: {
-            apo_count: 8,
-            contract_count: 2,
-            service_A_billing_amount: 240000,
-            service_B_billing_amount: 0,
-            total_billing_amount: 240000,
-          },
-        },
-        {
-          customer_id: customer_3_id,
-          service_types: [service_2],
-          email: 'contact@customer3.jp',
-          report_content: {
-            apo_count: 12,
-            contract_count: 4,
-            service_A_billing_amount: 0,
-            service_B_billing_amount: 480000,
-            total_billing_amount: 480000,
-          },
-        },
-      ],
-    };
-
-    const expected_distribution_log = [
+describe("月次サマリーテンプレートの定義・管理機能", () => {
+  // SCEN-679: [normal] 月次成果レポート自動集計機能 - 営業データから標準化されたレポートテンプレートに基づき顧客ごと・サービスごとの成果指標が自動集計される
+  test("should automatically aggregate sales performance metrics by customer and service based on standardized template", () => {
+    const sales_data = [
       {
-        log_id: 'LOG20240115090000001',
-        report_id: report_id,
-        customer_id: customer_1_id,
-        distribution_timestamp: execution_timestamp,
-        status: 'SUCCESS',
-        email_address: 'contact@customer1.jp',
-        content_hash: expect.any(String),
+        customer_id: "CUST001",
+        customer_name: "顧客A",
+        service_id: "SVC001",
+        service_name: "コンサルティング",
+        appointment_count: 5,
+        deal_count: 3,
+        revenue: 150000,
+        customer_satisfaction: 4.5,
       },
       {
-        log_id: 'LOG20240115090000002',
-        report_id: report_id,
-        customer_id: customer_2_id,
-        distribution_timestamp: execution_timestamp,
-        status: 'SUCCESS',
-        email_address: 'contact@customer2.jp',
-        content_hash: expect.any(String),
+        customer_id: "CUST001",
+        customer_name: "顧客A",
+        service_id: "SVC002",
+        service_name: "システム構築",
+        appointment_count: 8,
+        deal_count: 2,
+        revenue: 500000,
+        customer_satisfaction: 4.8,
       },
       {
-        log_id: 'LOG20240115090000003',
-        report_id: report_id,
-        customer_id: customer_3_id,
-        distribution_timestamp: execution_timestamp,
-        status: 'SUCCESS',
-        email_address: 'contact@customer3.jp',
-        content_hash: expect.any(String),
+        customer_id: "CUST002",
+        customer_name: "顧客B",
+        service_id: "SVC001",
+        service_name: "コンサルティング",
+        appointment_count: 12,
+        deal_count: 4,
+        revenue: 200000,
+        customer_satisfaction: 4.2,
+      },
+      {
+        customer_id: "CUST002",
+        customer_name: "顧客B",
+        service_id: "SVC003",
+        service_name: "運用サポート",
+        appointment_count: 3,
+        deal_count: 1,
+        revenue: 80000,
+        customer_satisfaction: 3.9,
       },
     ];
 
-    fetchMock.mockResponseOnce(
-      JSON.stringify({
-        distribution_logs: expected_distribution_log,
-        total_customers_distributed: 3,
-        total_customers_failed: 0,
-        execution_timestamp: execution_timestamp,
-      }),
-      { status: 200 }
+    const template_config = {
+      template_id: "TPL_MONTHLY_001",
+      template_name: "標準月次成果レポート",
+      aggregation_level: ["customer", "service"],
+      metrics: [
+        {
+          metric_id: "MTR_APPOINTMENT",
+          metric_name: "アポイント数",
+          calculation_type: "sum",
+          source_field: "appointment_count",
+          unit: "件",
+        },
+        {
+          metric_id: "MTR_DEAL",
+          metric_name: "成約数",
+          calculation_type: "sum",
+          source_field: "deal_count",
+          unit: "件",
+        },
+        {
+          metric_id: "MTR_REVENUE",
+          metric_name: "売上",
+          calculation_type: "sum",
+          source_field: "revenue",
+          unit: "円",
+        },
+        {
+          metric_id: "MTR_CONVERSION",
+          metric_name: "成約率",
+          calculation_type: "custom",
+          formula: "deal_count / appointment_count * 100",
+          unit: "%",
+        },
+        {
+          metric_id: "MTR_SATISFACTION",
+          metric_name: "顧客満足度",
+          calculation_type: "average",
+          source_field: "customer_satisfaction",
+          unit: "点",
+        },
+      ],
+      period: {
+        period_start: "2024-01-01",
+        period_end: "2024-01-31",
+        period_type: "monthly",
+      },
+    };
+
+    const result = aggregateMonthlyReportByCustomerAndService(
+      sales_data,
+      template_config
     );
 
-    const result = generateAndDistributeReports(distribution_request);
+    // レポートが生成されていることを確認
+    expect(result).toBeDefined();
+    expect(result.template_id).toBe("TPL_MONTHLY_001");
+    expect(result.template_name).toBe("標準月次成果レポート");
+    expect(result.period_type).toBe("monthly");
+    expect(result.period_start).toBe("2024-01-01");
+    expect(result.period_end).toBe("2024-01-31");
 
-    expect(result).toEqual({
-      distribution_logs: expect.any(Array),
-      total_customers_distributed: 3,
-      total_customers_failed: 0,
-      execution_timestamp: execution_timestamp,
-    });
+    // 顧客ごとの集計結果を検証
+    expect(result.customer_summaries).toBeDefined();
+    expect(result.customer_summaries.length).toBe(2);
 
-    expect(result.distribution_logs).toHaveLength(3);
+    const cust001_summary = result.customer_summaries.find(
+      (s) => s.customer_id === "CUST001"
+    );
+    expect(cust001_summary).toBeDefined();
+    expect(cust001_summary.customer_name).toBe("顧客A");
+    expect(cust001_summary.total_appointment_count).toBe(13); // 5 + 8
+    expect(cust001_summary.total_deal_count).toBe(5); // 3 + 2
+    expect(cust001_summary.total_revenue).toBe(650000); // 150000 + 500000
+    expect(cust001_summary.total_conversion_rate).toBeCloseTo(
+      (5 / 13) * 100,
+      1
+    ); // 38.46%
+    expect(cust001_summary.average_satisfaction).toBeCloseTo(4.65, 1); // (4.5 + 4.8) / 2
 
-    const log_1 = result.distribution_logs[0];
-    const log_2 = result.distribution_logs[1];
-    const log_3 = result.distribution_logs[2];
+    const cust002_summary = result.customer_summaries.find(
+      (s) => s.customer_id === "CUST002"
+    );
+    expect(cust002_summary).toBeDefined();
+    expect(cust002_summary.customer_name).toBe("顧客B");
+    expect(cust002_summary.total_appointment_count).toBe(15); // 12 + 3
+    expect(cust002_summary.total_deal_count).toBe(5); // 4 + 1
+    expect(cust002_summary.total_revenue).toBe(280000); // 200000 + 80000
+    expect(cust002_summary.total_conversion_rate).toBeCloseTo(
+      (5 / 15) * 100,
+      1
+    ); // 33.33%
+    expect(cust002_summary.average_satisfaction).toBeCloseTo(4.05, 1); // (4.2 + 3.9) / 2
 
-    expect(log_1.customer_id).toBe(customer_1_id);
-    expect(log_1.distribution_timestamp).toBe(execution_timestamp);
-    expect(log_1.status).toBe('SUCCESS');
-    expect(log_1.email_address).toBe('contact@customer1.jp');
+    // 顧客別・サービス別の細粒度集計結果を検証
+    expect(result.service_details).toBeDefined();
+    expect(result.service_details.length).toBe(4);
 
-    expect(log_2.customer_id).toBe(customer_2_id);
-    expect(log_2.distribution_timestamp).toBe(execution_timestamp);
-    expect(log_2.status).toBe('SUCCESS');
-    expect(log_2.email_address).toBe('contact@customer2.jp');
+    const cust001_svc001 = result.service_details.find(
+      (d) => d.customer_id === "CUST001" && d.service_id === "SVC001"
+    );
+    expect(cust001_svc001).toBeDefined();
+    expect(cust001_svc001.service_name).toBe("コンサルティング");
+    expect(cust001_svc001.appointment_count).toBe(5);
+    expect(cust001_svc001.deal_count).toBe(3);
+    expect(cust001_svc001.revenue).toBe(150000);
+    expect(cust001_svc001.conversion_rate).toBeCloseTo(60, 1); // 3/5 * 100
+    expect(cust001_svc001.satisfaction_score).toBe(4.5);
 
-    expect(log_3.customer_id).toBe(customer_3_id);
-    expect(log_3.distribution_timestamp).toBe(execution_timestamp);
-    expect(log_3.status).toBe('SUCCESS');
-    expect(log_3.email_address).toBe('contact@customer3.jp');
+    const cust001_svc002 = result.service_details.find(
+      (d) => d.customer_id === "CUST001" && d.service_id === "SVC002"
+    );
+    expect(cust001_svc002).toBeDefined();
+    expect(cust001_svc002.service_name).toBe("システム構築");
+    expect(cust001_svc002.appointment_count).toBe(8);
+    expect(cust001_svc002.deal_count).toBe(2);
+    expect(cust001_svc002.revenue).toBe(500000);
+    expect(cust001_svc002.conversion_rate).toBeCloseTo(25, 1); // 2/8 * 100
+    expect(cust001_svc002.satisfaction_score).toBe(4.8);
 
-    expect(log_1.distribution_timestamp).toBe(log_2.distribution_timestamp);
-    expect(log_2.distribution_timestamp).toBe(log_3.distribution_timestamp);
+    const cust002_svc001 = result.service_details.find(
+      (d) => d.customer_id === "CUST002" && d.service_id === "SVC001"
+    );
+    expect(cust002_svc001).toBeDefined();
+    expect(cust002_svc001.service_name).toBe("コンサルティング");
+    expect(cust002_svc001.appointment_count).toBe(12);
+    expect(cust002_svc001.deal_count).toBe(4);
+    expect(cust002_svc001.revenue).toBe(200000);
+    expect(cust002_svc001.conversion_rate).toBeCloseTo(
+      (4 / 12) * 100,
+      1
+    ); // 33.33%
+    expect(cust002_svc001.satisfaction_score).toBe(4.2);
 
-    expect(result.total_customers_distributed).toBe(3);
-    expect(result.total_customers_failed).toBe(0);
+    const cust002_svc003 = result.service_details.find(
+      (d) => d.customer_id === "CUST002" && d.service_id === "SVC003"
+    );
+    expect(cust002_svc003).toBeDefined();
+    expect(cust002_svc003.service_name).toBe("運用サポート");
+    expect(cust002_svc003.appointment_count).toBe(3);
+    expect(cust002_svc003.deal_count).toBe(1);
+    expect(cust002_svc003.revenue).toBe(80000);
+    expect(cust002_svc003.conversion_rate).toBeCloseTo(
+      (1 / 3) * 100,
+      1
+    ); // 33.33%
+    expect(cust002_svc003.satisfaction_score).toBe(3.9);
 
-    expect(result.distribution_logs.every((log: any) => log.status === 'SUCCESS')).toBe(true);
+    // テンプレート準拠性の確認
+    expect(result.template_compliance).toBeDefined();
+    expect(result.template_compliance.is_compliant).toBe(true);
+    expect(result.template_compliance.format_validation_passed).toBe(true);
+    expect(result.template_compliance.metric_calculation_valid).toBe(true);
+    expect(result.template_compliance.aggregation_level_correct).toBe(true);
+
+    // 生成完了ステータス
+    expect(result.generation_status).toBe("completed");
+    expect(result.generated_at).toBeDefined();
+    expect(result.total_records_aggregated).toBe(4);
+    expect(result.total_customers).toBe(2);
+    expect(result.total_services).toBe(3);
   });
 });

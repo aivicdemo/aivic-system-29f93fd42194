@@ -1,142 +1,136 @@
-import { aggregateBillingByService } from '../../src/logic/it-1781935279444-1-1-1';
+import {
+  calculateReportLineItems,
+} from '../../src/logic/it-1-br-1781935279444-1-2-1';
 
-describe('営業データ項目メタデータ管理 - 請求対象項目抽出・集計', () => {
-  test('SCEN-609: 請求対象項目マッピングが未定義のサービスで集計がスキップされる', () => {
-    // テスト用サービスマスタデータの準備
-    const serviceWithMappingId = 'service-001';
-    const serviceWithoutMappingId = 'service-002';
-    const serviceNormalId = 'service-003';
+describe('月次サマリーテンプレートの定義・管理機能', () => {
+  // SCEN-609: [normal] 請求書・成果レポート自動生成機能 - テンプレートの計算ロジック・レポートマッピング定義に基づきレポート内容が正確に生成される
+  test('should generate accurate report with correct calculations based on template logic and mapping definitions', () => {
+    // Setup: 顧客情報、売上データ、手数料マスタの事前登録
+    const templateDefinition = {
+      template_id: 'TMPL_STD_001',
+      template_name: '標準請求書テンプレート',
+      calculation_logic: {
+        commission: 'sales_amount * commission_rate',
+        consumption_tax: '(sales_amount + commission) * 0.10',
+        total_amount: 'sales_amount + commission + consumption_tax',
+      },
+      report_mapping: {
+        sales_amount_field: 'revenue',
+        commission_field: 'fee',
+        consumption_tax_field: 'tax',
+        total_amount_field: 'grand_total',
+      },
+    };
 
-    const services = [
-      {
-        serviceId: serviceWithMappingId,
-        serviceName: 'テストサービスA',
-        billingMappingDefined: true,
-      },
-      {
-        serviceId: serviceWithoutMappingId,
-        serviceName: 'テストサービスB（未定義）',
-        billingMappingDefined: false,
-      },
-      {
-        serviceId: serviceNormalId,
-        serviceName: 'テストサービスC',
-        billingMappingDefined: true,
-      },
-    ];
+    const commission_rate_master = {
+      standard: 0.08,
+      premium: 0.05,
+      enterprise: 0.03,
+    };
 
-    // 売上データテストデータの投入
-    const salesData = [
-      {
-        transactionId: 'tx-001',
-        serviceId: serviceWithMappingId,
-        customerId: 'cust-001',
-        amount: 10000,
-        quantity: 2,
-        recordDate: '2024-01-15T10:00:00Z',
-      },
-      {
-        transactionId: 'tx-002',
-        serviceId: serviceWithoutMappingId,
-        customerId: 'cust-002',
-        amount: 5000,
-        quantity: 1,
-        recordDate: '2024-01-15T11:00:00Z',
-      },
-      {
-        transactionId: 'tx-003',
-        serviceId: serviceWithoutMappingId,
-        customerId: 'cust-003',
-        amount: 8000,
-        quantity: 1,
-        recordDate: '2024-01-15T12:00:00Z',
-      },
-      {
-        transactionId: 'tx-004',
-        serviceId: serviceNormalId,
-        customerId: 'cust-001',
-        amount: 15000,
-        quantity: 3,
-        recordDate: '2024-01-15T13:00:00Z',
-      },
-    ];
+    // Test Pattern 1: 少額取引（売上額: 100,000円、標準手数料率 8%）
+    const small_transaction_input = {
+      sales_amount: 100000,
+      commission_rate: commission_rate_master.standard,
+      period_start: '2024-01-01',
+      period_end: '2024-01-31',
+      customer_id: 'CUST_001',
+      template_id: 'TMPL_STD_001',
+    };
 
-    // 請求対象項目マッピング定義
-    const billingMappings = [
-      {
-        serviceId: serviceWithMappingId,
-        mappingId: 'map-001',
-        mappedField: 'amount',
-        calculationLogic: 'direct',
-      },
-      {
-        serviceId: serviceNormalId,
-        mappingId: 'map-003',
-        mappedField: 'amount_with_quantity',
-        calculationLogic: 'multiply_amount_quantity',
-      },
-    ];
-
-    // 請求額集計処理の実行
-    const result = aggregateBillingByService({
-      services,
-      salesData,
-      billingMappings,
-      periodStart: '2024-01-01T00:00:00Z',
-      periodEnd: '2024-01-31T23:59:59Z',
-    });
-
-    // スキップログの検証
-    expect(result.skipLog).toBeDefined();
-    expect(result.skipLog.length).toBe(1);
-    expect(result.skipLog[0].serviceId).toBe(serviceWithoutMappingId);
-    expect(result.skipLog[0].reason).toMatch(/マッピング未定義/);
-
-    // 集計結果に未定義サービスのデータが含まれていないことを確認
-    const aggregatedServices = result.aggregations.map((agg) => agg.serviceId);
-    expect(aggregatedServices).toContain(serviceWithMappingId);
-    expect(aggregatedServices).toContain(serviceNormalId);
-    expect(aggregatedServices).not.toContain(serviceWithoutMappingId);
-
-    // サービスA（マッピング定義あり）の集計結果の検証
-    const serviceAResult = result.aggregations.find(
-      (agg) => agg.serviceId === serviceWithMappingId
+    const small_transaction_result = calculateReportLineItems(
+      small_transaction_input
     );
-    expect(serviceAResult).toBeDefined();
-    expect(serviceAResult!.totalBillingAmount).toBe(10000);
-    expect(serviceAResult!.transactionCount).toBe(1);
 
-    // サービスC（マッピング定義あり、計算ロジック：amount × quantity）の集計結果の検証
-    const serviceCResult = result.aggregations.find(
-      (agg) => agg.serviceId === serviceNormalId
-    );
-    expect(serviceCResult).toBeDefined();
-    expect(serviceCResult!.totalBillingAmount).toBe(45000);
-    expect(serviceCResult!.transactionCount).toBe(1);
+    // 期待値の計算：
+    // 手数料 = 100,000 × 0.08 = 8,000
+    // 消費税 = (100,000 + 8,000) × 0.10 = 10,800
+    // 合計額 = 100,000 + 8,000 + 10,800 = 118,800
+    expect(small_transaction_result.sales_amount).toBe(100000);
+    expect(small_transaction_result.commission).toBe(8000);
+    expect(small_transaction_result.consumption_tax).toBe(10800);
+    expect(small_transaction_result.total_amount).toBe(118800);
+    expect(small_transaction_result.template_id).toBe('TMPL_STD_001');
+    expect(small_transaction_result.customer_id).toBe('CUST_001');
 
-    // 請求データテーブルに未定義サービスのレコードが作成されていないことを検証
-    const generatedBillingRecords = result.generatedBillingRecords;
-    const recordsForUndefinedService = generatedBillingRecords.filter(
-      (record) => record.serviceId === serviceWithoutMappingId
-    );
-    expect(recordsForUndefinedService.length).toBe(0);
+    // Test Pattern 2: 高額取引（売上額: 1,000,000円、プレミアム手数料率 5%）
+    const high_transaction_input = {
+      sales_amount: 1000000,
+      commission_rate: commission_rate_master.premium,
+      period_start: '2024-01-01',
+      period_end: '2024-01-31',
+      customer_id: 'CUST_002',
+      template_id: 'TMPL_STD_001',
+    };
 
-    // 他の正常に定義されたサービスの集計処理は影響を受けていないことを確認
-    const recordsForDefinedServices = generatedBillingRecords.filter(
-      (record) =>
-        record.serviceId === serviceWithMappingId ||
-        record.serviceId === serviceNormalId
+    const high_transaction_result = calculateReportLineItems(
+      high_transaction_input
     );
-    expect(recordsForDefinedServices.length).toBe(2);
-    expect(recordsForDefinedServices.some((r) => r.serviceId === serviceWithMappingId)).toBe(
-      true
-    );
-    expect(recordsForDefinedServices.some((r) => r.serviceId === serviceNormalId)).toBe(true);
 
-    // 処理結果のメタデータ検証
-    expect(result.processedAt).toBeDefined();
-    expect(result.status).toBe('partial_success');
-    expect(result.totalServicesProcessed).toBe(2);
-    expect(result.totalServicesSkipped).toBe(1);
+    // 期待値の計算：
+    // 手数料 = 1,000,000 × 0.05 = 50,000
+    // 消費税 = (1,000,000 + 50,000) × 0.10 = 105,000
+    // 合計額 = 1,000,000 + 50,000 + 105,000 = 1,155,000
+    expect(high_transaction_result.sales_amount).toBe(1000000);
+    expect(high_transaction_result.commission).toBe(50000);
+    expect(high_transaction_result.consumption_tax).toBe(105000);
+    expect(high_transaction_result.total_amount).toBe(1155000);
+
+    // Test Pattern 3: 複数取引集計（複数取引の合計売上: 500,000円、エンタープライズ手数料率 3%）
+    const multiple_transaction_input = {
+      sales_amount: 500000,
+      commission_rate: commission_rate_master.enterprise,
+      period_start: '2024-01-01',
+      period_end: '2024-01-31',
+      customer_id: 'CUST_003',
+      template_id: 'TMPL_STD_001',
+    };
+
+    const multiple_transaction_result = calculateReportLineItems(
+      multiple_transaction_input
+    );
+
+    // 期待値の計算：
+    // 手数料 = 500,000 × 0.03 = 15,000
+    // 消費税 = (500,000 + 15,000) × 0.10 = 51,500
+    // 合計額 = 500,000 + 15,000 + 51,500 = 566,500
+    expect(multiple_transaction_result.sales_amount).toBe(500000);
+    expect(multiple_transaction_result.commission).toBe(15000);
+    expect(multiple_transaction_result.consumption_tax).toBe(51500);
+    expect(multiple_transaction_result.total_amount).toBe(566500);
+
+    // Test Pattern 4: 手数料率変更後の再生成（売上額: 100,000円、手数料率を8%から5%に変更）
+    const modified_rate_input = {
+      sales_amount: 100000,
+      commission_rate: 0.05,
+      period_start: '2024-02-01',
+      period_end: '2024-02-29',
+      customer_id: 'CUST_001',
+      template_id: 'TMPL_STD_001',
+    };
+
+    const modified_rate_result = calculateReportLineItems(
+      modified_rate_input
+    );
+
+    // 期待値の計算：
+    // 手数料 = 100,000 × 0.05 = 5,000
+    // 消費税 = (100,000 + 5,000) × 0.10 = 10,500
+    // 合計額 = 100,000 + 5,000 + 10,500 = 115,500
+    expect(modified_rate_result.sales_amount).toBe(100000);
+    expect(modified_rate_result.commission).toBe(5000);
+    expect(modified_rate_result.consumption_tax).toBe(10500);
+    expect(modified_rate_result.total_amount).toBe(115500);
+
+    // Verify: レポートマッピング定義に基づくフィールド名の正確性
+    expect(modified_rate_result).toHaveProperty('sales_amount');
+    expect(modified_rate_result).toHaveProperty('commission');
+    expect(modified_rate_result).toHaveProperty('consumption_tax');
+    expect(modified_rate_result).toHaveProperty('total_amount');
+
+    // Verify: テンプレートメタデータが正確に保持されている
+    expect(modified_rate_result.template_id).toBe('TMPL_STD_001');
+    expect(modified_rate_result.period_start).toBe('2024-02-01');
+    expect(modified_rate_result.period_end).toBe('2024-02-29');
   });
 });

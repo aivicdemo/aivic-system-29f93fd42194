@@ -1,191 +1,137 @@
-import { generateInvoiceStandardProcedure } from "../../src/logic/it-1-2-1";
+import { validateAggregationFormula } from "../../src/logic/it-1781935279444-2-2-1";
 
-describe("営業成果データから請求対象項目を自動抽出し、顧客ごと・サービスごとの請求額を集計する機能", () => {
-  // SCEN-1076
-  test("必須項目が不足している場合に手順書生成がエラーとなる", () => {
-    const inputWithMissingCustomerName = {
-      customerName: "",
-      invoiceAmount: 100000,
-      invoiceDate: "2024-01-15",
-      serviceType: "営業代行",
-      billingCycle: "月次",
-      paymentTerms: 30,
+describe("営業報告書集計自動検証機能 - 異常値検出と通知", () => {
+  test("SCEN-1076: 計算式適用結果が異常値である場合に検出・通知される", () => {
+    // 前提：営業報告書集計自動検証機能にアクセス可能な状態
+    // テストデータ：異常値を含む営業報告書
+
+    // ケース 1: 売上金額が負数の場合
+    const negative_revenue_input = {
+      revenue: -50000,
+      quantity: 10,
+      unit_price: 5000,
+      timestamp: new Date("2024-01-15T09:30:00Z").toISOString(),
     };
 
-    expect(() =>
-      generateInvoiceStandardProcedure(inputWithMissingCustomerName)
-    ).toThrow(/顧客名/);
-  });
+    const negative_result = validateAggregationFormula(negative_revenue_input);
 
-  test("請求金額が不足している場合に手順書生成がエラーとなる", () => {
-    const inputWithMissingInvoiceAmount = {
-      customerName: "テスト顧客A",
-      invoiceAmount: 0,
-      invoiceDate: "2024-01-15",
-      serviceType: "営業代行",
-      billingCycle: "月次",
-      paymentTerms: 30,
+    expect(negative_result.is_valid).toBe(false);
+    expect(negative_result.error_type).toBe("negative_revenue");
+    expect(negative_result.error_message).toMatch(/売上金額/);
+    expect(negative_result.detection_timestamp).toBeDefined();
+    expect(negative_result.detected_value).toBe(-50000);
+    expect(negative_result.notification_sent).toBe(true);
+
+    // ケース 2: 数量が極端に大きい値の場合
+    const extreme_quantity_input = {
+      revenue: 500000,
+      quantity: 999999999,
+      unit_price: 5000,
+      timestamp: new Date("2024-01-15T10:00:00Z").toISOString(),
     };
 
-    expect(() =>
-      generateInvoiceStandardProcedure(inputWithMissingInvoiceAmount)
-    ).toThrow(/請求金額/);
-  });
+    const extreme_result = validateAggregationFormula(extreme_quantity_input);
 
-  test("請求日が不足している場合に手順書生成がエラーとなる", () => {
-    const inputWithMissingInvoiceDate = {
-      customerName: "テスト顧客A",
-      invoiceAmount: 100000,
-      invoiceDate: "",
-      serviceType: "営業代行",
-      billingCycle: "月次",
-      paymentTerms: 30,
+    expect(extreme_result.is_valid).toBe(false);
+    expect(extreme_result.error_type).toBe("quantity_overflow");
+    expect(extreme_result.error_message).toMatch(/数量/);
+    expect(extreme_result.detection_timestamp).toBeDefined();
+    expect(extreme_result.detected_value).toBe(999999999);
+    expect(extreme_result.notification_sent).toBe(true);
+
+    // ケース 3: 計算式適用により NaN が生成される場合
+    const nan_input = {
+      revenue: 0,
+      quantity: 0,
+      unit_price: 0,
+      timestamp: new Date("2024-01-15T10:30:00Z").toISOString(),
     };
 
-    expect(() =>
-      generateInvoiceStandardProcedure(inputWithMissingInvoiceDate)
-    ).toThrow(/請求日/);
-  });
+    const nan_result = validateAggregationFormula(nan_input);
 
-  test("サービス種別が不足している場合に手順書生成がエラーとなる", () => {
-    const inputWithMissingServiceType = {
-      customerName: "テスト顧客A",
-      invoiceAmount: 100000,
-      invoiceDate: "2024-01-15",
-      serviceType: "",
-      billingCycle: "月次",
-      paymentTerms: 30,
+    expect(nan_result.is_valid).toBe(false);
+    expect(nan_result.error_type).toMatch(/NaN|calculation/);
+    expect(nan_result.error_message).toBeDefined();
+    expect(nan_result.detection_timestamp).toBeDefined();
+    expect(nan_result.notification_sent).toBe(true);
+
+    // ケース 4: 計算式適用により Infinity が生成される場合
+    const infinity_input = {
+      revenue: Number.MAX_VALUE,
+      quantity: 1000000,
+      unit_price: Number.MAX_VALUE,
+      timestamp: new Date("2024-01-15T11:00:00Z").toISOString(),
     };
 
-    expect(() =>
-      generateInvoiceStandardProcedure(inputWithMissingServiceType)
-    ).toThrow(/サービス/);
-  });
+    const infinity_result = validateAggregationFormula(infinity_input);
 
-  test("すべての必須項目が揃っている場合に手順書が正常に生成される", () => {
-    const validInput = {
-      customerName: "テスト顧客A",
-      invoiceAmount: 100000,
-      invoiceDate: "2024-01-15",
-      serviceType: "営業代行",
-      billingCycle: "月次",
-      paymentTerms: 30,
+    expect(infinity_result.is_valid).toBe(false);
+    expect(infinity_result.error_type).toMatch(/Infinity|overflow/);
+    expect(infinity_result.error_message).toBeDefined();
+    expect(infinity_result.detection_timestamp).toBeDefined();
+    expect(infinity_result.notification_sent).toBe(true);
+
+    // ケース 5: 正常値（境界値：最小正の値）
+    const valid_minimal_input = {
+      revenue: 0.01,
+      quantity: 1,
+      unit_price: 0.01,
+      timestamp: new Date("2024-01-15T11:30:00Z").toISOString(),
     };
 
-    const result = generateInvoiceStandardProcedure(validInput);
+    const valid_minimal_result = validateAggregationFormula(
+      valid_minimal_input
+    );
 
-    expect(result).toHaveProperty("procedureId");
-    expect(result).toHaveProperty("generatedAt");
-    expect(result).toHaveProperty("checklist");
-    expect(result.checklist).toBeInstanceOf(Array);
-    expect(result.checklist.length).toBeGreaterThan(0);
-    expect(result).toHaveProperty("template");
-    expect(result.template).toHaveProperty("customerName", "テスト顧客A");
-    expect(result.template).toHaveProperty("invoiceAmount", 100000);
-    expect(result.template).toHaveProperty("invoiceDate", "2024-01-15");
-    expect(result.template).toHaveProperty("serviceType", "営業代行");
-  });
+    expect(valid_minimal_result.is_valid).toBe(true);
+    expect(valid_minimal_result.error_type).toBeNull();
+    expect(valid_minimal_result.error_message).toBeNull();
+    expect(valid_minimal_result.notification_sent).toBe(false);
+    expect(valid_minimal_result.calculated_value).toBeGreaterThan(0);
 
-  test("請求金額が負数の場合にエラーとなる", () => {
-    const inputWithNegativeAmount = {
-      customerName: "テスト顧客A",
-      invoiceAmount: -50000,
-      invoiceDate: "2024-01-15",
-      serviceType: "営業代行",
-      billingCycle: "月次",
-      paymentTerms: 30,
+    // ケース 6: 正常値（通常のケース）
+    const valid_normal_input = {
+      revenue: 1000000,
+      quantity: 100,
+      unit_price: 10000,
+      timestamp: new Date("2024-01-15T12:00:00Z").toISOString(),
     };
 
-    expect(() =>
-      generateInvoiceStandardProcedure(inputWithNegativeAmount)
-    ).toThrow(/請求金額/);
-  });
+    const valid_normal_result = validateAggregationFormula(valid_normal_input);
 
-  test("請求日の形式が不正な場合にエラーとなる", () => {
-    const inputWithInvalidDateFormat = {
-      customerName: "テスト顧客A",
-      invoiceAmount: 100000,
-      invoiceDate: "2024/01/15",
-      serviceType: "営業代行",
-      billingCycle: "月次",
-      paymentTerms: 30,
-    };
+    expect(valid_normal_result.is_valid).toBe(true);
+    expect(valid_normal_result.error_type).toBeNull();
+    expect(valid_normal_result.error_message).toBeNull();
+    expect(valid_normal_result.notification_sent).toBe(false);
+    expect(valid_normal_result.calculated_value).toBe(1000000);
 
-    expect(() =>
-      generateInvoiceStandardProcedure(inputWithInvalidDateFormat)
-    ).toThrow(/日付形式/);
-  });
+    // ケース 7: エラー検出ログ記録確認
+    expect(negative_result.log_record).toBeDefined();
+    expect(negative_result.log_record.error_id).toBeDefined();
+    expect(negative_result.log_record.error_id).toMatch(/^ERR_/);
+    expect(negative_result.log_record.error_occurred_at).toBeDefined();
+    expect(negative_result.log_record.error_location).toMatch(/revenue/);
+    expect(negative_result.log_record.error_severity).toBe("high");
 
-  test("支払い条件が不正な場合にエラーとなる", () => {
-    const inputWithInvalidPaymentTerms = {
-      customerName: "テスト顧客A",
-      invoiceAmount: 100000,
-      invoiceDate: "2024-01-15",
-      serviceType: "営業代行",
-      billingCycle: "月次",
-      paymentTerms: -10,
-    };
+    // ケース 8: 管理者ダッシュボード記録確認
+    expect(negative_result.admin_dashboard_record).toBeDefined();
+    expect(negative_result.admin_dashboard_record.recorded).toBe(true);
+    expect(negative_result.admin_dashboard_record.record_timestamp).toBeDefined();
+    expect(negative_result.admin_dashboard_record.admin_action_required).toBe(
+      true
+    );
 
-    expect(() =>
-      generateInvoiceStandardProcedure(inputWithInvalidPaymentTerms)
-    ).toThrow(/支払い条件/);
-  });
-
-  test("複数の必須項目が不足している場合に最初の不足項目がエラー報告される", () => {
-    const inputWithMultipleMissingFields = {
-      customerName: "",
-      invoiceAmount: 0,
-      invoiceDate: "",
-      serviceType: "",
-      billingCycle: "月次",
-      paymentTerms: 30,
-    };
-
-    expect(() =>
-      generateInvoiceStandardProcedure(inputWithMultipleMissingFields)
-    ).toThrow(/顧客名/);
-  });
-
-  test("生成された手順書に標準チェックリスト項目が含まれている", () => {
-    const validInput = {
-      customerName: "テスト顧客B",
-      invoiceAmount: 250000,
-      invoiceDate: "2024-02-20",
-      serviceType: "提案資料管理",
-      billingCycle: "月次",
-      paymentTerms: 45,
-    };
-
-    const result = generateInvoiceStandardProcedure(validInput);
-
-    expect(result.checklist).toContainEqual(
-      expect.objectContaining({
-        item: expect.any(String),
-        required: expect.any(Boolean),
-      })
+    // ケース 9: ユーザー通知機能確認
+    expect(negative_result.user_notification).toBeDefined();
+    expect(negative_result.user_notification.notification_channels).toContain(
+      "email"
+    );
+    expect(negative_result.user_notification.notification_channels).toContain(
+      "dashboard"
     );
     expect(
-      result.checklist.some(
-        (item: { item: string }) =>
-          item.item.includes("顧客") || item.item.includes("確認")
-      )
-    ).toBe(true);
-  });
-
-  test("生成された手順書に判定基準が含まれている", () => {
-    const validInput = {
-      customerName: "テスト顧客C",
-      invoiceAmount: 500000,
-      invoiceDate: "2024-03-10",
-      serviceType: "契約管理",
-      billingCycle: "月次",
-      paymentTerms: 60,
-    };
-
-    const result = generateInvoiceStandardProcedure(validInput);
-
-    expect(result.template).toHaveProperty("judgmentCriteria");
-    expect(typeof result.template.judgmentCriteria).toBe("string");
-    expect(result.template.judgmentCriteria.length).toBeGreaterThan(0);
+      negative_result.user_notification.notification_channels
+    ).toContain("log");
+    expect(negative_result.user_notification.email_sent_at).toBeDefined();
   });
 });

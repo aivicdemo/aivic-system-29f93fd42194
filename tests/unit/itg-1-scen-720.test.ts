@@ -1,53 +1,93 @@
-import { validateCorrectionDeadlineAndNotify } from "../../src/logic/it-1-1-1";
+import { describe, it, expect, beforeEach, afterEach } from "@jest/globals";
+import {
+  validateAndApproveOperationalData,
+} from "../../src/logic/it-1781935279444-2-1-1";
 
-describe("営業成果データの自動検証ルール定義と異常検出機能", () => {
-  // SCEN-720: [normal] 修正期限管理と催促通知 - 修正期限超過時に自動催促通知が発行される
-  test("修正期限超過時に自動催促通知が発行される", () => {
-    // テストデータ: 修正期限が過去日時に設定された未修正のデータ品質問題レコード
-    const quality_issue_id = "QI-2024-001";
-    const user_email = "operator@example.com";
-    const correction_deadline = new Date("2024-01-10T23:59:59Z"); // 過去の期限
-    const problem_content = "必須項目『顧客名』が欠落している営業活動レコード";
-    const affected_record_ids = ["REC-001", "REC-002", "REC-003"];
-    const system_execution_time = new Date("2024-01-15T09:30:00Z"); // 期限を超過した実行時刻
+describe("営業データ品質基準チェック・承認機能", () => {
+  let auditLogEntries: Array<{
+    timestamp: string;
+    userId: string;
+    action: string;
+    recordId: string;
+    status: string;
+  }> = [];
 
-    // 修正期限管理システムの自動催促通知処理を実行
-    const notification_result = validateCorrectionDeadlineAndNotify({
-      quality_issue_id,
-      user_email,
-      correction_deadline,
-      problem_content,
-      affected_record_ids,
-      system_execution_time,
-    });
+  beforeEach(() => {
+    auditLogEntries = [];
+  });
 
-    // 催促通知が発行されたかを検証
-    expect(notification_result.notification_issued).toBe(true);
+  afterEach(() => {
+    auditLogEntries = [];
+  });
 
-    // 催促通知メッセージの内容を検証
-    expect(notification_result.notification_message).toContain(quality_issue_id);
-    expect(notification_result.notification_message).toContain(problem_content);
-    expect(notification_result.notification_message).toContain("2024-01-10");
+  // SCEN-720
+  it("修正済みデータがすべての品質基準をパスし確定・承認ステータスへ遷移する", () => {
+    // Arrange
+    const recordId = "OP-2024-001";
+    const userId = "USER-REP-001";
+    const correctedData = {
+      id: recordId,
+      customerName: "テスト顧客A",
+      contactDate: "2024-01-15",
+      appointmentStatus: "confirmed",
+      transactionAmount: 150000,
+      serviceType: "plan-a",
+      status: "pending_approval",
+      createdAt: "2024-01-10T08:00:00Z",
+      correctedAt: "2024-01-12T14:30:00Z",
+    };
 
-    // 新しい期限が計算されているかを検証（修正期限から5営業日を想定）
-    expect(notification_result.new_deadline).toBeDefined();
-    expect(typeof notification_result.new_deadline).toBe("string");
+    const expectedValidationResult = {
+      recordId: recordId,
+      requiredFieldsCheck: true,
+      dataTypeCheck: true,
+      formatCheck: true,
+      valueRangeCheck: true,
+      overallStatus: "合格",
+      allCriteriaMet: true,
+    };
 
-    // 催促通知の配信先アドレスが正しく設定されていることを確認
-    expect(notification_result.delivery_email).toBe(user_email);
+    const mockAuditLog = (entry: {
+      timestamp: string;
+      userId: string;
+      action: string;
+      recordId: string;
+      status: string;
+    }) => {
+      auditLogEntries.push(entry);
+    };
 
-    // 催促通知の発行日時がシステム実行時刻と一致していることを確認
-    expect(notification_result.notification_issued_at).toBe(
-      "2024-01-15T09:30:00Z"
+    // Act
+    const validationResult = validateAndApproveOperationalData(
+      correctedData,
+      userId,
+      mockAuditLog
     );
 
-    // 催促通知ステータスが『発行済み』に更新されていることを確認
-    expect(notification_result.notification_status).toBe("発行済み");
+    // Assert - 1. 検証結果がすべての基準で合格
+    expect(validationResult.overallStatus).toBe("合格");
+    expect(validationResult.requiredFieldsCheck).toBe(true);
+    expect(validationResult.dataTypeCheck).toBe(true);
+    expect(validationResult.formatCheck).toBe(true);
+    expect(validationResult.valueRangeCheck).toBe(true);
+    expect(validationResult.allCriteriaMet).toBe(true);
 
-    // 対象レコード数が正しく反映されていることを確認
-    expect(notification_result.affected_record_count).toBe(3);
+    // Assert - 2. ステータス遷移確認
+    expect(validationResult.newStatus).toBe("確定・承認済み");
 
-    // 修正期限超過日数が計算されていることを確認（2024-01-15 vs 2024-01-10 = 5日超過）
-    expect(notification_result.days_overdue).toBe(5);
+    // Assert - 3. 承認操作が監査ログに記録されたことを確認
+    expect(auditLogEntries.length).toBe(1);
+    const auditEntry = auditLogEntries[0];
+    expect(auditEntry.action).toBe("承認");
+    expect(auditEntry.recordId).toBe(recordId);
+    expect(auditEntry.userId).toBe(userId);
+    expect(auditEntry.status).toBe("確定・承認済み");
+    expect(auditEntry.timestamp).toMatch(
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/
+    );
+
+    // Assert - 4. 請求処理への進行可能性を確認
+    expect(validationResult.proceedToNextWorkflow).toBe(true);
+    expect(validationResult.readyForBilling).toBe(true);
   });
 });

@@ -1,121 +1,138 @@
-import {
-  detectSalesDataQualityIssues,
-} from "../../src/logic/it-1781935279444-2-2-1";
+import { extractBillingDifferences } from '../../src/logic/it-1-2-1';
 
-describe("営業データ品質異常検出・補正指示生成機能", () => {
-  // SCEN-636: [normal] 営業データ品質異常検出・補正指示生成機能 - 月次営業データの異常値と漏れが正確に検出され、補正指示が生成される
-  test("月次営業データから異常値と漏れを検出し、補正指示を生成する", () => {
-    const salesData = [
+describe('契約変更条件と請求パターンの差分可視化機能', () => {
+  test('SCEN-636: 請求データが存在しない契約の差分抽出でも変更条件のみが正確に表示される', () => {
+    // テストデータ: 請求データが存在しない契約レコード
+    const contract_id = 'CTR-20240615-001';
+    const customer_id = 'CUST-A001';
+    const service_id = 'SVC-PREMIUM';
+
+    // 契約変更条件: 複数件の変更条件を設定
+    const contract_changes = [
       {
-        record_id: "REC001",
-        sales_amount: 150000,
-        customer_id: "CUST001",
-        product_code: "PROD001",
-        transaction_date: "2024-01-15",
+        change_id: 'CHG-001',
+        contract_id: contract_id,
+        change_type: '料金プラン変更',
+        change_date: '2024-06-15',
+        change_time: '2024-06-15T09:30:00Z',
+        previous_value: '基本プラン月額5000円',
+        new_value: 'プレミアムプラン月額8000円',
+        change_reason: '顧客要望による上位プランへの変更',
+        approved_by: 'REP-001',
+        approved_date: '2024-06-14T17:00:00Z',
       },
       {
-        record_id: "REC002",
-        sales_amount: -50000,
-        customer_id: "CUST_INVALID",
-        product_code: "PROD002",
-        transaction_date: "2024-01-16",
-      },
-      {
-        record_id: "REC003",
-        sales_amount: 200000,
-        customer_id: "CUST003",
-        product_code: null,
-        transaction_date: "2024-01-17",
-      },
-      {
-        record_id: "REC004",
-        sales_amount: 120000,
-        customer_id: "CUST004",
-        product_code: "PROD_NONEXISTENT",
-        transaction_date: "",
-      },
-      {
-        record_id: "REC005",
-        sales_amount: 0,
-        customer_id: "",
-        product_code: "PROD005",
-        transaction_date: "2024-01-19",
+        change_id: 'CHG-002',
+        contract_id: contract_id,
+        change_type: 'サービス追加',
+        change_date: '2024-06-15',
+        change_time: '2024-06-15T10:00:00Z',
+        previous_value: 'ユーザー数5名まで',
+        new_value: 'ユーザー数10名まで',
+        change_reason: '拡張オプション追加',
+        approved_by: 'REP-001',
+        approved_date: '2024-06-14T17:00:00Z',
       },
     ];
 
-    const validCustomerIds = ["CUST001", "CUST003", "CUST004", "CUST005"];
-    const validProductCodes = ["PROD001", "PROD002", "PROD005", "PROD006"];
-    const minSalesAmount = 1000;
-    const maxSalesAmount = 1000000;
+    // 請求データは意図的に空配列 (存在しない状態)
+    const billing_records: Array<{
+      billing_id: string;
+      contract_id: string;
+      billing_date: string;
+      amount: number;
+    }> = [];
 
-    const result = detectSalesDataQualityIssues(
-      salesData,
-      validCustomerIds,
-      validProductCodes,
-      minSalesAmount,
-      maxSalesAmount
+    // 期待される差分結果
+    const expected_diff_result = {
+      contract_id: contract_id,
+      customer_id: customer_id,
+      service_id: service_id,
+      contract_changes_found: true,
+      billing_records_found: false,
+      billing_records_status: 'データなし',
+      contract_changes: [
+        {
+          change_id: 'CHG-001',
+          change_type: '料金プラン変更',
+          change_date: '2024-06-15',
+          change_time: '2024-06-15T09:30:00Z',
+          previous_value: '基本プラン月額5000円',
+          new_value: 'プレミアムプラン月額8000円',
+          change_reason: '顧客要望による上位プランへの変更',
+          approved_by: 'REP-001',
+          approved_date: '2024-06-14T17:00:00Z',
+        },
+        {
+          change_id: 'CHG-002',
+          change_type: 'サービス追加',
+          change_date: '2024-06-15',
+          change_time: '2024-06-15T10:00:00Z',
+          previous_value: 'ユーザー数5名まで',
+          new_value: 'ユーザー数10名まで',
+          change_reason: '拡張オプション追加',
+          approved_by: 'REP-001',
+          approved_date: '2024-06-14T17:00:00Z',
+        },
+      ],
+      billing_pattern_diff: null,
+      error_occurred: false,
+      error_message: null,
+      processing_timestamp: '2024-06-15T10:30:00Z',
+    };
+
+    // 差分可視化機能を実行
+    const actual_result = extractBillingDifferences({
+      contract_id: contract_id,
+      customer_id: customer_id,
+      service_id: service_id,
+      contract_changes: contract_changes,
+      billing_records: billing_records,
+      timestamp: '2024-06-15T10:30:00Z',
+    });
+
+    // アサーション: エラーが発生していないこと
+    expect(actual_result.error_occurred).toBe(false);
+    expect(actual_result.error_message).toBeNull();
+
+    // アサーション: 請求データが存在しないことが正しく検出されたこと
+    expect(actual_result.billing_records_found).toBe(false);
+    expect(actual_result.billing_records_status).toBe('データなし');
+
+    // アサーション: 変更条件が完全に表示されていること
+    expect(actual_result.contract_changes_found).toBe(true);
+    expect(actual_result.contract_changes.length).toBe(2);
+
+    // アサーション: 最初の変更条件が正確に表示されていること
+    expect(actual_result.contract_changes[0].change_id).toBe('CHG-001');
+    expect(actual_result.contract_changes[0].change_type).toBe('料金プラン変更');
+    expect(actual_result.contract_changes[0].change_date).toBe('2024-06-15');
+    expect(actual_result.contract_changes[0].previous_value).toBe(
+      '基本プラン月額5000円'
+    );
+    expect(actual_result.contract_changes[0].new_value).toBe(
+      'プレミアムプラン月額8000円'
     );
 
-    expect(result).toBeDefined();
-    expect(result.total_records).toBe(5);
-    expect(result.issues_detected).toBe(4);
-    expect(result.anomalies).toBeDefined();
-    expect(Array.isArray(result.anomalies)).toBe(true);
-    expect(result.anomalies.length).toBe(4);
-
-    const anomaly_rec002 = result.anomalies.find(
-      (a: any) => a.record_id === "REC002"
+    // アサーション: 二番目の変更条件が正確に表示されていること
+    expect(actual_result.contract_changes[1].change_id).toBe('CHG-002');
+    expect(actual_result.contract_changes[1].change_type).toBe('サービス追加');
+    expect(actual_result.contract_changes[1].previous_value).toBe(
+      'ユーザー数5名まで'
     );
-    expect(anomaly_rec002).toBeDefined();
-    expect(anomaly_rec002.anomaly_type).toMatch(/金額|顧客ID/);
-    expect(anomaly_rec002.severity).toBeDefined();
-
-    const anomaly_rec003 = result.anomalies.find(
-      (a: any) => a.record_id === "REC003"
+    expect(actual_result.contract_changes[1].new_value).toBe(
+      'ユーザー数10名まで'
     );
-    expect(anomaly_rec003).toBeDefined();
-    expect(anomaly_rec003.anomaly_type).toMatch(/商品コード/);
-    expect(anomaly_rec003.details).toMatch(/NULL/);
 
-    const anomaly_rec004 = result.anomalies.find(
-      (a: any) => a.record_id === "REC004"
+    // アサーション: 請求パターン差分が null であること
+    expect(actual_result.billing_pattern_diff).toBeNull();
+
+    // アサーション: 全体の結果構造が期待値と一致すること
+    expect(actual_result.contract_id).toBe(expected_diff_result.contract_id);
+    expect(actual_result.customer_id).toBe(expected_diff_result.customer_id);
+    expect(actual_result.service_id).toBe(expected_diff_result.service_id);
+    expect(actual_result.processing_timestamp).toBe(
+      expected_diff_result.processing_timestamp
     );
-    expect(anomaly_rec004).toBeDefined();
-    expect(anomaly_rec004.anomaly_type).toMatch(/取引日付|商品コード/);
-
-    const anomaly_rec005 = result.anomalies.find(
-      (a: any) => a.record_id === "REC005"
-    );
-    expect(anomaly_rec005).toBeDefined();
-    expect(anomaly_rec005.anomaly_type).toMatch(/金額|顧客ID/);
-
-    expect(result.corrections).toBeDefined();
-    expect(Array.isArray(result.corrections)).toBe(true);
-    expect(result.corrections.length).toBe(4);
-
-    const correction_rec002 = result.corrections.find(
-      (c: any) => c.record_id === "REC002"
-    );
-    expect(correction_rec002).toBeDefined();
-    expect(correction_rec002.correction_type).toBeDefined();
-    expect(correction_rec002.recommended_action).toBeDefined();
-    expect(correction_rec002.priority).toMatch(/高|中|低/);
-
-    const correction_rec003 = result.corrections.find(
-      (c: any) => c.record_id === "REC003"
-    );
-    expect(correction_rec003).toBeDefined();
-    expect(correction_rec003.recommended_action).toMatch(/補正|確認/);
-
-    expect(result.generated_at).toBeDefined();
-    expect(typeof result.generated_at).toBe("string");
-    const timestamp = new Date(result.generated_at);
-    expect(timestamp.getFullYear()).toBe(2024);
-
-    expect(result.metadata).toBeDefined();
-    expect(result.metadata.batch_id).toBeDefined();
-    expect(result.metadata.total_anomalies).toBe(4);
-    expect(result.metadata.total_corrections_generated).toBe(4);
-    expect(result.metadata.processing_status).toMatch(/完了|処理済み/);
   });
 });

@@ -1,38 +1,38 @@
-import { mapMonthlySummaryTemplateFromSalesData } from "../../src/logic/it-1-br-1781935279444-1-2-1";
+import { validateSalesData } from '../../src/logic/it-1781935279444-2-2-1';
 
-describe("月次サマリーテンプレートの定義・管理機能", () => {
-  // SCEN-1149: [error] 営業データから月次サマリーテンプレートへの自動マッピング - テンプレート項目の必須フィールドが営業データに不足している場合、不完全マッピングとして検出される
-  test("必須フィールドが欠落した営業データをマッピングすると、不完全マッピングエラーが発生する", () => {
-    // テンプレート定義：必須フィールド: apoCount, contractCount, customerFeedback
-    const templateDef = {
-      template_id: "tpl_20240101_monthly_v1",
-      template_name: "月次営業成果サマリー",
-      required_fields: ["apoCount", "contractCount", "customerFeedback"],
-      optional_fields: ["discountAmount"],
+describe('営業データの完全性・正確性を自動検証し、不足データ・誤りを検出・通知する機能', () => {
+  // SCEN-1149: [normal] 営業データ品質検証・エラー検出機能 - 必須項目欠落時に検証失敗が正しく記録される
+  test('必須項目欠落時に検証失敗とエラー内容が正しく記録される', () => {
+    const now = new Date('2024-01-15T11:00:00Z');
+
+    // テストデータ：顧客名を意図的に空白にした不完全なデータ
+    const incompleteData = {
+      customer_name: '',
+      amount: 50000,
+      contact_date: '2024-01-10',
+      appointment_status: '確定',
+      service_type: 'コンサル',
     };
 
-    // 営業データ：contractCount と customerFeedback が欠落
-    const salesData = {
-      period: "2024-01",
-      customer_id: "cust_001",
-      service_id: "svc_sales",
-      apoCount: 12,
-      // contractCount 欠落
-      // customerFeedback 欠落
-      discountAmount: 5000,
-    };
+    const result = validateSalesData(incompleteData, now);
 
-    // マッピング処理を実行
-    const result = mapMonthlySummaryTemplateFromSalesData(
-      templateDef,
-      salesData
-    );
+    // ①検証ステータスが「失敗」と記録されること
+    expect(result.validation_status).toBe('failed');
 
-    // 不完全マッピングとして検出されることを確認
-    expect(result.status).toBe("error");
-    expect(result.mapping_result).toBe("incomplete");
-    expect(result.missing_fields).toEqual(["contractCount", "customerFeedback"]);
-    expect(result.error_message).toContain("contractCount");
-    expect(result.error_message).toContain("customerFeedback");
+    // ②不足している具体的な必須項目名が特定されること
+    expect(result.missing_fields).toEqual(expect.arrayContaining(['customer_name']));
+
+    // ③エラーメッセージが明確に表示されること
+    expect(result.error_message).toMatch(/顧客名/);
+
+    // ④エラー検出のタイムスタンプが記録されること
+    expect(result.error_timestamp).toBe('2024-01-15T11:00:00Z');
+
+    // ⑤検証失敗の記録がシステムログ・監査ログに含まれること
+    expect(result.audit_log).toBeDefined();
+    expect(result.audit_log.error_code).toBe('MISSING_REQUIRED_FIELD');
+    expect(result.audit_log.target_field).toBe('customer_name');
+    expect(result.audit_log.severity).toBe('error');
+    expect(result.audit_log.recorded_at).toBe('2024-01-15T11:00:00Z');
   });
 });

@@ -1,169 +1,280 @@
-import { structuredValidationResultWithWarning } from "../../src/logic/it-1781935279444-2-2-1";
+import { describe, test, expect, beforeEach, afterEach } from '@jest/globals';
+import fetchMock from 'jest-fetch-mock';
+import { sendNotificationWithTimestamp } from '../../src/logic/it-1781935279444-2-2-1';
 
-describe("営業データ品質検証 - 参照ドキュメント存在確認", () => {
-  // SCEN-1207: [edge] 検証結果根拠資料構造化機能 - 参照先のソースドキュメント（契約書・提案資料）が存在しない場合、警告フラグが付与される
-  test("参照先のソースドキュメントが存在しない場合、検証結果に警告フラグが付与される", () => {
-    const validation_result_id = "vr_20240115_001";
-    const validation_error_id = "ve_20240115_001";
-    const error_content = "営業データの売上金額が契約条件の範囲を超過";
-    const source_contract_id = null;
-    const source_proposal_id = null;
-    const detected_at_timestamp = new Date("2024-01-15T11:30:00Z");
+fetchMock.enableMocks();
 
-    const result = structuredValidationResultWithWarning({
-      validation_result_id,
-      validation_error_id,
-      error_content,
-      source_contract_id,
-      source_proposal_id,
-      detected_at_timestamp,
-    });
-
-    expect(result.validation_result_id).toBe("vr_20240115_001");
-    expect(result.validation_error_id).toBe("ve_20240115_001");
-    expect(result.error_content).toBe("営業データの売上金額が契約条件の範囲を超過");
-    expect(result.source_contract_id).toBeNull();
-    expect(result.source_proposal_id).toBeNull();
-    expect(result.warning_flag).toBe(true);
-    expect(result.warning_code).toBe("DOC_NOT_FOUND");
-    expect(result.warning_message).toMatch(/参照先ドキュメント/);
-    expect(result.warning_timestamp).toEqual(new Date("2024-01-15T11:30:00Z"));
-    expect(result.processing_status).toBe("CONTINUED_WITH_WARNING");
-    expect(result.is_logged).toBe(true);
+describe('営業データ品質管理・請求自動化システム - メール通知自動送信', () => {
+  beforeEach(() => {
+    fetchMock.resetMocks();
   });
 
-  test("参照先のソースドキュメントが存在する場合、警告フラグは付与されない", () => {
-    const validation_result_id = "vr_20240115_002";
-    const validation_error_id = "ve_20240115_002";
-    const error_content = "営業データの成約日付が営業期間の範囲外";
-    const source_contract_id = "ct_cust_A_202401";
-    const source_proposal_id = "pp_cust_A_202401_rev1";
-    const detected_at_timestamp = new Date("2024-01-15T10:45:00Z");
-
-    const result = structuredValidationResultWithWarning({
-      validation_result_id,
-      validation_error_id,
-      error_content,
-      source_contract_id,
-      source_proposal_id,
-      detected_at_timestamp,
-    });
-
-    expect(result.validation_result_id).toBe("vr_20240115_002");
-    expect(result.warning_flag).toBe(false);
-    expect(result.warning_code).toBeNull();
-    expect(result.warning_message).toBeNull();
-    expect(result.processing_status).toBe("COMPLETED");
-    expect(result.source_contract_id).toBe("ct_cust_A_202401");
-    expect(result.source_proposal_id).toBe("pp_cust_A_202401_rev1");
+  afterEach(() => {
+    fetchMock.resetMocks();
   });
 
-  test("参照先のソースドキュメントが部分的に存在しない場合、警告フラグが付与される", () => {
-    const validation_result_id = "vr_20240115_003";
-    const validation_error_id = "ve_20240115_003";
-    const error_content = "営業データのアポ数が計上ルール違反";
-    const source_contract_id = "ct_cust_B_202401";
-    const source_proposal_id = null;
-    const detected_at_timestamp = new Date("2024-01-15T14:20:00Z");
+  test('SCEN-1207: 有効なメールアドレスに通知送信ボタン押下時、メールが送信され受信確認タイムスタンプが記録される', async () => {
+    // 入力条件: 有効なメールアドレス
+    const input_mail_address = 'test@example.com';
+    const input_notification_content = '営業データ品質チェック完了通知';
+    const input_customer_id = 'CUST-001';
+    const expected_send_timestamp = new Date('2024-01-15T11:00:00Z').toISOString();
 
-    const result = structuredValidationResultWithWarning({
-      validation_result_id,
-      validation_error_id,
-      error_content,
-      source_contract_id,
-      source_proposal_id,
-      detected_at_timestamp,
-    });
-
-    expect(result.validation_result_id).toBe("vr_20240115_003");
-    expect(result.warning_flag).toBe(true);
-    expect(result.warning_code).toBe("PARTIAL_DOC_NOT_FOUND");
-    expect(result.warning_message).toMatch(/提案資料が見つかりません/);
-    expect(result.source_contract_id).toBe("ct_cust_B_202401");
-    expect(result.source_proposal_id).toBeNull();
-    expect(result.processing_status).toBe("CONTINUED_WITH_WARNING");
-  });
-
-  test("警告フラグが付与された場合、ログに記録される", () => {
-    const validation_result_id = "vr_20240115_004";
-    const validation_error_id = "ve_20240115_004";
-    const error_content = "営業データのサービス種別が契約対象外";
-    const source_contract_id = null;
-    const source_proposal_id = null;
-    const detected_at_timestamp = new Date("2024-01-15T16:00:00Z");
-
-    const result = structuredValidationResultWithWarning({
-      validation_result_id,
-      validation_error_id,
-      error_content,
-      source_contract_id,
-      source_proposal_id,
-      detected_at_timestamp,
-    });
-
-    expect(result.warning_flag).toBe(true);
-    expect(result.is_logged).toBe(true);
-    expect(result.log_timestamp).toBeDefined();
-    expect(new Date(result.log_timestamp as string)).toBeInstanceOf(Date);
-    expect(result.log_entry).toMatch(/DOC_NOT_FOUND/);
-  });
-
-  test("複数の検証エラーが存在し、参照ドキュメントが存在しない場合、それぞれに警告フラグが付与される", () => {
-    const validation_errors = [
-      {
-        validation_result_id: "vr_20240115_005a",
-        validation_error_id: "ve_20240115_005a",
-        error_content: "売上金額が範囲超過",
-        source_contract_id: null,
-        source_proposal_id: null,
-        detected_at_timestamp: new Date("2024-01-15T12:00:00Z"),
-      },
-      {
-        validation_result_id: "vr_20240115_005b",
-        validation_error_id: "ve_20240115_005b",
-        error_content: "成約日付が範囲外",
-        source_contract_id: null,
-        source_proposal_id: null,
-        detected_at_timestamp: new Date("2024-01-15T12:15:00Z"),
-      },
-    ];
-
-    const results = validation_errors.map((ve) =>
-      structuredValidationResultWithWarning(ve)
+    // メール送信API のモック
+    fetchMock.mockResponseOnce(
+      JSON.stringify({
+        success: true,
+        message_id: 'MSG-20240115-001',
+        send_timestamp: expected_send_timestamp,
+        recipient_address: input_mail_address,
+        status: 'sent',
+      }),
+      { status: 200 }
     );
 
-    expect(results).toHaveLength(2);
-    results.forEach((result) => {
-      expect(result.warning_flag).toBe(true);
-      expect(result.warning_code).toBe("DOC_NOT_FOUND");
-      expect(result.processing_status).toBe("CONTINUED_WITH_WARNING");
+    // ポータル通知記録API のモック
+    fetchMock.mockResponseOnce(
+      JSON.stringify({
+        success: true,
+        notification_id: 'NOTIF-20240115-001',
+        display_timestamp: expected_send_timestamp,
+        portal_visibility: true,
+      }),
+      { status: 200 }
+    );
+
+    // データベース受信確認記録API のモック
+    fetchMock.mockResponseOnce(
+      JSON.stringify({
+        success: true,
+        receipt_id: 'RECEIPT-20240115-001',
+        received_timestamp: expected_send_timestamp,
+        confirmation_recorded: true,
+      }),
+      { status: 200 }
+    );
+
+    // 関数実行
+    const result = await sendNotificationWithTimestamp({
+      mail_address: input_mail_address,
+      notification_content: input_notification_content,
+      customer_id: input_customer_id,
+      send_timestamp_iso: expected_send_timestamp,
     });
+
+    // 期待結果①: メール送信成功
+    expect(result.mail_send_success).toBe(true);
+    expect(result.mail_recipient).toBe(input_mail_address);
+    expect(result.mail_status).toBe('sent');
+    expect(result.mail_message_id).toBe('MSG-20240115-001');
+
+    // 期待結果②: ポータル通知即座表示
+    expect(result.portal_notification_display).toBe(true);
+    expect(result.portal_notification_id).toBe('NOTIF-20240115-001');
+    expect(result.portal_display_timestamp).toBe(expected_send_timestamp);
+
+    // 期待結果③: データベース受信確認記録
+    expect(result.receipt_confirmation_recorded).toBe(true);
+    expect(result.receipt_id).toBe('RECEIPT-20240115-001');
+    expect(result.received_timestamp_recorded).toBe(expected_send_timestamp);
+
+    // API呼び出し数を検証
+    expect(fetchMock.mock.calls.length).toBe(3);
+
+    // 第1回API呼び出し: メール送信
+    const first_call = fetchMock.mock.calls[0];
+    expect(first_call[0]).toBe('/api/notification/send-email');
+    expect(first_call[1]?.method).toBe('POST');
+
+    // 第2回API呼び出し: ポータル通知
+    const second_call = fetchMock.mock.calls[1];
+    expect(second_call[0]).toBe('/api/portal/record-notification');
+    expect(second_call[1]?.method).toBe('POST');
+
+    // 第3回API呼び出し: 受信確認記録
+    const third_call = fetchMock.mock.calls[2];
+    expect(third_call[0]).toBe('/api/database/record-receipt');
+    expect(third_call[1]?.method).toBe('POST');
+
+    // タイムスタンプの正確性を検証
+    const result_timestamp = new Date(result.received_timestamp_recorded);
+    const expected_timestamp_obj = new Date(expected_send_timestamp);
+    expect(result_timestamp.getTime()).toBe(expected_timestamp_obj.getTime());
   });
 
-  test("警告フラグが付与された場合、ユーザーが警告内容を確認できる", () => {
-    const validation_result_id = "vr_20240115_006";
-    const validation_error_id = "ve_20240115_006";
-    const error_content = "営業データの顧客名が必須項目で欠落";
-    const source_contract_id = null;
-    const source_proposal_id = null;
-    const detected_at_timestamp = new Date("2024-01-15T15:30:00Z");
+  test('SCEN-1207: メールアドレス形式不正時、エラーが発生する', async () => {
+    const input_invalid_mail = 'invalid-email-format';
+    const input_notification_content = '営業データ品質チェック完了通知';
+    const input_customer_id = 'CUST-001';
+    const expected_send_timestamp = new Date('2024-01-15T11:00:00Z').toISOString();
 
-    const result = structuredValidationResultWithWarning({
-      validation_result_id,
-      validation_error_id,
-      error_content,
-      source_contract_id,
-      source_proposal_id,
-      detected_at_timestamp,
+    // 関数実行でエラーをスロー
+    expect(() =>
+      sendNotificationWithTimestamp({
+        mail_address: input_invalid_mail,
+        notification_content: input_notification_content,
+        customer_id: input_customer_id,
+        send_timestamp_iso: expected_send_timestamp,
+      })
+    ).toThrow(/メールアドレス/);
+  });
+
+  test('SCEN-1207: メール送信API失敗時、リトライト処理が実行される', async () => {
+    const input_mail_address = 'test@example.com';
+    const input_notification_content = '営業データ品質チェック完了通知';
+    const input_customer_id = 'CUST-001';
+    const expected_send_timestamp = new Date('2024-01-15T11:00:00Z').toISOString();
+
+    // 1回目の送信失敗、2回目の送信成功
+    fetchMock.mockResponseOnce(
+      JSON.stringify({ success: false, error: 'temporary failure' }),
+      { status: 500 }
+    );
+
+    fetchMock.mockResponseOnce(
+      JSON.stringify({
+        success: true,
+        message_id: 'MSG-20240115-002',
+        send_timestamp: expected_send_timestamp,
+        recipient_address: input_mail_address,
+        status: 'sent',
+      }),
+      { status: 200 }
+    );
+
+    fetchMock.mockResponseOnce(
+      JSON.stringify({
+        success: true,
+        notification_id: 'NOTIF-20240115-002',
+        display_timestamp: expected_send_timestamp,
+        portal_visibility: true,
+      }),
+      { status: 200 }
+    );
+
+    fetchMock.mockResponseOnce(
+      JSON.stringify({
+        success: true,
+        receipt_id: 'RECEIPT-20240115-002',
+        received_timestamp: expected_send_timestamp,
+        confirmation_recorded: true,
+      }),
+      { status: 200 }
+    );
+
+    // 関数実行
+    const result = await sendNotificationWithTimestamp({
+      mail_address: input_mail_address,
+      notification_content: input_notification_content,
+      customer_id: input_customer_id,
+      send_timestamp_iso: expected_send_timestamp,
+      retry_enabled: true,
+      retry_max_attempts: 2,
     });
 
-    expect(result.warning_flag).toBe(true);
-    expect(result.warning_details).toBeDefined();
-    expect(result.warning_details).toHaveProperty("doc_type_expected");
-    expect(result.warning_details.doc_type_expected).toMatch(/contract|proposal/i);
-    expect(result.warning_details).toHaveProperty("severity");
-    expect(result.warning_details.severity).toBe("WARNING");
-    expect(result.warning_details).toHaveProperty("user_action_required");
-    expect(result.warning_details.user_action_required).toBe(true);
+    // リトライト後、最終的に成功
+    expect(result.mail_send_success).toBe(true);
+    expect(result.retry_attempt_count).toBe(2);
+    expect(result.mail_message_id).toBe('MSG-20240115-002');
+  });
+
+  test('SCEN-1207: ポータル通知記録失敗時、通知記録がスキップされる', async () => {
+    const input_mail_address = 'test@example.com';
+    const input_notification_content = '営業データ品質チェック完了通知';
+    const input_customer_id = 'CUST-001';
+    const expected_send_timestamp = new Date('2024-01-15T11:00:00Z').toISOString();
+
+    // メール送信成功
+    fetchMock.mockResponseOnce(
+      JSON.stringify({
+        success: true,
+        message_id: 'MSG-20240115-003',
+        send_timestamp: expected_send_timestamp,
+        recipient_address: input_mail_address,
+        status: 'sent',
+      }),
+      { status: 200 }
+    );
+
+    // ポータル通知記録失敗
+    fetchMock.mockResponseOnce(
+      JSON.stringify({ success: false, error: 'portal service unavailable' }),
+      { status: 503 }
+    );
+
+    // 受信確認記録はスキップ
+    fetchMock.mockResponseOnce(
+      JSON.stringify({
+        success: false,
+        skipped: true,
+        reason: 'portal notification failed',
+      }),
+      { status: 200 }
+    );
+
+    // 関数実行
+    const result = await sendNotificationWithTimestamp({
+      mail_address: input_mail_address,
+      notification_content: input_notification_content,
+      customer_id: input_customer_id,
+      send_timestamp_iso: expected_send_timestamp,
+    });
+
+    // メール送信は成功、ポータル通知は失敗
+    expect(result.mail_send_success).toBe(true);
+    expect(result.portal_notification_display).toBe(false);
+    expect(result.receipt_confirmation_recorded).toBe(false);
+  });
+
+  test('SCEN-1207: 受信確認タイムスタンプが期待値と一致することを検証', async () => {
+    const input_mail_address = 'test@example.com';
+    const input_notification_content = '営業データ品質チェック完了通知';
+    const input_customer_id = 'CUST-001';
+    const expected_send_timestamp = new Date('2024-02-20T14:30:45.123Z').toISOString();
+
+    fetchMock.mockResponseOnce(
+      JSON.stringify({
+        success: true,
+        message_id: 'MSG-20240220-001',
+        send_timestamp: expected_send_timestamp,
+        recipient_address: input_mail_address,
+        status: 'sent',
+      }),
+      { status: 200 }
+    );
+
+    fetchMock.mockResponseOnce(
+      JSON.stringify({
+        success: true,
+        notification_id: 'NOTIF-20240220-001',
+        display_timestamp: expected_send_timestamp,
+        portal_visibility: true,
+      }),
+      { status: 200 }
+    );
+
+    fetchMock.mockResponseOnce(
+      JSON.stringify({
+        success: true,
+        receipt_id: 'RECEIPT-20240220-001',
+        received_timestamp: expected_send_timestamp,
+        confirmation_recorded: true,
+      }),
+      { status: 200 }
+    );
+
+    const result = await sendNotificationWithTimestamp({
+      mail_address: input_mail_address,
+      notification_content: input_notification_content,
+      customer_id: input_customer_id,
+      send_timestamp_iso: expected_send_timestamp,
+    });
+
+    // タイムスタンプの完全一致を検証
+    expect(result.received_timestamp_recorded).toBe(expected_send_timestamp);
+    expect(result.portal_display_timestamp).toBe(expected_send_timestamp);
+    expect(result.mail_send_success).toBe(true);
+    expect(result.portal_notification_display).toBe(true);
+    expect(result.receipt_confirmation_recorded).toBe(true);
   });
 });

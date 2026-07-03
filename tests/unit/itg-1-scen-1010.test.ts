@@ -1,129 +1,98 @@
-import { describe, test, expect } from "@jest/globals";
-import {
-  extractBillingItemsByService,
-  type ExtractBillingItemsInput,
-  type ServiceBillingAmount,
-} from "../../src/logic/it-1-2-1";
+import { generateMonthlySummaryReport } from '../../src/logic/it-1-br-1781935279444-1-2-1';
 
-describe("営業成果データから請求対象項目の自動抽出と顧客別・サービス別集計", () => {
-  // SCEN-1010: [normal] 営業データから請求対象項目の自動抽出・集計 - 複数サービスを提供する顧客の場合、サービス別請求額が正確に分離・集計される
-  test("複数サービス顧客について、各サービスが正確に分離・集計され、サービス別明細が正確に表示される", () => {
-    const input: ExtractBillingItemsInput = {
-      customerId: "CUST-20240115-001",
-      contractId: "CONT-20240101-A",
-      invoicePeriod: {
-        startDate: "2024-01-01",
-        endDate: "2024-01-31",
-      },
-      salesData: [
-        {
-          serviceId: "SVC-A",
-          serviceName: "サービスA",
-          saleAmount: 100000,
-          quantity: 1,
-          unitPrice: 100000,
-          transactionDate: "2024-01-15",
-        },
-        {
-          serviceId: "SVC-B",
-          serviceName: "サービスB",
-          saleAmount: 50000,
-          quantity: 1,
-          unitPrice: 50000,
-          transactionDate: "2024-01-20",
-        },
-        {
-          serviceId: "SVC-C",
-          serviceName: "サービスC",
-          saleAmount: 75000,
-          quantity: 1,
-          unitPrice: 75000,
-          transactionDate: "2024-01-25",
-        },
-      ],
-      billingRules: {
-        applicableServiceIds: ["SVC-A", "SVC-B", "SVC-C"],
-        discountRate: 0,
-        minimumBillingAmount: 0,
-        maximumBillingAmount: null,
-      },
+describe('月次サマリーテンプレート定義・管理機能', () => {
+  test('SCEN-1010: 月次サマリーレポート生成時に計算ロジックエラーが発生した場合にエラーが検出される', () => {
+    // 正常なテストデータ
+    const validSummaryData = {
+      month: '2024-01',
+      totalRevenue: 1000000,
+      transactionCount: 50,
+      handlingFeeRate: 0.05,
+      netRevenue: 950000,
+      reportGeneratedAt: '2024-01-31T23:59:59Z'
     };
 
-    const result = extractBillingItemsByService(input);
+    // ケース1: 正常系 - 計算が正確に実行される
+    const validResult = generateMonthlySummaryReport(validSummaryData);
+    expect(validResult.status).toBe('success');
+    expect(validResult.totalRevenue).toBe(1000000);
+    expect(validResult.handlingFee).toBe(50000);
+    expect(validResult.netRevenue).toBe(950000);
+    expect(validResult.errors).toEqual([]);
 
-    // サービス別請求額が正確に分離されていることを検証
-    expect(result.serviceBreakdown).toHaveLength(3);
+    // ケース2: ゼロ除算エラー - 件数が0の場合
+    const zeroDivisionData = {
+      month: '2024-01',
+      totalRevenue: 1000000,
+      transactionCount: 0,
+      handlingFeeRate: 0.05,
+      netRevenue: 950000,
+      reportGeneratedAt: '2024-01-31T23:59:59Z'
+    };
 
-    const serviceA = result.serviceBreakdown.find(
-      (s: ServiceBillingAmount) => s.serviceId === "SVC-A"
-    );
-    expect(serviceA).toEqual({
-      serviceId: "SVC-A",
-      serviceName: "サービスA",
-      billingAmount: 100000,
-      quantity: 1,
-      unitPrice: 100000,
-    });
+    expect(() => generateMonthlySummaryReport(zeroDivisionData)).toThrow(/件数/);
 
-    const serviceB = result.serviceBreakdown.find(
-      (s: ServiceBillingAmount) => s.serviceId === "SVC-B"
-    );
-    expect(serviceB).toEqual({
-      serviceId: "SVC-B",
-      serviceName: "サービスB",
-      billingAmount: 50000,
-      quantity: 1,
-      unitPrice: 50000,
-    });
+    // ケース3: 負の値エラー - 売上金額が負値
+    const negativeRevenueData = {
+      month: '2024-01',
+      totalRevenue: -100000,
+      transactionCount: 50,
+      handlingFeeRate: 0.05,
+      netRevenue: -95000,
+      reportGeneratedAt: '2024-01-31T23:59:59Z'
+    };
 
-    const serviceC = result.serviceBreakdown.find(
-      (s: ServiceBillingAmount) => s.serviceId === "SVC-C"
-    );
-    expect(serviceC).toEqual({
-      serviceId: "SVC-C",
-      serviceName: "サービスC",
-      billingAmount: 75000,
-      quantity: 1,
-      unitPrice: 75000,
-    });
+    expect(() => generateMonthlySummaryReport(negativeRevenueData)).toThrow(/売上/);
 
-    // 各サービスの請求額の集計合計が正確であることを検証
-    expect(result.totalBillingAmount).toBe(225000);
+    // ケース4: データ型不一致エラー - ハンドリング手数料レートが無効
+    const invalidTypeData = {
+      month: '2024-01',
+      totalRevenue: 1000000,
+      transactionCount: 50,
+      handlingFeeRate: NaN,
+      netRevenue: 950000,
+      reportGeneratedAt: '2024-01-31T23:59:59Z'
+    };
 
-    // 請求書生成時にサービス別の明細が正確に表示されることを確認
-    expect(result.invoiceLineItems).toHaveLength(3);
-    expect(result.invoiceLineItems[0]).toEqual({
-      lineNumber: 1,
-      serviceId: "SVC-A",
-      serviceName: "サービスA",
-      quantity: 1,
-      unitPrice: 100000,
-      lineAmount: 100000,
-    });
-    expect(result.invoiceLineItems[1]).toEqual({
-      lineNumber: 2,
-      serviceId: "SVC-B",
-      serviceName: "サービスB",
-      quantity: 1,
-      unitPrice: 50000,
-      lineAmount: 50000,
-    });
-    expect(result.invoiceLineItems[2]).toEqual({
-      lineNumber: 3,
-      serviceId: "SVC-C",
-      serviceName: "サービスC",
-      quantity: 1,
-      unitPrice: 75000,
-      lineAmount: 75000,
-    });
+    expect(() => generateMonthlySummaryReport(invalidTypeData)).toThrow(/手数料/);
 
-    // 請求書全体の構造を検証
-    expect(result.customerId).toBe("CUST-20240115-001");
-    expect(result.contractId).toBe("CONT-20240101-A");
-    expect(result.invoicePeriod).toEqual({
-      startDate: "2024-01-01",
-      endDate: "2024-01-31",
-    });
-    expect(result.isReadyForInvoiceGeneration).toBe(true);
+    // ケース5: 日付形式エラー
+    const invalidDateData = {
+      month: '2024-01',
+      totalRevenue: 1000000,
+      transactionCount: 50,
+      handlingFeeRate: 0.05,
+      netRevenue: 950000,
+      reportGeneratedAt: 'invalid-date'
+    };
+
+    expect(() => generateMonthlySummaryReport(invalidDateData)).toThrow(/日付/);
+
+    // ケース6: 必須項目欠落エラー
+    const missingFieldData = {
+      month: '2024-01',
+      totalRevenue: 1000000,
+      transactionCount: 50,
+      handlingFeeRate: 0.05
+    } as any;
+
+    expect(() => generateMonthlySummaryReport(missingFieldData)).toThrow(/必須/);
+
+    // ケース7: 整合性エラー - netRevenueが計算値と不一致
+    const inconsistentData = {
+      month: '2024-01',
+      totalRevenue: 1000000,
+      transactionCount: 50,
+      handlingFeeRate: 0.05,
+      netRevenue: 800000,
+      reportGeneratedAt: '2024-01-31T23:59:59Z'
+    };
+
+    expect(() => generateMonthlySummaryReport(inconsistentData)).toThrow(/整合性/);
+
+    // ケース8: 成功時のエラーログが空配列であることを確認
+    const cleanResult = generateMonthlySummaryReport(validSummaryData);
+    expect(Array.isArray(cleanResult.errors)).toBe(true);
+    expect(cleanResult.errors.length).toBe(0);
   });
 });

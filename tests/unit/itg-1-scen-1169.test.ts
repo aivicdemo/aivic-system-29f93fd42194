@@ -1,31 +1,47 @@
-import { validateSalesData } from '../../src/logic/it-1781935279444-2-2-1';
+import { validateReportDataAccuracy } from "../../src/logic/it-1781935279444-2-2-1";
 
-describe('営業データ品質検証・異常検出', () => {
-  // SCEN-1169: [error] 営業データ品質検証・異常検出 - 数値型項目に文字列が入力された場合、データ型不整合エラーが検出される
-  test('数値型項目に文字列が入力された場合、データ型不整合エラーが検出される', () => {
-    const testData = {
-      sales_amount: '12345ABC',
-      customer_id: 'CUST001',
-      service_type: 'contract',
-      contact_date: '2024-01-15',
+describe("営業データの完全性・正確性を自動検証し、不足データ・誤りを検出・通知する機能", () => {
+  // SCEN-1169: [normal] レポート数値とソースデータの照合機能 - レポート記載値とソースデータが不一致であることを検出できる
+  test("should detect all mismatches between report values and source data with detailed information", () => {
+    const sourceData = {
+      revenue: 100000,
+      count: 50,
+      conversionRate: 0.24,
+      periodStart: "2024-01-01",
+      periodEnd: "2024-01-31",
     };
 
-    const schema = {
-      sales_amount: { type: 'number', required: true },
-      customer_id: { type: 'string', required: true },
-      service_type: { type: 'string', required: true },
-      contact_date: { type: 'string', required: true },
+    const reportData = {
+      revenue: 95000,
+      count: 48,
+      conversionRate: 0.24,
+      periodStart: "2024-01-01",
+      periodEnd: "2024-01-31",
     };
 
-    const result = validateSalesData(testData, schema);
+    const result = validateReportDataAccuracy(sourceData, reportData);
 
-    expect(result.is_valid).toBe(false);
-    expect(result.errors).toHaveLength(1);
-    expect(result.errors[0].error_code).toBe('ERR_DATA_TYPE_MISMATCH');
-    expect(result.errors[0].field_name).toBe('sales_amount');
-    expect(result.errors[0].message).toMatch(/売上金額フィールドはNumeric型が必須です/);
-    expect(result.errors[0].input_value).toBe('12345ABC');
-    expect(result.record_status).toBe('validation_failed');
-    expect(result.excluded_from_billing).toBe(true);
+    expect(result.isAccurate).toBe(false);
+    expect(result.mismatches).toHaveLength(2);
+
+    const revenueMismatch = result.mismatches.find((m) => m.fieldName === "revenue");
+    expect(revenueMismatch).toBeDefined();
+    expect(revenueMismatch?.expectedValue).toBe(100000);
+    expect(revenueMismatch?.actualValue).toBe(95000);
+    expect(revenueMismatch?.difference).toBe(5000);
+    expect(revenueMismatch?.differenceRate).toBeCloseTo(0.05, 5);
+
+    const countMismatch = result.mismatches.find((m) => m.fieldName === "count");
+    expect(countMismatch).toBeDefined();
+    expect(countMismatch?.expectedValue).toBe(50);
+    expect(countMismatch?.actualValue).toBe(48);
+    expect(countMismatch?.difference).toBe(2);
+    expect(countMismatch?.differenceRate).toBeCloseTo(0.04, 5);
+
+    expect(result.recordedAt).toMatch(
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{3})?Z?$/
+    );
+    expect(result.mismatchSummary).toContain("revenue");
+    expect(result.mismatchSummary).toContain("count");
   });
 });

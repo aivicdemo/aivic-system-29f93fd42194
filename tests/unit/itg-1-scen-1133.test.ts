@@ -1,37 +1,65 @@
-import { validateSalesData } from "../../src/logic/it-1781935279444-2-2-1";
+import { extractValidDistributionList } from "../../src/logic/it-1-2-1";
 
-describe("営業データ品質検証 - 金額項目の上限値検証", () => {
-  test("SCEN-1133: 金額項目が定義された範囲の上限値と同値のとき検証を通過する", () => {
-    // Arrange
-    const salesDataRecord = {
-      sales_id: "SALES-20240115-001",
-      customer_id: "CUST-12345",
-      sales_amount: 1000000, // 定義された上限値と同値
-      sales_date: "2024-01-15",
-      sales_person: "営業太郎",
-      service_type: "basic_plan",
-      appointment_count: 5,
-      contract_count: 2,
-      status: "completed"
-    };
+describe("営業成果データから請求対象項目を自動抽出し、顧客ごと・サービスごとの請求額を集計する機能", () => {
+  // SCEN-1133
+  test("配信リスト妥当性確認 - 契約状態が失効した顧客も含めた配信リストから最新ステータスの顧客のみが抽出される", () => {
+    const distributionList = [
+      {
+        customerId: "CUST001",
+        customerName: "顧客A",
+        contractStatus: "有効",
+        statusUpdatedAt: new Date("2024-12-15T10:00:00Z"),
+        previousStatusUpdatedAt: new Date("2024-11-15T10:00:00Z"),
+        previousStatus: "休止",
+      },
+      {
+        customerId: "CUST002",
+        customerName: "顧客B",
+        contractStatus: "失効",
+        statusUpdatedAt: new Date("2024-12-10T09:00:00Z"),
+        previousStatusUpdatedAt: new Date("2024-11-10T09:00:00Z"),
+        previousStatus: "有効",
+      },
+      {
+        customerId: "CUST003",
+        customerName: "顧客C",
+        contractStatus: "休止",
+        statusUpdatedAt: new Date("2024-12-20T14:30:00Z"),
+        previousStatusUpdatedAt: new Date("2024-11-20T14:30:00Z"),
+        previousStatus: "有効",
+      },
+    ];
 
-    const validationRule = {
-      field_name: "sales_amount",
-      data_type: "number",
-      is_required: true,
-      min_value: 0,
-      max_value: 1000000, // 上限値を定義
-      allowed_values: null
-    };
+    const result = extractValidDistributionList(distributionList);
 
-    // Act
-    const result = validateSalesData(salesDataRecord, validationRule);
+    expect(result).toHaveLength(2);
+    expect(result.map((c) => c.customerId)).toEqual(["CUST001", "CUST003"]);
+    expect(result.map((c) => c.contractStatus)).toEqual(["有効", "休止"]);
 
-    // Assert
-    expect(result.is_valid).toBe(true);
-    expect(result.error_message).toBe("");
-    expect(result.error_code).toBeNull();
-    expect(result.field_name).toBe("sales_amount");
-    expect(result.validated_value).toBe(1000000);
+    const customer1 = result.find((c) => c.customerId === "CUST001");
+    expect(customer1).toBeDefined();
+    expect(customer1?.statusUpdatedAt).toEqual(
+      new Date("2024-12-15T10:00:00Z")
+    );
+    expect(customer1?.previousStatusUpdatedAt).toEqual(
+      new Date("2024-11-15T10:00:00Z")
+    );
+
+    const customer3 = result.find((c) => c.customerId === "CUST003");
+    expect(customer3).toBeDefined();
+    expect(customer3?.statusUpdatedAt).toEqual(
+      new Date("2024-12-20T14:30:00Z")
+    );
+    expect(customer3?.previousStatusUpdatedAt).toEqual(
+      new Date("2024-11-20T14:30:00Z")
+    );
+
+    const excludedCustomer = result.find((c) => c.customerId === "CUST002");
+    expect(excludedCustomer).toBeUndefined();
+
+    result.forEach((customer) => {
+      expect(customer.contractStatus).not.toBe("失効");
+      expect(["有効", "休止"]).toContain(customer.contractStatus);
+    });
   });
 });

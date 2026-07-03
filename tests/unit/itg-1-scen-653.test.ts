@@ -1,108 +1,236 @@
-import { validateReportAmountAccuracy } from "../../src/logic/it-1781935279444-2-1-1";
+import { detectAnomaliesAndMissingData } from '../../src/logic/it-1781935279444-2-2-1';
 
-describe("レポート内容承認基準判定機能 - 金額集計の正確性チェック", () => {
+describe('営業データ異常値・漏れデータ自動検出機能', () => {
   // SCEN-653
-  test("金額集計の正確性チェックで誤差が検出された場合に差戻し理由が明示される", () => {
-    const report_data = {
-      report_id: "RPT-2024-01-001",
-      customer_id: "CUST-001",
-      service_id: "SVC-A",
-      period_start: "2024-01-01",
-      period_end: "2024-01-31",
-      items: [
-        {
-          item_id: "ITEM-001",
-          item_name: "アポイント件数",
-          unit: "件",
-          quantity: 10,
-          unit_price: 5000,
-          expected_amount: 50000,
-          actual_amount: 49500,
-        },
-        {
-          item_id: "ITEM-002",
-          item_name: "成約件数",
-          unit: "件",
-          quantity: 3,
-          unit_price: 20000,
-          expected_amount: 60000,
-          actual_amount: 60000,
-        },
-        {
-          item_id: "ITEM-003",
-          item_name: "顧客反応スコア",
-          unit: "ポイント",
-          quantity: 150,
-          unit_price: 100,
-          expected_amount: 15000,
-          actual_amount: 14850,
-        },
-      ],
-      total_expected_amount: 125000,
-      total_actual_amount: 124350,
+  test('すべての必須項目が正常に入力された営業データセットを処理した場合、検出結果が空で返される', () => {
+    const validSalesData = {
+      customerId: 'CUST-001',
+      customerName: '株式会社テスト',
+      amount: 150000,
+      transactionDate: '2024-01-15',
+      managerId: 'MGR-001',
+      managerName: '営業太郎',
+      appointmentCount: 5,
+      contractCount: 2,
+      serviceType: 'Premium',
+      description: '正常な営業活動データ',
+      status: 'completed',
     };
 
-    const result = validateReportAmountAccuracy(report_data);
+    const result = detectAnomaliesAndMissingData(validSalesData);
 
-    // 誤差検出の確認
-    expect(result.status).toBe("REJECTED");
+    expect(result).toEqual([]);
+    expect(Array.isArray(result)).toBe(true);
+    expect(result.length).toBe(0);
+  });
 
-    // 差戻し理由が存在することの確認
-    expect(result.rejection_reason).toBeDefined();
-    expect(typeof result.rejection_reason).toBe("string");
+  test('複数の必須項目が欠落しているデータセットを処理した場合、欠落項目が検出される', () => {
+    const incompleteSalesData = {
+      customerId: 'CUST-001',
+      amount: 150000,
+      transactionDate: '2024-01-15',
+    };
 
-    // 誤差検出通知の確認
-    expect(result.rejection_reason).toMatch(/誤差/);
+    const result = detectAnomaliesAndMissingData(incompleteSalesData);
 
-    // 誤差額の確認 (125000 - 124350 = 650)
-    expect(result.rejection_reason).toMatch(/650/);
+    expect(Array.isArray(result)).toBe(true);
+    expect(result.length).toBeGreaterThan(0);
+    expect(result.some((error: any) => error.field === 'customerName')).toBe(true);
+    expect(result.some((error: any) => error.field === 'managerId')).toBe(true);
+  });
 
-    // 誤差率の確認 (650 / 125000 = 0.52%)
-    expect(result.rejection_reason).toMatch(/0\.52|0\.5%/);
+  test('金額が負の数値の場合、異常値として検出される', () => {
+    const invalidAmountData = {
+      customerId: 'CUST-001',
+      customerName: '株式会社テスト',
+      amount: -50000,
+      transactionDate: '2024-01-15',
+      managerId: 'MGR-001',
+      managerName: '営業太郎',
+      appointmentCount: 5,
+      contractCount: 2,
+      serviceType: 'Premium',
+      description: '金額が不正なデータ',
+      status: 'completed',
+    };
 
-    // 誤差項目の特定確認
-    expect(result.rejection_reason).toMatch(/ITEM-001/);
-    expect(result.rejection_reason).toMatch(/ITEM-003/);
+    const result = detectAnomaliesAndMissingData(invalidAmountData);
 
-    // 対象項目名の確認
-    expect(result.rejection_reason).toMatch(/アポイント件数|成約件数|顧客反応スコア/);
+    expect(Array.isArray(result)).toBe(true);
+    expect(result.length).toBeGreaterThan(0);
+    expect(result.some((error: any) => error.field === 'amount')).toBe(true);
+  });
 
-    // 誤差詳細情報の構造確認
-    expect(result.error_details).toBeDefined();
-    expect(Array.isArray(result.error_details)).toBe(true);
-    expect(result.error_details.length).toBe(2);
+  test('日付形式が無効な場合、異常値として検出される', () => {
+    const invalidDateData = {
+      customerId: 'CUST-001',
+      customerName: '株式会社テスト',
+      amount: 150000,
+      transactionDate: '2024-13-45',
+      managerId: 'MGR-001',
+      managerName: '営業太郎',
+      appointmentCount: 5,
+      contractCount: 2,
+      serviceType: 'Premium',
+      description: '日付が不正なデータ',
+      status: 'completed',
+    };
 
-    // 各誤差項目の詳細確認
-    const error_item_1 = result.error_details.find(
-      (e: any) => e.item_id === "ITEM-001"
-    );
-    expect(error_item_1).toBeDefined();
-    expect(error_item_1.item_name).toBe("アポイント件数");
-    expect(error_item_1.expected_amount).toBe(50000);
-    expect(error_item_1.actual_amount).toBe(49500);
-    expect(error_item_1.discrepancy_amount).toBe(500);
-    expect(error_item_1.discrepancy_rate).toBe(1.0);
+    const result = detectAnomaliesAndMissingData(invalidDateData);
 
-    const error_item_2 = result.error_details.find(
-      (e: any) => e.item_id === "ITEM-003"
-    );
-    expect(error_item_2).toBeDefined();
-    expect(error_item_2.item_name).toBe("顧客反応スコア");
-    expect(error_item_2.expected_amount).toBe(15000);
-    expect(error_item_2.actual_amount).toBe(14850);
-    expect(error_item_2.discrepancy_amount).toBe(150);
-    expect(error_item_2.discrepancy_rate).toBeCloseTo(1.0, 1);
+    expect(Array.isArray(result)).toBe(true);
+    expect(result.length).toBeGreaterThan(0);
+    expect(result.some((error: any) => error.field === 'transactionDate')).toBe(true);
+  });
 
-    // 対応方法の提示確認
-    expect(result.rejection_reason).toMatch(/確認|修正|確定|入力|営業/);
+  test('契約数がアポイント数を超えている場合、矛盾として検出される', () => {
+    const contradictoryData = {
+      customerId: 'CUST-001',
+      customerName: '株式会社テスト',
+      amount: 150000,
+      transactionDate: '2024-01-15',
+      managerId: 'MGR-001',
+      managerName: '営業太郎',
+      appointmentCount: 2,
+      contractCount: 5,
+      serviceType: 'Premium',
+      description: '契約数がアポ数を超えるデータ',
+      status: 'completed',
+    };
 
-    // ユーザーが理解しやすい形式の確認
-    expect(result.rejection_reason.length).toBeGreaterThan(0);
-    expect(result.formatted_message).toBeDefined();
+    const result = detectAnomaliesAndMissingData(contradictoryData);
 
-    // 日本語による明確な説明
-    expect(result.formatted_message).toMatch(/誤差が検出されました/);
-    expect(result.formatted_message).toMatch(/誤差額/);
-    expect(result.formatted_message).toMatch(/誤差率/);
+    expect(Array.isArray(result)).toBe(true);
+    expect(result.length).toBeGreaterThan(0);
+    expect(result.some((error: any) => error.type === 'inconsistency')).toBe(true);
+  });
+
+  test('顧客名が空文字列の場合、欠落として検出される', () => {
+    const emptyCustomerNameData = {
+      customerId: 'CUST-001',
+      customerName: '',
+      amount: 150000,
+      transactionDate: '2024-01-15',
+      managerId: 'MGR-001',
+      managerName: '営業太郎',
+      appointmentCount: 5,
+      contractCount: 2,
+      serviceType: 'Premium',
+      description: '顧客名が空のデータ',
+      status: 'completed',
+    };
+
+    const result = detectAnomaliesAndMissingData(emptyCustomerNameData);
+
+    expect(Array.isArray(result)).toBe(true);
+    expect(result.some((error: any) => error.field === 'customerName')).toBe(true);
+  });
+
+  test('金額が0の場合、許容範囲内として検出されない', () => {
+    const zeroAmountData = {
+      customerId: 'CUST-001',
+      customerName: '株式会社テスト',
+      amount: 0,
+      transactionDate: '2024-01-15',
+      managerId: 'MGR-001',
+      managerName: '営業太郎',
+      appointmentCount: 0,
+      contractCount: 0,
+      serviceType: 'Premium',
+      description: '金額がゼロのデータ',
+      status: 'completed',
+    };
+
+    const result = detectAnomaliesAndMissingData(zeroAmountData);
+
+    expect(Array.isArray(result)).toBe(true);
+    expect(result.some((error: any) => error.field === 'amount' && error.type === 'outOfRange')).toBe(false);
+  });
+
+  test('アポイント数と契約数が両方0の場合、矛盾なく検出されない', () => {
+    const zeroCountsData = {
+      customerId: 'CUST-001',
+      customerName: '株式会社テスト',
+      amount: 0,
+      transactionDate: '2024-01-15',
+      managerId: 'MGR-001',
+      managerName: '営業太郎',
+      appointmentCount: 0,
+      contractCount: 0,
+      serviceType: 'Premium',
+      description: 'カウントが両方ゼロのデータ',
+      status: 'completed',
+    };
+
+    const result = detectAnomaliesAndMissingData(zeroCountsData);
+
+    expect(result.some((error: any) => error.type === 'inconsistency')).toBe(false);
+  });
+
+  test('ステータスが無効な値の場合、異常値として検出される', () => {
+    const invalidStatusData = {
+      customerId: 'CUST-001',
+      customerName: '株式会社テスト',
+      amount: 150000,
+      transactionDate: '2024-01-15',
+      managerId: 'MGR-001',
+      managerName: '営業太郎',
+      appointmentCount: 5,
+      contractCount: 2,
+      serviceType: 'Premium',
+      description: 'ステータスが不正なデータ',
+      status: 'invalid_status',
+    };
+
+    const result = detectAnomaliesAndMissingData(invalidStatusData);
+
+    expect(Array.isArray(result)).toBe(true);
+    expect(result.some((error: any) => error.field === 'status')).toBe(true);
+  });
+
+  test('金額が指定範囲の上限を超えている場合、異常値として検出される', () => {
+    const excessiveAmountData = {
+      customerId: 'CUST-001',
+      customerName: '株式会社テスト',
+      amount: 100000000,
+      transactionDate: '2024-01-15',
+      managerId: 'MGR-001',
+      managerName: '営業太郎',
+      appointmentCount: 5,
+      contractCount: 2,
+      serviceType: 'Premium',
+      description: '金額が異常に大きいデータ',
+      status: 'completed',
+    };
+
+    const result = detectAnomaliesAndMissingData(excessiveAmountData);
+
+    expect(Array.isArray(result)).toBe(true);
+    expect(result.some((error: any) => error.field === 'amount' && error.type === 'outOfRange')).toBe(true);
+  });
+
+  test('複数の異常値が存在する場合、すべて検出される', () => {
+    const multipleAnomaliesData = {
+      customerId: 'CUST-001',
+      customerName: '',
+      amount: -50000,
+      transactionDate: '2024-13-45',
+      managerId: 'MGR-001',
+      managerName: '営業太郎',
+      appointmentCount: 2,
+      contractCount: 5,
+      serviceType: 'Premium',
+      description: '複数の異常を含むデータ',
+      status: 'invalid_status',
+    };
+
+    const result = detectAnomaliesAndMissingData(multipleAnomaliesData);
+
+    expect(Array.isArray(result)).toBe(true);
+    expect(result.length).toBeGreaterThanOrEqual(4);
+    expect(result.some((error: any) => error.field === 'customerName')).toBe(true);
+    expect(result.some((error: any) => error.field === 'amount')).toBe(true);
+    expect(result.some((error: any) => error.field === 'transactionDate')).toBe(true);
+    expect(result.some((error: any) => error.field === 'status')).toBe(true);
   });
 });

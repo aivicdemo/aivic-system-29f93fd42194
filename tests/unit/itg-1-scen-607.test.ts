@@ -1,130 +1,231 @@
-import { extractBillingTargetItems } from "../../src/logic/it-1781935279444-1-1-1";
+import { describe, test, expect } from "@jest/globals";
+import { detectBillingCalculationErrors } from "../../src/logic/it-1-2-1";
 
-describe("営業データ項目のメタデータ管理機能 - 請求対象項目抽出", () => {
-  test("SCEN-607: 請求対象外のデータが集計対象から除外される", () => {
-    // テストデータ準備
-    const billingRecords = [
+describe("営業成果データから請求対象項目を自動抽出し、顧客ごと・サービスごとの請求額を集計する機能", () => {
+  // SCEN-607: [error] 請求額計算・異常値検出機能 - 計算誤り（四捨五入・端数処理）が検出される
+  test("複数の請求項目の四捨五入・端数処理誤りを検出し、詳細なエラー情報を記録する", () => {
+    const billingData = [
       {
-        id: "REC-001",
-        customerId: "CUST-A",
-        serviceId: "SVC-001",
-        isBillingTarget: true,
-        amount: 100000,
-        taxAmount: 10000,
-        discountAmount: 5000,
+        itemId: "item_001",
+        itemName: "サービスA",
+        unitPrice: 1234.567,
+        quantity: 3,
+        expectedAmount: 3704,
+        calculatedAmount: 3705,
+        roundingMethod: "常に切り上げ",
       },
       {
-        id: "REC-002",
-        customerId: "CUST-A",
-        serviceId: "SVC-001",
-        isBillingTarget: true,
-        amount: 150000,
-        taxAmount: 15000,
-        discountAmount: 7500,
+        itemId: "item_002",
+        itemName: "サービスB",
+        unitPrice: 567.89,
+        quantity: 2,
+        expectedAmount: 1136,
+        calculatedAmount: 1135,
+        roundingMethod: "常に切り下げ",
       },
       {
-        id: "REC-003",
-        customerId: "CUST-B",
-        serviceId: "SVC-002",
-        isBillingTarget: true,
-        amount: 200000,
-        taxAmount: 20000,
-        discountAmount: 10000,
-      },
-      {
-        id: "REC-004",
-        customerId: "CUST-B",
-        serviceId: "SVC-002",
-        isBillingTarget: true,
-        amount: 120000,
-        taxAmount: 12000,
-        discountAmount: 6000,
-      },
-      {
-        id: "REC-005",
-        customerId: "CUST-C",
-        serviceId: "SVC-003",
-        isBillingTarget: true,
-        amount: 180000,
-        taxAmount: 18000,
-        discountAmount: 9000,
-      },
-      {
-        id: "REC-EXC-001",
-        customerId: "CUST-D",
-        serviceId: "SVC-004",
-        isBillingTarget: false,
-        amount: 250000,
-        taxAmount: 25000,
-        discountAmount: 12500,
-      },
-      {
-        id: "REC-EXC-002",
-        customerId: "CUST-E",
-        serviceId: "SVC-005",
-        isBillingTarget: false,
-        amount: 300000,
-        taxAmount: 30000,
-        discountAmount: 15000,
-      },
-      {
-        id: "REC-EXC-003",
-        customerId: "CUST-F",
-        serviceId: "SVC-006",
-        isBillingTarget: false,
-        amount: 175000,
-        taxAmount: 17500,
-        discountAmount: 8750,
+        itemId: "item_003",
+        itemName: "サービスC",
+        unitPrice: 999.999,
+        quantity: 5,
+        expectedAmount: 5000,
+        calculatedAmount: 5000,
+        roundingMethod: "四捨五入",
       },
     ];
 
-    // 請求額集計処理を実行
-    const result = extractBillingTargetItems(billingRecords);
+    const detectionResult = detectBillingCalculationErrors(billingData);
 
-    // 集計結果に含まれるレコード数を確認
-    expect(result.extractedRecords.length).toBe(5);
+    expect(detectionResult).toBeDefined();
+    expect(detectionResult.hasErrors).toBe(true);
+    expect(detectionResult.errorCount).toBe(2);
 
-    // 集計結果に請求対象フラグが'false'のレコードが存在しないことを検証
-    const hasNonBillingTarget = result.extractedRecords.some(
-      (rec) => rec.isBillingTarget === false
+    const errors = detectionResult.detectedErrors;
+    expect(errors.length).toBe(2);
+
+    const firstError = errors[0];
+    expect(firstError.itemId).toBe("item_001");
+    expect(firstError.itemName).toBe("サービスA");
+    expect(firstError.errorType).toBe("四捨五入誤り");
+    expect(firstError.expectedValue).toBe(3704);
+    expect(firstError.calculatedValue).toBe(3705);
+    expect(firstError.discrepancy).toBe(1);
+    expect(firstError.cause).toBe("常に切り上げ");
+    expect(firstError.severity).toBe("high");
+    expect(firstError.detectionTimestamp).toMatch(
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/
     );
-    expect(hasNonBillingTarget).toBe(false);
+    expect(firstError.detectionReason).toMatch(/四捨五入/);
 
-    // 請求対象フラグが'true'のレコード5件のみが集計対象に含まれていることを確認
-    const extractedIds = result.extractedRecords.map((rec) => rec.id).sort();
-    const expectedIds = ["REC-001", "REC-002", "REC-003", "REC-004", "REC-005"];
-    expect(extractedIds).toEqual(expectedIds);
+    const secondError = errors[1];
+    expect(secondError.itemId).toBe("item_002");
+    expect(secondError.itemName).toBe("サービスB");
+    expect(secondError.errorType).toBe("四捨五入誤り");
+    expect(secondError.expectedValue).toBe(1136);
+    expect(secondError.calculatedValue).toBe(1135);
+    expect(secondError.discrepancy).toBe(-1);
+    expect(secondError.cause).toBe("常に切り下げ");
+    expect(secondError.severity).toBe("high");
+    expect(secondError.detectionTimestamp).toMatch(
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/
+    );
+    expect(secondError.detectionReason).toMatch(/四捨五入/);
 
-    // 集計された合計金額が、請求対象のレコード5件のみの合計と一致することを検証
-    const expectedTotalAmount =
-      100000 + 150000 + 200000 + 120000 + 180000;
-    expect(result.totalAmount).toBe(expectedTotalAmount);
+    const successItem = errors.find((e) => e.itemId === "item_003");
+    expect(successItem).toBeUndefined();
 
-    // 集計された合計税額が正確に計算されていることを検証
-    const expectedTotalTaxAmount =
-      10000 + 15000 + 20000 + 12000 + 18000;
-    expect(result.totalTaxAmount).toBe(expectedTotalTaxAmount);
+    expect(detectionResult.errorLog).toBeDefined();
+    expect(detectionResult.errorLog.length).toBeGreaterThan(0);
+    expect(detectionResult.errorLog[0]).toHaveProperty("detectedAt");
+    expect(detectionResult.errorLog[0]).toHaveProperty("reason");
+    expect(detectionResult.errorLog[0]).toHaveProperty("severity");
+    expect(detectionResult.errorLog[0].severity).toMatch(
+      /^(low|medium|high|critical)$/
+    );
 
-    // 集計された合計割引額が正確に計算されていることを検証
-    const expectedTotalDiscountAmount =
-      5000 + 7500 + 10000 + 6000 + 9000;
-    expect(result.totalDiscountAmount).toBe(expectedTotalDiscountAmount);
+    const totalDiscrepancy = errors.reduce((sum, e) => sum + Math.abs(e.discrepancy), 0);
+    expect(totalDiscrepancy).toBe(2);
 
-    // 請求対象フラグが'false'のレコードが完全に除外されていることを確認
-    const excludedIds = result.excludedRecords.map((rec) => rec.id).sort();
-    const expectedExcludedIds = [
-      "REC-EXC-001",
-      "REC-EXC-002",
-      "REC-EXC-003",
+    expect(detectionResult.summary).toBeDefined();
+    expect(detectionResult.summary.processedItemCount).toBe(3);
+    expect(detectionResult.summary.errorItemCount).toBe(2);
+    expect(detectionResult.summary.successItemCount).toBe(1);
+  });
+
+  test("複数の端数処理パターンでの計算誤りを検出し、根本原因を特定する", () => {
+    const complexBillingData = [
+      {
+        itemId: "item_010",
+        unitPrice: 1111.111,
+        quantity: 7,
+        expectedAmount: 7778,
+        calculatedAmount: 7779,
+        roundingMethod: "切り上げ",
+      },
+      {
+        itemId: "item_020",
+        unitPrice: 2222.222,
+        quantity: 4,
+        expectedAmount: 8889,
+        calculatedAmount: 8888,
+        roundingMethod: "切り下げ",
+      },
+      {
+        itemId: "item_030",
+        unitPrice: 3333.333,
+        quantity: 3,
+        expectedAmount: 10000,
+        calculatedAmount: 9999,
+        roundingMethod: "四捨五入（誤り）",
+      },
     ];
-    expect(excludedIds).toEqual(expectedExcludedIds);
 
-    // 除外されたレコード数が正確であることを検証
-    expect(result.excludedRecords.length).toBe(3);
+    const detectionResult = detectBillingCalculationErrors(complexBillingData);
 
-    // 請求対象外の合計金額が除外対象に正確に記録されていることを検証
-    const expectedExcludedTotalAmount =
-      250000 + 300000 + 175000;
-    expect(result.excludedTotalAmount).toBe(expectedExcludedTotalAmount);
+    expect(detectionResult.hasErrors).toBe(true);
+    expect(detectionResult.errorCount).toBe(3);
+
+    const rootCauses = detectionResult.detectedErrors.map((e) => e.cause);
+    expect(rootCauses).toContain("切り上げ");
+    expect(rootCauses).toContain("切り下げ");
+    expect(rootCauses).toContain("四捨五入（誤り）");
+
+    detectionResult.detectedErrors.forEach((error) => {
+      expect(error).toHaveProperty("cause");
+      expect(error.cause).toBeTruthy();
+      expect(error).toHaveProperty("errorType");
+      expect(error.errorType).toBe("四捨五入誤り");
+    });
+
+    const discrepancies = detectionResult.detectedErrors.map((e) => e.discrepancy);
+    expect(discrepancies).toContain(1);
+    expect(discrepancies).toContain(-1);
+    expect(discrepancies).toContain(-1);
+  });
+
+  test("計算誤りが検出されない場合、errorCountは0で hasErrorsはfalseとなる", () => {
+    const validBillingData = [
+      {
+        itemId: "item_100",
+        unitPrice: 1000,
+        quantity: 5,
+        expectedAmount: 5000,
+        calculatedAmount: 5000,
+        roundingMethod: "四捨五入",
+      },
+      {
+        itemId: "item_101",
+        unitPrice: 2500,
+        quantity: 2,
+        expectedAmount: 5000,
+        calculatedAmount: 5000,
+        roundingMethod: "四捨五入",
+      },
+    ];
+
+    const detectionResult = detectBillingCalculationErrors(validBillingData);
+
+    expect(detectionResult.hasErrors).toBe(false);
+    expect(detectionResult.errorCount).toBe(0);
+    expect(detectionResult.detectedErrors.length).toBe(0);
+    expect(detectionResult.summary.errorItemCount).toBe(0);
+    expect(detectionResult.summary.successItemCount).toBe(2);
+  });
+
+  test("不正な四捨五入ルールが適用されたデータを入力時、エラー検出機能が正常に動作しないケースで例外をスロー", () => {
+    const invalidBillingData = [
+      {
+        itemId: "item_bad",
+        unitPrice: null as any,
+        quantity: 3,
+        expectedAmount: 0,
+        calculatedAmount: 0,
+        roundingMethod: "不正なルール",
+      },
+    ];
+
+    expect(() => detectBillingCalculationErrors(invalidBillingData)).toThrow(
+      /単価/
+    );
+  });
+
+  test("異常値検出ログに検出日時、検出理由、重要度レベルが記録される", () => {
+    const billingDataForLogging = [
+      {
+        itemId: "item_log_001",
+        itemName: "ログテスト項目A",
+        unitPrice: 1500.5,
+        quantity: 4,
+        expectedAmount: 6002,
+        calculatedAmount: 6003,
+        roundingMethod: "不正な切り上げ",
+      },
+    ];
+
+    const detectionResult = detectBillingCalculationErrors(
+      billingDataForLogging
+    );
+
+    expect(detectionResult.errorLog).toBeDefined();
+    expect(Array.isArray(detectionResult.errorLog)).toBe(true);
+    expect(detectionResult.errorLog.length).toBeGreaterThan(0);
+
+    const logEntry = detectionResult.errorLog[0];
+    expect(logEntry).toHaveProperty("detectedAt");
+    expect(typeof logEntry.detectedAt).toBe("string");
+    expect(logEntry.detectedAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
+
+    expect(logEntry).toHaveProperty("reason");
+    expect(typeof logEntry.reason).toBe("string");
+    expect(logEntry.reason.length).toBeGreaterThan(0);
+
+    expect(logEntry).toHaveProperty("severity");
+    expect(["low", "medium", "high", "critical"]).toContain(logEntry.severity);
+
+    expect(logEntry).toHaveProperty("affectedItemId");
+    expect(logEntry.affectedItemId).toBe("item_log_001");
+
+    expect(logEntry).toHaveProperty("discrepancyAmount");
+    expect(logEntry.discrepancyAmount).toBe(1);
   });
 });

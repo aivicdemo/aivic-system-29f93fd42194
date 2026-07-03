@@ -1,101 +1,154 @@
-import { describe, test, expect, beforeEach } from '@jest/globals';
-import { generateContractChangeNotificationEmail } from '../../src/logic/it-1781935279444-2-1-1';
+import { determinePriorityForMultipleContractChanges } from "../../src/logic/it-1781935279444-2-1-1";
 
-describe('営業データ入力時の品質検証ルール定義・実行機能', () => {
-  let emailQueue: Array<{ to: string; subject: string; body: string }>;
-  let errorLogs: Array<{ timestamp: string; message: string; invalidEmail: string }>;
-
-  beforeEach(() => {
-    emailQueue = [];
-    errorLogs = [];
-  });
-
-  // SCEN-1233: [error] 契約変更通知メール自動生成機能 - 営業責任者のメールアドレスが不正な形式の場合、メール生成がスキップされる
-  test('営業責任者のメールアドレスが不正な形式の場合、メール生成がスキップされエラーログが出力される', () => {
-    const contractChangeData = {
-      contractId: 'CT-20240115-001',
-      customerId: 'CUST-2024-001',
-      changeDescription: '契約期間を3ヶ月延長',
-      changedBy: 'representative@company.com',
-      changeDate: '2024-01-15T09:30:00Z',
-    };
-
-    const invalidEmailPatterns = [
-      { email: 'user@domain', pattern: 'no-tld' },
-      { email: '@example.com', pattern: 'no-local-part' },
-      { email: 'user name@example.com', pattern: 'space-in-local' },
-      { email: 'user@example .com', pattern: 'space-in-domain' },
-      { email: 'userexample.com', pattern: 'no-at-sign' },
-      { email: 'user@@example.com', pattern: 'double-at-sign' },
+describe("複数契約変更優先順位自動判定機能", () => {
+  // SCEN-1233
+  test("複数の契約変更が同時登録された場合、請求額計算への影響が大きい順に優先順位が付与される", () => {
+    // 複数の契約変更データを準備（請求額計算への影響度が異なるケース）
+    const contractChanges = [
+      {
+        contractChangeId: "CC001",
+        contractId: "C001",
+        changeType: "discount_rate",
+        previousValue: 0.1,
+        newValue: 0.2,
+        affectedAmount: 5000,
+        impactFactor: 0.5,
+      },
+      {
+        contractChangeId: "CC002",
+        contractId: "C001",
+        changeType: "contract_amount",
+        previousValue: 100000,
+        newValue: 150000,
+        affectedAmount: 50000,
+        impactFactor: 1.0,
+      },
+      {
+        contractChangeId: "CC003",
+        contractId: "C001",
+        changeType: "contract_period",
+        previousValue: 12,
+        newValue: 24,
+        affectedAmount: 100000,
+        impactFactor: 0.8,
+      },
     ];
 
-    invalidEmailPatterns.forEach((invalidPattern) => {
-      emailQueue = [];
-      errorLogs = [];
+    // システムが各契約変更に対して優先順位を自動判定
+    const result = determinePriorityForMultipleContractChanges(contractChanges);
 
-      const salesManagerEmail = invalidPattern.email;
+    // 優先順位が付与されたことを確認
+    expect(result).toBeDefined();
+    expect(result.length).toBe(3);
+    expect(result.every((item) => item.priority !== undefined)).toBe(true);
 
-      const result = generateContractChangeNotificationEmail({
-        contractChangeData,
-        salesManagerEmail,
-        onError: (errorMsg: string, invalidEmail: string) => {
-          errorLogs.push({
-            timestamp: new Date('2024-01-15T09:35:00Z').toISOString(),
-            message: errorMsg,
-            invalidEmail,
-          });
-        },
-        onEmailQueued: (email: { to: string; subject: string; body: string }) => {
-          emailQueue.push(email);
-        },
-      });
+    // 付与された優先順位が請求額計算への影響度が大きい順に並んでいることを検証
+    // 期待される優先順位：
+    // 1位：contract_period (impactFactor: 0.8, affectedAmount: 100000 → 80000)
+    // 2位：contract_amount (impactFactor: 1.0, affectedAmount: 50000 → 50000)
+    // 3位：discount_rate (impactFactor: 0.5, affectedAmount: 5000 → 2500)
+    const sortedByPriority = [...result].sort((a, b) => a.priority - b.priority);
 
-      expect(result).toEqual({
-        success: false,
-        emailGenerated: false,
-        errorReason: 'メールアドレス形式が不正です',
-        invalidEmailAddress: salesManagerEmail,
-      });
+    expect(sortedByPriority[0].contractChangeId).toBe("CC003");
+    expect(sortedByPriority[0].priority).toBe(1);
+    expect(sortedByPriority[1].contractChangeId).toBe("CC002");
+    expect(sortedByPriority[1].priority).toBe(2);
+    expect(sortedByPriority[2].contractChangeId).toBe("CC001");
+    expect(sortedByPriority[2].priority).toBe(3);
 
-      expect(emailQueue.length).toBe(0);
+    // 優先順位の妥当性を検証（影響度スコア = affectedAmount × impactFactor）
+    const cc003ImpactScore = 100000 * 0.8;
+    const cc002ImpactScore = 50000 * 1.0;
+    const cc001ImpactScore = 5000 * 0.5;
 
-      expect(errorLogs.length).toBe(1);
-      expect(errorLogs[0].invalidEmail).toBe(salesManagerEmail);
-      expect(errorLogs[0].message).toMatch(/メールアドレス/);
-      expect(errorLogs[0].message).toMatch(/形式/);
-    });
+    expect(cc003ImpactScore).toBe(80000);
+    expect(cc002ImpactScore).toBe(50000);
+    expect(cc001ImpactScore).toBe(2500);
+    expect(cc003ImpactScore).toBeGreaterThan(cc002ImpactScore);
+    expect(cc002ImpactScore).toBeGreaterThan(cc001ImpactScore);
 
-    const validEmail = 'sales.manager@example.co.jp';
-    emailQueue = [];
-    errorLogs = [];
+    // 請求額計算ロジックで、優先順位の高い順に契約変更が反映されていることを確認
+    // 順序通り適用された場合の最終請求額
+    const baseAmount = 100000;
+    let calculatedAmount = baseAmount;
 
-    const resultValid = generateContractChangeNotificationEmail({
-      contractChangeData,
-      salesManagerEmail: validEmail,
-      onError: (errorMsg: string, invalidEmail: string) => {
-        errorLogs.push({
-          timestamp: new Date('2024-01-15T09:35:00Z').toISOString(),
-          message: errorMsg,
-          invalidEmail,
-        });
+    // 優先順位1位：contract_period（期間倍率適用）
+    calculatedAmount = calculatedAmount * (24 / 12);
+    expect(calculatedAmount).toBe(200000);
+
+    // 優先順位2位：contract_amount（契約金額更新）
+    calculatedAmount = 150000 * (24 / 12);
+    expect(calculatedAmount).toBe(300000);
+
+    // 優先順位3位：discount_rate（割引率適用）
+    calculatedAmount = calculatedAmount * (1 - 0.2);
+    expect(calculatedAmount).toBe(240000);
+
+    // 異なるパターン（異なる契約金額、期間、割引率の組み合わせ）での検証
+    const alternativeContractChanges = [
+      {
+        contractChangeId: "CC004",
+        contractId: "C002",
+        changeType: "discount_rate",
+        previousValue: 0.05,
+        newValue: 0.15,
+        affectedAmount: 20000,
+        impactFactor: 0.6,
       },
-      onEmailQueued: (email: { to: string; subject: string; body: string }) => {
-        emailQueue.push(email);
+      {
+        contractChangeId: "CC005",
+        contractId: "C002",
+        changeType: "contract_amount",
+        previousValue: 200000,
+        newValue: 250000,
+        affectedAmount: 50000,
+        impactFactor: 0.9,
       },
-    });
+      {
+        contractChangeId: "CC006",
+        contractId: "C002",
+        changeType: "contract_period",
+        previousValue: 6,
+        newValue: 12,
+        affectedAmount: 80000,
+        impactFactor: 0.75,
+      },
+    ];
 
-    expect(resultValid).toEqual({
-      success: true,
-      emailGenerated: true,
-      errorReason: null,
-      invalidEmailAddress: null,
-    });
+    const alternativeResult = determinePriorityForMultipleContractChanges(
+      alternativeContractChanges
+    );
 
-    expect(emailQueue.length).toBe(1);
-    expect(emailQueue[0].to).toBe(validEmail);
-    expect(emailQueue[0].subject).toMatch(/契約変更/);
-    expect(emailQueue[0].body).toContain('契約期間を3ヶ月延長');
+    // 同じロジックが正常に機能することを確認
+    expect(alternativeResult.length).toBe(3);
+    expect(alternativeResult.every((item) => item.priority !== undefined)).toBe(
+      true
+    );
 
-    expect(errorLogs.length).toBe(0);
+    const altSortedByPriority = [...alternativeResult].sort(
+      (a, b) => a.priority - b.priority
+    );
+
+    // 期待される優先順位：
+    // 1位：contract_period (0.75 × 80000 = 60000)
+    // 2位：contract_amount (0.9 × 50000 = 45000)
+    // 3位：discount_rate (0.6 × 20000 = 12000)
+    expect(altSortedByPriority[0].contractChangeId).toBe("CC006");
+    expect(altSortedByPriority[0].priority).toBe(1);
+    expect(altSortedByPriority[1].contractChangeId).toBe("CC005");
+    expect(altSortedByPriority[1].priority).toBe(2);
+    expect(altSortedByPriority[2].contractChangeId).toBe("CC004");
+    expect(altSortedByPriority[2].priority).toBe(3);
+
+    // 優先順位の一貫性を検証
+    const altCC006ImpactScore = 80000 * 0.75;
+    const altCC005ImpactScore = 50000 * 0.9;
+    const altCC004ImpactScore = 20000 * 0.6;
+
+    expect(altCC006ImpactScore).toBe(60000);
+    expect(altCC005ImpactScore).toBe(45000);
+    expect(altCC004ImpactScore).toBe(12000);
+    expect(altCC006ImpactScore).toBeGreaterThan(altCC005ImpactScore);
+    expect(altCC005ImpactScore).toBeGreaterThan(altCC004ImpactScore);
   });
 });

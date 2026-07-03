@@ -1,131 +1,51 @@
-import { describe, test, expect, beforeEach, afterEach } from "@jest/globals";
-import { validateAndSendLatestVersionNotification } from "../../src/logic/it-1781935279444-2-2-1";
+import { selectLatestDocumentVersion } from "../../src/logic/it-1781935279444-1-1-1";
 
-describe("最新版リリース通知自動配信機能 - エラーハンドリング", () => {
-  let consoleErrorSpy: jest.SpyInstance;
-  let errorLogs: string[];
+describe("営業データ項目のメタデータ管理機能", () => {
+  // SCEN-775: [edge] 契約書・提案資料の自動特定・適用機能 - 複数の有効なバージョンが存在する場合、最新版のみを特定して返す
+  test("複数の有効なバージョンが存在する場合、最新版のみを特定して返す", () => {
+    const multipleValidVersions = [
+      {
+        versionId: "v1",
+        versionNumber: "1.0",
+        createdAt: new Date("2024-01-01T09:00:00Z"),
+        status: "有効",
+        documentId: "doc-123",
+      },
+      {
+        versionId: "v2",
+        versionNumber: "1.5",
+        createdAt: new Date("2024-06-15T14:30:00Z"),
+        status: "有効",
+        documentId: "doc-123",
+      },
+      {
+        versionId: "v3",
+        versionNumber: "2.0",
+        createdAt: new Date("2024-12-20T10:45:00Z"),
+        status: "有効",
+        documentId: "doc-123",
+      },
+    ];
 
-  beforeEach(() => {
-    errorLogs = [];
-    consoleErrorSpy = jest
-      .spyOn(console, "error")
-      .mockImplementation((message: string) => {
-        errorLogs.push(message);
-      });
-  });
+    const result = selectLatestDocumentVersion(multipleValidVersions);
 
-  afterEach(() => {
-    consoleErrorSpy.mockRestore();
-  });
+    // 戻り値に含まれるバージョン数が1件のみであることを確認
+    expect(result.versions.length).toBe(1);
 
-  // SCEN-775
-  test("通知内容が空または必須項目が欠落している場合にエラーとして検出される", () => {
-    // ケース1: 通知内容が空（null）
-    expect(() => {
-      validateAndSendLatestVersionNotification(null);
-    }).toThrow(/通知内容/);
+    // 戻り値のバージョン番号が最新版（v2.0）であることを確認
+    expect(result.versions[0].versionNumber).toBe("2.0");
 
-    // ケース2: 通知内容が空（undefined）
-    expect(() => {
-      validateAndSendLatestVersionNotification(undefined);
-    }).toThrow(/通知内容/);
+    // 最新版のバージョンIDを検証
+    expect(result.versions[0].versionId).toBe("v3");
 
-    // ケース3: 通知内容が空オブジェクト
-    expect(() => {
-      validateAndSendLatestVersionNotification({});
-    }).toThrow(/リリース版番号/);
+    // ステータスが「有効」であることを確認
+    expect(result.versions[0].status).toBe("有効");
 
-    // ケース4: リリース版番号が欠落
-    expect(() => {
-      validateAndSendLatestVersionNotification({
-        releaseDate: "2024-01-15T10:00:00Z",
-        targetUsers: ["user001", "user002"],
-        notificationContent: "新しいバージョンがリリースされました",
-      });
-    }).toThrow(/リリース版番号/);
+    // 最新版の作成日時が最も新しいことを確認
+    expect(result.versions[0].createdAt).toEqual(new Date("2024-12-20T10:45:00Z"));
 
-    // ケース5: リリース版番号が空文字列
-    expect(() => {
-      validateAndSendLatestVersionNotification({
-        releaseVersion: "",
-        releaseDate: "2024-01-15T10:00:00Z",
-        targetUsers: ["user001", "user002"],
-        notificationContent: "新しいバージョンがリリースされました",
-      });
-    }).toThrow(/リリース版番号/);
-
-    // ケース6: リリース日時が欠落
-    expect(() => {
-      validateAndSendLatestVersionNotification({
-        releaseVersion: "v2.1.0",
-        targetUsers: ["user001", "user002"],
-        notificationContent: "新しいバージョンがリリースされました",
-      });
-    }).toThrow(/リリース日時/);
-
-    // ケース7: リリース日時が空文字列
-    expect(() => {
-      validateAndSendLatestVersionNotification({
-        releaseVersion: "v2.1.0",
-        releaseDate: "",
-        targetUsers: ["user001", "user002"],
-        notificationContent: "新しいバージョンがリリースされました",
-      });
-    }).toThrow(/リリース日時/);
-
-    // ケース8: 通知対象ユーザーが欠落
-    expect(() => {
-      validateAndSendLatestVersionNotification({
-        releaseVersion: "v2.1.0",
-        releaseDate: "2024-01-15T10:00:00Z",
-        notificationContent: "新しいバージョンがリリースされました",
-      });
-    }).toThrow(/通知対象ユーザー/);
-
-    // ケース9: 通知対象ユーザーが空配列
-    expect(() => {
-      validateAndSendLatestVersionNotification({
-        releaseVersion: "v2.1.0",
-        releaseDate: "2024-01-15T10:00:00Z",
-        targetUsers: [],
-        notificationContent: "新しいバージョンがリリースされました",
-      });
-    }).toThrow(/通知対象ユーザー/);
-
-    // ケース10: 通知対象ユーザーが null
-    expect(() => {
-      validateAndSendLatestVersionNotification({
-        releaseVersion: "v2.1.0",
-        releaseDate: "2024-01-15T10:00:00Z",
-        targetUsers: null,
-        notificationContent: "新しいバージョンがリリース",
-      });
-    }).toThrow(/通知対象ユーザー/);
-
-    // エラーが記録されたことを検証
-    expect(errorLogs.length).toBeGreaterThan(0);
-
-    // 正常系：すべての必須項目が揃っている場合
-    const validNotification = {
-      releaseVersion: "v2.1.0",
-      releaseDate: "2024-01-15T10:00:00Z",
-      targetUsers: ["user001", "user002", "user003"],
-      notificationContent: "新しいバージョンがリリースされました",
-      changeDescription: "バグ修正とパフォーマンス改善",
-    };
-
-    const result = validateAndSendLatestVersionNotification(validNotification);
-
-    // 結果の構造を検証
-    expect(result).toHaveProperty("success");
-    expect(result).toHaveProperty("notificationId");
-    expect(result).toHaveProperty("sentAt");
-    expect(result).toHaveProperty("recipientCount");
-
-    // 結果の具体的な値を検証
-    expect(result.success).toBe(true);
-    expect(result.recipientCount).toBe(3);
-    expect(typeof result.notificationId).toBe("string");
-    expect(result.notificationId.length).toBeGreaterThan(0);
+    // 戻り値に最新版の情報が含まれていることを確認
+    expect(result.latestVersionNumber).toBe("2.0");
+    expect(result.latestVersionId).toBe("v3");
   });
 });

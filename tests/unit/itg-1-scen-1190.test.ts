@@ -1,82 +1,80 @@
-import { classifyInquiry } from '../../src/logic/it-1-1-1';
+import { classifyInquiryMismatchType } from '../../src/logic/it-1781935279444-2-2-1';
 
-describe('営業成果データの自動検証ルール定義と異常検出機能', () => {
-  // SCEN-1190: [edge] 問い合わせ分類・優先度決定機能 - 複数カテゴリに該当する曖昧な問い合わせが適切にメインカテゴリに分類される
-  test('複数カテゴリに該当する曖昧な問い合わせが最適なメインカテゴリに分類され、優先度が自動決定される', () => {
-    const ambiguous_inquiry = {
-      inquiry_id: 'INQ-20240215-001',
-      received_at: '2024-02-15T10:30:00Z',
-      content:
-        '先月の請求書に記載されている営業成果数値が正しくない。アポ数が20件のはずが15件と記載されています。また、提供されたサービス品質についても確認したいのですが、成約数の計算ロジックが正確なのか、請求ルールの適用も含めて説明してください。',
-      customer_id: 'CUST-0001',
-      source_channel: 'email',
+describe('月次レポート配信後の顧客問い合わせ対応と検証 - データ不一致の自動判定', () => {
+  // SCEN-1190
+  test('3種類すべての問い合わせが正確に分類される', () => {
+    // データ入力誤り: 顧客名の誤字、金額の桁数違い等
+    const dataInputErrorInquiry = {
+      inquiry_id: 'INQ001',
+      inquiry_content: '請求書に記載されている顧客名が「株式会社テスト」になっていますが、正しくは「株式会社テスト・グループ」です。金額も1000000円のはずが100000円になっています。',
+      report_value: 100000,
+      source_value: 1000000,
+      contract_terms: {
+        customer_name: '株式会社テスト',
+        billing_amount: 100000,
+      },
     };
 
-    const classification_result = classifyInquiry(ambiguous_inquiry);
+    const dataInputErrorResult = classifyInquiryMismatchType(dataInputErrorInquiry);
+    expect(dataInputErrorResult.classification).toBe('データ入力誤り');
+    expect(dataInputErrorResult.error_type).toMatch(/顧客名|金額|桁数/);
+    expect(dataInputErrorResult.confidence_score).toBeGreaterThanOrEqual(0.8);
 
-    // メインカテゴリが「請求」に分類されることを確認（最も合致度が高い）
-    expect(classification_result.main_category).toBe('請求');
+    // 計算ロジック誤り: 割引率の計算ミス、税金計算の誤り等
+    const calculationErrorInquiry = {
+      inquiry_id: 'INQ002',
+      inquiry_content: '割引率が10%で計算されるはずですが、請求額が割引なしで計算されているように見えます。基本料金が100000円の場合、10%割引後は90000円になるはずが、100000円のままになっています。',
+      report_value: 100000,
+      source_value: 90000,
+      contract_terms: {
+        base_amount: 100000,
+        discount_rate: 0.1,
+        expected_amount: 90000,
+      },
+    };
 
-    // 優先度が「高」に自動決定されることを確認（請求関連は優先度高）
-    expect(classification_result.priority).toBe('高');
+    const calculationErrorResult = classifyInquiryMismatchType(calculationErrorInquiry);
+    expect(calculationErrorResult.classification).toBe('計算ロジック誤り');
+    expect(calculationErrorResult.error_type).toMatch(/割引|計算|ロジック/);
+    expect(calculationErrorResult.confidence_score).toBeGreaterThanOrEqual(0.8);
 
-    // サブカテゴリとして「成果数値検証」が含まれることを確認
-    expect(classification_result.sub_categories).toContain('成果数値検証');
+    // 契約条件の誤解釈: 請求期間の認識違い、割引適用条件の相違等
+    const contractMisinterpretationInquiry = {
+      inquiry_id: 'INQ003',
+      inquiry_content: '請求期間が1月1日から1月31日と記載されていますが、契約上は1月15日から2月14日までの月次請求ではないのですか？また、新規顧客割引が適用されると思っていたのですが、適用されていないようです。',
+      report_value: 100000,
+      source_value: 80000,
+      contract_terms: {
+        billing_period_start: '2024-01-01',
+        billing_period_end: '2024-01-31',
+        contract_period_start: '2024-01-15',
+        contract_period_end: '2024-02-14',
+        new_customer_discount_applicable: true,
+      },
+    };
 
-    // 関連カテゴリとして「製品品質」が含まれることを確認
-    expect(classification_result.related_categories).toContain('製品品質');
+    const contractMisinterpretationResult = classifyInquiryMismatchType(contractMisinterpretationInquiry);
+    expect(contractMisinterpretationResult.classification).toBe('契約条件の誤解釈');
+    expect(contractMisinterpretationResult.error_type).toMatch(/請求期間|割引条件|契約条件/);
+    expect(contractMisinterpretationResult.confidence_score).toBeGreaterThanOrEqual(0.8);
 
-    // メインカテゴリの合致度スコアが0.85以上であることを確認（複数候補の中で最高）
-    expect(classification_result.main_category_score).toBeGreaterThanOrEqual(0.85);
+    // 総合検証: 3種類すべてが正確に分類されることを確認
+    expect(dataInputErrorResult.classification).not.toBe(calculationErrorResult.classification);
+    expect(calculationErrorResult.classification).not.toBe(contractMisinterpretationResult.classification);
+    expect(dataInputErrorResult.classification).not.toBe(contractMisinterpretationResult.classification);
 
-    // 複数候補の情報が記録されていることを確認
-    expect(classification_result.candidate_categories).toBeDefined();
-    expect(Array.isArray(classification_result.candidate_categories)).toBe(true);
-    expect(classification_result.candidate_categories.length).toBeGreaterThanOrEqual(2);
-
-    // 候補の中に「請求」と「品質」の両方が含まれることを確認
-    const candidate_names = classification_result.candidate_categories.map(
-      (c: any) => c.category_name
+    // 各結果に必須フィールドが存在することを確認
+    [dataInputErrorResult, calculationErrorResult, contractMisinterpretationResult].forEach(
+      (result) => {
+        expect(result).toHaveProperty('classification');
+        expect(result).toHaveProperty('error_type');
+        expect(result).toHaveProperty('confidence_score');
+        expect(typeof result.classification).toBe('string');
+        expect(typeof result.error_type).toBe('string');
+        expect(typeof result.confidence_score).toBe('number');
+        expect(result.confidence_score).toBeGreaterThan(0);
+        expect(result.confidence_score).toBeLessThanOrEqual(1);
+      }
     );
-    expect(candidate_names).toContain('請求');
-    expect(candidate_names).toContain('品質');
-
-    // 各候補の合致度スコアが記録されていることを確認
-    classification_result.candidate_categories.forEach((candidate: any) => {
-      expect(candidate.match_score).toBeLessThanOrEqual(1.0);
-      expect(candidate.match_score).toBeGreaterThanOrEqual(0);
-    });
-
-    // 分類の根拠となるキーワードが記録されていることを確認
-    expect(classification_result.classification_reasoning).toBeDefined();
-    expect(typeof classification_result.classification_reasoning).toBe('string');
-    expect(classification_result.classification_reasoning.length).toBeGreaterThan(0);
-
-    // 推奨対応ルートが正しく設定されることを確認
-    expect(classification_result.recommended_response_route).toBeDefined();
-    expect(['即座に回答', '調査後回答', '契約確認後回答']).toContain(
-      classification_result.recommended_response_route
-    );
-
-    // SLA期限が正しく計算されることを確認（優先度高の場合は営業日1日以内）
-    expect(classification_result.sla_deadline).toBeDefined();
-    const received_date = new Date('2024-02-15T10:30:00Z');
-    const deadline_date = new Date(classification_result.sla_deadline);
-    const hours_difference = (deadline_date.getTime() - received_date.getTime()) / (1000 * 60 * 60);
-    expect(hours_difference).toBeGreaterThan(0);
-    expect(hours_difference).toBeLessThanOrEqual(24);
-
-    // タイムスタンプが記録されていることを確認
-    expect(classification_result.classified_at).toBeDefined();
-    expect(new Date(classification_result.classified_at)).toBeInstanceOf(Date);
-
-    // 後続処理への連携情報が含まれていることを確認
-    expect(classification_result.for_billing_automation).toBeDefined();
-    expect(classification_result.for_billing_automation).toBe(true);
-
-    // サブカテゴリ「成果数値検証」に基づく調査項目が記録されていることを確認
-    expect(classification_result.investigation_items).toBeDefined();
-    expect(Array.isArray(classification_result.investigation_items)).toBe(true);
-    expect(classification_result.investigation_items.length).toBeGreaterThan(0);
   });
 });

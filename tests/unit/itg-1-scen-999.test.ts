@@ -1,104 +1,113 @@
-import { calculateInvoiceAmount } from "../../src/logic/it-1781935279444-1-1-1";
+import {
+  defineAggregationRule,
+  executeAggregation,
+  getAggregationResult,
+  saveAggregationResult,
+  skipBillingForZeroAggregation,
+} from "../../src/logic/it-1-br-1781935279444-1-2-1";
 
-describe("営業データ項目のメタデータ管理機能 - 複数スタッフ間の請求ルール理解度統一確認", () => {
-  test("SCEN-999: 複数スタッフが同一営業データから一致した請求額を算出", () => {
-    // ==================== テストデータ準備 ====================
-    // 同一の営業データ（顧客情報、商品情報、数量、単価、割引率、税率など）
-    const commonSalesData = {
-      customerId: "CUST-20250526-001",
-      customerName: "テスト顧客A",
-      serviceType: "SERVICE_BASIC",
-      quantity: 10,
-      unitPrice: 5000,
-      discountRate: 0.1, // 10% 割引
-      taxRate: 0.1, // 10% 税
+describe("月次サマリーテンプレートの定義・管理機能", () => {
+  // SCEN-999: [edge] 営業データ抽出・集計ルール定義 - 顧客またはサービスが0件の場合でも集計ルールが正常に動作する
+  test("should handle aggregation rule definition and execution with zero customers or services", () => {
+    // Arrange: テストデータベース初期化、顧客テーブルとサービステーブルを空状態にセットアップ
+    const customersCount = 0;
+    const servicesCount = 0;
+    const templateId = "template_001";
+    const ruleName = "月次集計ルール_Q1";
+    const aggregationTarget = "sales_activities";
+    const aggregationMethod = "sum";
+    const aggregationItems = ["appointment_count", "deal_count"];
+
+    // Act 1: 集計ルール定義画面でルール作成
+    const ruleDefinitionInput = {
+      templateId: templateId,
+      ruleName: ruleName,
+      aggregationTarget: aggregationTarget,
+      aggregationMethod: aggregationMethod,
+      aggregationItems: aggregationItems,
+      customersCount: customersCount,
+      servicesCount: servicesCount,
     };
 
-    // ==================== ビジネスルール確認 ====================
-    // 期待される請求額の計算ロジック:
-    // 1. 基本額 = 数量 × 単価 = 10 × 5000 = 50000
-    // 2. 割引額 = 基本額 × 割引率 = 50000 × 0.1 = 5000
-    // 3. 割引後金額 = 基本額 - 割引額 = 50000 - 5000 = 45000
-    // 4. 税額 = 割引後金額 × 税率 = 45000 × 0.1 = 4500
-    // 5. 請求額 = 割引後金額 + 税額 = 45000 + 4500 = 49500
-    const expectedSystemInvoiceAmount = 49500;
+    const definedRule = defineAggregationRule(ruleDefinitionInput);
 
-    // ==================== 複数スタッフ（最低3名）による独立した請求額算出 ====================
-    // スタッフA: 請求ルール理解度が高い場合
-    const staffA_calculatedAmount = 49500; // 正確に計算
+    // Assert 1: ルール定義が正常に完了し、必須項目がすべて含まれていることを確認
+    expect(definedRule.ruleId).toBeTruthy();
+    expect(definedRule.ruleName).toBe(ruleName);
+    expect(definedRule.aggregationTarget).toBe(aggregationTarget);
+    expect(definedRule.aggregationMethod).toBe(aggregationMethod);
+    expect(definedRule.status).toBe("active");
+    expect(definedRule.aggregationItems).toEqual(aggregationItems);
 
-    // スタッフB: 請求ルール理解度が高い場合（スタッフAと同じルール適用）
-    const staffB_calculatedAmount = 49500; // 正確に計算
+    // Act 2: 集計処理を実行トリガー
+    const aggregationExecutionInput = {
+      ruleId: definedRule.ruleId,
+      executionPeriod: "2024-01-01_2024-01-31",
+      dataSourceCount: {
+        customers: customersCount,
+        services: servicesCount,
+      },
+    };
 
-    // スタッフC: 請求ルール理解度が高い場合（スタッフA, Bと同じルール適用）
-    const staffC_calculatedAmount = 49500; // 正確に計算
+    const executionLog = executeAggregation(aggregationExecutionInput);
 
-    // ==================== システムの請求ルールエンジンで正式な請求額を算出 ====================
-    const systemCalculatedAmount = calculateInvoiceAmount(commonSalesData);
+    // Assert 2: 集計実行ログが正常に記録され、エラーハンドリングが適切に行われたことを確認
+    expect(executionLog.executionId).toBeTruthy();
+    expect(executionLog.ruleId).toBe(definedRule.ruleId);
+    expect(executionLog.status).toBe("completed");
+    expect(executionLog.recordsProcessed).toBe(0);
+    expect(executionLog.errorsOccurred).toBe(false);
+    expect(executionLog.executionTimestampUtc).toBeTruthy();
 
-    // ==================== 各スタッフの算出結果とシステムの算出結果を比較検証 ====================
-    // スタッフAの結果がシステムと一致
-    expect(staffA_calculatedAmount).toBe(expectedSystemInvoiceAmount);
+    // Act 3: 集計結果を取得
+    const aggregationResultInput = {
+      ruleId: definedRule.ruleId,
+      executionPeriod: "2024-01-01_2024-01-31",
+    };
 
-    // スタッフBの結果がシステムと一致
-    expect(staffB_calculatedAmount).toBe(expectedSystemInvoiceAmount);
+    const aggregationResult = getAggregationResult(aggregationResultInput);
 
-    // スタッフCの結果がシステムと一致
-    expect(staffC_calculatedAmount).toBe(expectedSystemInvoiceAmount);
-
-    // ==================== システムが返した請求額の検証 ====================
-    // システムが計算した請求額の確認
-    expect(systemCalculatedAmount).toBe(expectedSystemInvoiceAmount);
-
-    // ==================== 複数スタッフ間の算出結果の一致性をチェック ====================
-    // スタッフA = スタッフB
-    expect(staffA_calculatedAmount).toBe(staffB_calculatedAmount);
-
-    // スタッフB = スタッフC
-    expect(staffB_calculatedAmount).toBe(staffC_calculatedAmount);
-
-    // スタッフA = スタッフC（間接的な検証）
-    expect(staffA_calculatedAmount).toBe(staffC_calculatedAmount);
-
-    // ==================== 全スタッフとシステムの算出結果が完全に一致 ====================
-    const allStaffAmounts = [
-      staffA_calculatedAmount,
-      staffB_calculatedAmount,
-      staffC_calculatedAmount,
-    ];
-    const allAmountsMatch = allStaffAmounts.every(
-      (amount) => amount === systemCalculatedAmount
-    );
-    expect(allAmountsMatch).toBe(true);
-
-    // ==================== 請求額の差異がないことを明示的に確認 ====================
-    const invoiceAmountDifferences = allStaffAmounts.map(
-      (amount) => amount - systemCalculatedAmount
-    );
-    const noDifferences = invoiceAmountDifferences.every(
-      (diff) => diff === 0
-    );
-    expect(noDifferences).toBe(true);
-
-    // ==================== 最終的なビジネスルール要件確認 ====================
-    // 期待結果: 複数スタッフが同一の営業データに対して算出した請求額が全て一致し、
-    // かつシステムの請求ルールエンジンで算出された正式な請求額とも一致すること
-    expect({
-      staffA: staffA_calculatedAmount,
-      staffB: staffB_calculatedAmount,
-      staffC: staffC_calculatedAmount,
-      systemCalculated: systemCalculatedAmount,
-      allMatch:
-        staffA_calculatedAmount ===
-        staffB_calculatedAmount &&
-        staffB_calculatedAmount === staffC_calculatedAmount &&
-        staffC_calculatedAmount === systemCalculatedAmount,
-    }).toEqual({
-      staffA: 49500,
-      staffB: 49500,
-      staffC: 49500,
-      systemCalculated: 49500,
-      allMatch: true,
+    // Assert 3: 集計結果が0件の場合でも正常に表示形式が適用されることを確認
+    expect(aggregationResult.totalRecords).toBe(0);
+    expect(aggregationResult.displayMessage).toBe("集計対象なし");
+    expect(aggregationResult.summaryByCustomer).toEqual([]);
+    expect(aggregationResult.summaryByService).toEqual([]);
+    expect(aggregationResult.aggregatedValues).toEqual({
+      appointment_count: 0,
+      deal_count: 0,
     });
+
+    // Act 4: 集計結果を保存
+    const saveResultInput = {
+      ruleId: definedRule.ruleId,
+      executionId: executionLog.executionId,
+      aggregationResult: aggregationResult,
+      templateId: templateId,
+    };
+
+    const savedResult = saveAggregationResult(saveResultInput);
+
+    // Assert 4: データベースに集計結果が正常に保存されたことを確認
+    expect(savedResult.saved).toBe(true);
+    expect(savedResult.recordId).toBeTruthy();
+    expect(savedResult.totalRecords).toBe(0);
+    expect(savedResult.storageTimestampUtc).toBeTruthy();
+
+    // Act 5: 請求自動化処理が集計結果0件の場合でも正常にスキップ・処理されることを確認
+    const billingSkipInput = {
+      ruleId: definedRule.ruleId,
+      aggregationResultId: savedResult.recordId,
+      aggregatedRecordCount: 0,
+      executionPeriod: "2024-01-01_2024-01-31",
+    };
+
+    const billingResult = skipBillingForZeroAggregation(billingSkipInput);
+
+    // Assert 5: 請求処理が適切にスキップされ、ステータスが正常に遷移したことを確認
+    expect(billingResult.skipped).toBe(true);
+    expect(billingResult.skipReason).toBe("zero_aggregation_records");
+    expect(billingResult.billingProcessStatus).toBe("skipped");
+    expect(billingResult.nextProcessStep).toBe("awaiting_next_period");
+    expect(billingResult.processLog).toContain("集計結果が0件のため請求処理をスキップしました");
   });
 });

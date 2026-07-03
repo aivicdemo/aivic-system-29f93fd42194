@@ -1,115 +1,148 @@
-import { notifyContractChanges } from '../../src/logic/it-1-1-1';
+import { describe, test, expect, beforeEach, afterEach } from '@jest/globals';
+import { 
+  validateBillingItemWithinRange,
+  extractBillingItems
+} from '../../src/logic/it-1781935279444-2-1-1';
 
-describe('営業成果データの自動検証ルール定義と異常検出機能', () => {
-  // SCEN-1073: [normal] 契約・成果物変更通知機能 - 複数の変更内容が同時に発生した場合、全ての変更内容と影響範囲が正確に通知メールに含まれる
-  test('複数の変更内容が同時に発生した場合、全ての変更項目と影響範囲が通知メール本文に正確に含まれ、全ての受取人に配信されること', async () => {
-    const contractId = 'CONTRACT-001';
-    const contractName = 'ABC社 営業支援契約';
-    const customerId = 'CUST-001';
-    const changedByUserId = 'USER-123';
-    const changedByUserName = '営業オペレーター 太郎';
-    const changeTimestamp = new Date('2024-06-15T14:30:00Z');
+describe('営業データ入力時の品質検証ルール定義・実行機能', () => {
+  // SCEN-1073: [edge] 請求対象項目自動抽出・検証機能 - 入力値が検証ルールの許容範囲の最小値・最大値である場合に正確に判定される
+  test('should correctly validate billing items at minimum and maximum boundary values', () => {
+    // Arrange: 検証ルールの最小値・最大値を定義
+    const validationRuleMinValue = 0;
+    const validationRuleMaxValue = 100000;
 
-    const changeDetails = {
-      contractAmount: {
-        oldValue: 500000,
-        newValue: 600000,
-        unit: '円',
-        impactFields: ['請求予定日', '割引計算対象額']
-      },
-      contractPeriod: {
-        oldValue: '2024-01-01～2024-12-31',
-        newValue: '2024-01-01～2025-12-31',
-        unit: '日付範囲',
-        impactFields: ['請求期間', '成果物納期スケジュール']
-      },
-      deliverableDeadline: {
-        oldValue: '2024-12-31',
-        newValue: '2025-06-30',
-        unit: '日付',
-        impactFields: ['納期実績確認タイミング', '請求内容確認期限']
-      },
-      customerName: {
-        oldValue: 'ABC社',
-        newValue: 'ABC社（子会社統合後）',
-        unit: '文字列',
-        impactFields: ['請求書送付先', 'レポート配信先']
-      }
+    // 最小値と同じ入力値
+    const testInputAtMin = {
+      itemId: 'ITEM_001',
+      itemName: 'アポイント数',
+      inputValue: 0,
+      unitType: 'count',
+      dataType: 'number',
+      contractId: 'CONTRACT_2024_001',
+      customerId: 'CUST_A001',
+      serviceId: 'SVC_001',
+      entryDate: '2024-01-15',
     };
 
-    const recipientEmails = [
-      { email: 'contract-owner@customer.com', role: '契約者' },
-      { email: 'sales-rep@agency.com', role: '営業担当者' },
-      { email: 'admin@agency.com', role: '事務担当者' }
-    ];
+    // 最大値と同じ入力値
+    const testInputAtMax = {
+      itemId: 'ITEM_001',
+      itemName: 'アポイント数',
+      inputValue: 100000,
+      unitType: 'count',
+      dataType: 'number',
+      contractId: 'CONTRACT_2024_001',
+      customerId: 'CUST_A001',
+      serviceId: 'SVC_001',
+      entryDate: '2024-01-15',
+    };
 
-    const result = await notifyContractChanges({
-      contractId,
-      contractName,
-      customerId,
-      changeDetails,
-      changedByUserId,
-      changedByUserName,
-      changeTimestamp,
-      recipientEmails
+    // 最小値より小さい入力値（エラーケース）
+    const testInputBelowMin = {
+      itemId: 'ITEM_001',
+      itemName: 'アポイント数',
+      inputValue: -1,
+      unitType: 'count',
+      dataType: 'number',
+      contractId: 'CONTRACT_2024_001',
+      customerId: 'CUST_A001',
+      serviceId: 'SVC_001',
+      entryDate: '2024-01-15',
+    };
+
+    // 最大値より大きい入力値（エラーケース）
+    const testInputAboveMax = {
+      itemId: 'ITEM_001',
+      itemName: 'アポイント数',
+      inputValue: 100001,
+      unitType: 'count',
+      dataType: 'number',
+      contractId: 'CONTRACT_2024_001',
+      customerId: 'CUST_A001',
+      serviceId: 'SVC_001',
+      entryDate: '2024-01-15',
+    };
+
+    // Act & Assert: 最小値での検証
+    const resultAtMin = validateBillingItemWithinRange(testInputAtMin, {
+      minValue: validationRuleMinValue,
+      maxValue: validationRuleMaxValue,
+    });
+    expect(resultAtMin).toEqual({
+      isValid: true,
+      itemId: 'ITEM_001',
+      inputValue: 0,
+      passedValidation: true,
+      validationMessage: '検証ルールに合致しました',
+      boundaryCondition: 'at_minimum',
     });
 
-    // (1) 全ての変更項目が通知メール本文に明記されていること
-    expect(result.emailBody).toContain('契約金額');
-    expect(result.emailBody).toContain('契約期間');
-    expect(result.emailBody).toContain('成果物納期');
-    expect(result.emailBody).toContain('顧客名');
-
-    // (2) 各項目の変更前後の値が正確に記載されていること
-    expect(result.emailBody).toContain('500000');
-    expect(result.emailBody).toContain('600000');
-    expect(result.emailBody).toContain('2024-01-01～2024-12-31');
-    expect(result.emailBody).toContain('2024-01-01～2025-12-31');
-    expect(result.emailBody).toContain('2024-12-31');
-    expect(result.emailBody).toContain('2025-06-30');
-    expect(result.emailBody).toContain('ABC社');
-    expect(result.emailBody).toContain('ABC社（子会社統合後）');
-
-    // (3) 変更による影響範囲が詳細に記載されていること
-    expect(result.emailBody).toContain('請求予定日');
-    expect(result.emailBody).toContain('割引計算対象額');
-    expect(result.emailBody).toContain('請求期間');
-    expect(result.emailBody).toContain('成果物納期スケジュール');
-    expect(result.emailBody).toContain('納期実績確認タイミング');
-    expect(result.emailBody).toContain('請求内容確認期限');
-    expect(result.emailBody).toContain('請求書送付先');
-    expect(result.emailBody).toContain('レポート配信先');
-
-    // (4) メールが指定された全ての受取人に正常に配信されていること
-    expect(result.sentTo).toHaveLength(3);
-    expect(result.sentTo).toContain('contract-owner@customer.com');
-    expect(result.sentTo).toContain('sales-rep@agency.com');
-    expect(result.sentTo).toContain('admin@agency.com');
-
-    // (5) メール送信の失敗やタイムアウトが発生しないこと
-    expect(result.status).toBe('success');
-    expect(result.deliveryStatus).toEqual({
-      'contract-owner@customer.com': 'delivered',
-      'sales-rep@agency.com': 'delivered',
-      'admin@agency.com': 'delivered'
+    // Act & Assert: 最大値での検証
+    const resultAtMax = validateBillingItemWithinRange(testInputAtMax, {
+      minValue: validationRuleMinValue,
+      maxValue: validationRuleMaxValue,
+    });
+    expect(resultAtMax).toEqual({
+      isValid: true,
+      itemId: 'ITEM_001',
+      inputValue: 100000,
+      passedValidation: true,
+      validationMessage: '検証ルールに合致しました',
+      boundaryCondition: 'at_maximum',
     });
 
-    // 追加: メールヘッダに変更者情報と変更日時が含まれていること
-    expect(result.emailSubject).toContain(contractName);
-    expect(result.emailBody).toContain(changedByUserName);
-    expect(result.emailBody).toContain('2024-06-15');
+    // Act & Assert: 最小値より下回る入力値での検証（エラーケース）
+    expect(() =>
+      validateBillingItemWithinRange(testInputBelowMin, {
+        minValue: validationRuleMinValue,
+        maxValue: validationRuleMaxValue,
+      })
+    ).toThrow(/範囲外/);
 
-    // 追加: 変更の影響範囲の警告が独立したセクションとして含まれていること
-    expect(result.impactSummarySection).toBeDefined();
-    expect(result.impactSummarySection).toContain('影響範囲');
-    expect(result.impactSummarySection).toContain('注意');
+    // Act & Assert: 最大値を超過する入力値での検証（エラーケース）
+    expect(() =>
+      validateBillingItemWithinRange(testInputAboveMax, {
+        minValue: validationRuleMinValue,
+        maxValue: validationRuleMaxValue,
+      })
+    ).toThrow(/範囲外/);
 
-    // 追加: 各受取人に対して正しいロール別情報が送信されていること
-    expect(result.recipientDetails).toHaveLength(3);
-    const contractOwnerNotification = result.recipientDetails.find(
-      (r: any) => r.email === 'contract-owner@customer.com'
-    );
-    expect(contractOwnerNotification?.role).toBe('契約者');
-    expect(contractOwnerNotification?.status).toBe('delivered');
+    // Act & Assert: 複数請求対象項目の一括抽出・検証
+    const billingItems = [testInputAtMin, testInputAtMax];
+    const extractionResult = extractBillingItems(billingItems, {
+      minValue: validationRuleMinValue,
+      maxValue: validationRuleMaxValue,
+    });
+
+    expect(extractionResult).toEqual({
+      extractedCount: 2,
+      validItems: [
+        {
+          itemId: 'ITEM_001',
+          contractId: 'CONTRACT_2024_001',
+          customerId: 'CUST_A001',
+          serviceId: 'SVC_001',
+          inputValue: 0,
+          isValid: true,
+        },
+        {
+          itemId: 'ITEM_001',
+          contractId: 'CONTRACT_2024_001',
+          customerId: 'CUST_A001',
+          serviceId: 'SVC_001',
+          inputValue: 100000,
+          isValid: true,
+        },
+      ],
+      invalidItems: [],
+      validationLog: {
+        executedAt: expect.any(String),
+        ruleId: expect.any(String),
+        totalProcessed: 2,
+        passedCount: 2,
+        failedCount: 0,
+        boundaryValuesDetected: ['at_minimum', 'at_maximum'],
+      },
+    });
   });
 });

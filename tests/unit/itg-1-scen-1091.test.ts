@@ -1,179 +1,109 @@
-import { evaluateStaffCompetency } from "../../src/logic/it-1-2-1";
+import { describe, test, expect } from '@jest/globals';
+import { validateAndProcessSalesData } from '../../src/logic/it-1781935279444-2-1-1';
 
-describe("新入スタッフ到達度評価判定 - 請求書作成のみ不合格", () => {
-  // SCEN-1091
-  test("請求書作成のみ不合格の場合、追加指導判定となること", () => {
-    const staffId = "staff_001";
-    const evaluationData = {
-      staffId,
-      salesDataQuality: {
-        score: 95,
-        passed: true,
+describe('営業データ入力時の品質検証ルール定義・実行機能', () => {
+  // SCEN-1091: [normal] ドキュメント反映・更新機能 - 発見された例外ケースと改善点がドキュメントに反映され、次回業務で同一誤りが検出されない
+  test('ドキュメント反映後、同一条件のテストデータが正常に処理される', () => {
+    // 前提: 新入スタッフの実行結果が確認・検証され、例外ケースと改善点がドキュメントに反映されている状態
+    // トリガー: 前回と同一条件のテストデータをシステムに入力して処理する
+    // 期待結果: ドキュメント反映による改善が適用され、同一誤りが検出されず、請求自動化処理が正常に完了
+
+    // テストデータ: 前回エラーが検出された営業データ（日付・金額の矛盾）
+    const salesData = {
+      customerId: 'CUST-001',
+      salesPersonId: 'SP-001',
+      contactDate: '2024-01-15',
+      contactTime: '14:30',
+      serviceType: 'PREMIUM',
+      appointmentCount: 3,
+      agreementCount: 2,
+      customerFeedback: 'positive',
+      contractAmount: 150000,
+      invoicingAmount: 150000,
+      billingRuleVersion: 'v2.1',
+      documentReviewDate: '2024-01-20T09:00:00Z',
+      exceptionCasesDocumented: true,
+      improvementPointsDocumented: true,
+    };
+
+    // 検証ルール: ドキュメント反映後の改善版ルール
+    const validationRules = {
+      requiredFields: ['customerId', 'salesPersonId', 'contactDate', 'serviceType', 'appointmentCount', 'agreementCount', 'contractAmount', 'invoicingAmount'],
+      dataTypeValidation: {
+        customerId: 'string',
+        appointmentCount: 'number',
+        agreementCount: 'number',
+        contractAmount: 'number',
+        invoicingAmount: 'number',
       },
-      billingAutomation: {
-        score: 90,
-        passed: true,
+      rangeValidation: {
+        appointmentCount: { min: 0, max: 100 },
+        agreementCount: { min: 0, max: 100 },
+        contractAmount: { min: 0, max: 10000000 },
+        invoicingAmount: { min: 0, max: 10000000 },
       },
-      invoiceCreation: {
-        score: 60,
-        passed: false,
+      consistencyRules: [
+        {
+          rule: 'agreementCountNotGreaterThanAppointmentCount',
+          condition: (data: any) => data.agreementCount <= data.appointmentCount,
+        },
+        {
+          rule: 'invoicingAmountNotGreaterThanContractAmount',
+          condition: (data: any) => data.invoicingAmount <= data.contractAmount,
+        },
+        {
+          rule: 'contactDateBeforeTodayOrToday',
+          condition: (data: any) => new Date(data.contactDate) <= new Date('2024-01-20'),
+        },
+      ],
+      exceptionHandling: {
+        allowZeroAppointmentIfDocumented: true,
+        allowInvoicingAmountEqualToContractAmount: true,
       },
     };
 
-    const result = evaluateStaffCompetency(evaluationData);
+    // 処理実行
+    const result = validateAndProcessSalesData(salesData, validationRules);
 
-    expect(result.judgement).toBe("追加指導判定");
-    expect(result.passed).toBe(false);
-    expect(result.failureReasons).toEqual(["請求書作成"]);
-    expect(result.message).toMatch(/請求書作成/);
-    expect(result.staffId).toBe(staffId);
-    expect(result.requiresAdditionalTraining).toBe(true);
-  });
+    // 期待結果の検証
+    // 1. バリデーション成功
+    expect(result.validationStatus).toBe('PASSED');
 
-  // SCEN-1091: エラーケース - 評価データが不完全な場合
-  test("評価データが不完全な場合、エラーをスロー", () => {
-    const incompleteData = {
-      staffId: "staff_002",
-      salesDataQuality: {
-        score: 85,
-        passed: true,
-      },
-      billingAutomation: {
-        score: 88,
-        passed: true,
-      },
-      // invoiceCreation が欠落
-    };
+    // 2. 異常値が検出されない（前回検出された矛盾が修正されている）
+    expect(result.errorCount).toBe(0);
+    expect(result.warningCount).toBe(0);
 
-    expect(() => evaluateStaffCompetency(incompleteData as any)).toThrow(
-      /評価項目/
-    );
-  });
+    // 3. 処理が正常に完了
+    expect(result.processingStatus).toBe('COMPLETED');
 
-  // SCEN-1091: エラーケース - スコアが範囲外の場合
-  test("スコアが範囲外の場合、エラーをスロー", () => {
-    const invalidData = {
-      staffId: "staff_003",
-      salesDataQuality: {
-        score: 150,
-        passed: true,
-      },
-      billingAutomation: {
-        score: 90,
-        passed: true,
-      },
-      invoiceCreation: {
-        score: 70,
-        passed: true,
-      },
-    };
+    // 4. 請求額が正確に計算されている
+    expect(result.calculatedBillingAmount).toBe(150000);
 
-    expect(() => evaluateStaffCompetency(invalidData)).toThrow(/スコア/);
-  });
+    // 5. ドキュメント反映による改善が適用されたことが記録されている
+    expect(result.documentReflectionApplied).toBe(true);
+    expect(result.exceptionCaseHandled).toBe(false); // 例外ケースが発生していない
+    expect(result.improvementRuleApplied).toBe(true);
 
-  // SCEN-1091: 成功ケース - すべて合格の場合
-  test("すべて合格の場合、即戦力判定となること", () => {
-    const allPassedData = {
-      staffId: "staff_004",
-      salesDataQuality: {
-        score: 92,
-        passed: true,
-      },
-      billingAutomation: {
-        score: 88,
-        passed: true,
-      },
-      invoiceCreation: {
-        score: 85,
-        passed: true,
-      },
-    };
+    // 6. 処理ログに改善履歴が記録されている
+    expect(result.processingLog).toContain('document_improvement_applied');
+    expect(result.processingLog).not.toContain('exception_case_detected');
 
-    const result = evaluateStaffCompetency(allPassedData);
+    // 7. 顧客別・サービス別の請求額集計が正確である
+    expect(result.billingAggregation).toEqual({
+      customerId: 'CUST-001',
+      serviceType: 'PREMIUM',
+      totalBillingAmount: 150000,
+      aggregationTimestamp: expect.any(String),
+    });
 
-    expect(result.judgement).toBe("即戦力判定");
-    expect(result.passed).toBe(true);
-    expect(result.failureReasons).toEqual([]);
-    expect(result.requiresAdditionalTraining).toBe(false);
-  });
+    // 8. 前回検出された矛盾（例: 成約数 > アポ数、請求額 > 契約額）が再発していない
+    expect(result.agreementCountExceedsAppointmentCount).toBe(false);
+    expect(result.invoicingAmountExceedsContractAmount).toBe(false);
 
-  // SCEN-1091: 境界値ケース - 複数項目不合格の場合
-  test("複数項目不合格の場合、追加指導判定となること", () => {
-    const multipleFailureData = {
-      staffId: "staff_005",
-      salesDataQuality: {
-        score: 75,
-        passed: false,
-      },
-      billingAutomation: {
-        score: 65,
-        passed: false,
-      },
-      invoiceCreation: {
-        score: 55,
-        passed: false,
-      },
-    };
+    // 9. 検証完了タイムスタンプが記録されている
+    expect(result.validationCompletedAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
 
-    const result = evaluateStaffCompetency(multipleFailureData);
-
-    expect(result.judgement).toBe("追加指導判定");
-    expect(result.passed).toBe(false);
-    expect(result.failureReasons).toEqual([
-      "営業データ品質",
-      "請求自動化処理",
-      "請求書作成",
-    ]);
-    expect(result.requiresAdditionalTraining).toBe(true);
-  });
-
-  // SCEN-1091: 境界値ケース - 営業データ品質のみ不合格の場合
-  test("営業データ品質のみ不合格の場合、追加指導判定となること", () => {
-    const salesQualityFailureData = {
-      staffId: "staff_006",
-      salesDataQuality: {
-        score: 60,
-        passed: false,
-      },
-      billingAutomation: {
-        score: 92,
-        passed: true,
-      },
-      invoiceCreation: {
-        score: 88,
-        passed: true,
-      },
-    };
-
-    const result = evaluateStaffCompetency(salesQualityFailureData);
-
-    expect(result.judgement).toBe("追加指導判定");
-    expect(result.passed).toBe(false);
-    expect(result.failureReasons).toEqual(["営業データ品質"]);
-  });
-
-  // SCEN-1091: 境界値ケース - 請求自動化処理のみ不合格の場合
-  test("請求自動化処理のみ不合格の場合、追加指導判定となること", () => {
-    const billingAutomationFailureData = {
-      staffId: "staff_007",
-      salesDataQuality: {
-        score: 90,
-        passed: true,
-      },
-      billingAutomation: {
-        score: 58,
-        passed: false,
-      },
-      invoiceCreation: {
-        score: 89,
-        passed: true,
-      },
-    };
-
-    const result = evaluateStaffCompetency(billingAutomationFailureData);
-
-    expect(result.judgement).toBe("追加指導判定");
-    expect(result.passed).toBe(false);
-    expect(result.failureReasons).toEqual(["請求自動化処理"]);
+    // 10. 処理全体の完了ステータスが確認できる
+    expect(result.overallStatus).toBe('SUCCESS');
   });
 });

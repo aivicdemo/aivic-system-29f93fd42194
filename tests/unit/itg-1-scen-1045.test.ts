@@ -1,290 +1,132 @@
-import { describe, test, expect, beforeEach } from "@jest/globals";
-import { extractSalesDataFromQuery } from "../../src/logic/it-1781935279444-2-2-1";
+import { describe, test, expect } from '@jest/globals';
+import { validateSalesDataWithCompositeRules } from '../../src/logic/it-1781935279444-2-1-1';
 
-describe("営業データの完全性・正確性を自動検証し、不足データ・誤りを検出・通知する機能", () => {
-  beforeEach(() => {
-    jest.clearAllMocks();
-  });
-
-  test("SCEN-1045: 質問内容から営業データが正確に特定され、対応する根拠データが完全かつ正確に抽出される", () => {
-    // 入力: 顧客質問
-    const query = {
-      queryText: "2024年1月の商品Aの売上実績は？",
-      targetPeriod: {
-        startDate: "2024-01-01",
-        endDate: "2024-01-31",
-      },
-      productName: "商品A",
-      queryType: "sales_performance",
+describe('営業データ入力時の品質検証ルール定義・実行', () => {
+  test('SCEN-1045: 複数の検証条件を組み合わせたルールが正常に評価され、検証結果が返される', () => {
+    // ルール定義：顧客名（必須）AND売上金額（0以上）AND取引日（現在日付以前）
+    const compositeRule = {
+      rule_id: 'rule_composite_001',
+      rule_name: '複合検証ルール',
+      conditions: [
+        {
+          condition_id: 'cond_001',
+          field_name: 'customer_name',
+          operator: 'required',
+          expected_value: null,
+          error_message: '顧客名は必須項目です'
+        },
+        {
+          condition_id: 'cond_002',
+          field_name: 'sales_amount',
+          operator: 'greater_than_or_equal',
+          expected_value: 0,
+          error_message: '売上金額は0以上である必要があります'
+        },
+        {
+          condition_id: 'cond_003',
+          field_name: 'transaction_date',
+          operator: 'less_than_or_equal',
+          expected_value: '2024-12-31',
+          error_message: '取引日は現在日付以前である必要があります'
+        }
+      ]
     };
 
-    // モック営業データベース
-    const mockSalesData = [
-      {
-        transactionId: "TXN-001",
-        transactionDate: "2024-01-05",
-        productName: "商品A",
-        quantity: 10,
-        unitPrice: 1000,
-        totalAmount: 10000,
-        salesPerson: "田中太郎",
-        customerId: "CUST-001",
-        customerName: "顧客企業A",
-      },
-      {
-        transactionId: "TXN-002",
-        transactionDate: "2024-01-12",
-        productName: "商品A",
-        quantity: 15,
-        unitPrice: 1000,
-        totalAmount: 15000,
-        salesPerson: "鈴木花子",
-        customerId: "CUST-002",
-        customerName: "顧客企業B",
-      },
-      {
-        transactionId: "TXN-003",
-        transactionDate: "2024-01-20",
-        productName: "商品A",
-        quantity: 8,
-        unitPrice: 1000,
-        totalAmount: 8000,
-        salesPerson: "佐藤次郎",
-        customerId: "CUST-001",
-        customerName: "顧客企業A",
-      },
-      {
-        transactionId: "TXN-004",
-        transactionDate: "2024-01-28",
-        productName: "商品B",
-        quantity: 5,
-        unitPrice: 2000,
-        totalAmount: 10000,
-        salesPerson: "田中太郎",
-        customerId: "CUST-003",
-        customerName: "顧客企業C",
-      },
-    ];
-
-    // システムが質問内容を解析し、対応する営業データを抽出
-    const result = extractSalesDataFromQuery(query, mockSalesData);
-
-    // 期待される抽出データ
-    const expectedExtractedData = [
-      {
-        transactionId: "TXN-001",
-        transactionDate: "2024-01-05",
-        productName: "商品A",
-        quantity: 10,
-        unitPrice: 1000,
-        totalAmount: 10000,
-        salesPerson: "田中太郎",
-        customerId: "CUST-001",
-        customerName: "顧客企業A",
-      },
-      {
-        transactionId: "TXN-002",
-        transactionDate: "2024-01-12",
-        productName: "商品A",
-        quantity: 15,
-        unitPrice: 1000,
-        totalAmount: 15000,
-        salesPerson: "鈴木花子",
-        customerId: "CUST-002",
-        customerName: "顧客企業B",
-      },
-      {
-        transactionId: "TXN-003",
-        transactionDate: "2024-01-20",
-        productName: "商品A",
-        quantity: 8,
-        unitPrice: 1000,
-        totalAmount: 8000,
-        salesPerson: "佐藤次郎",
-        customerId: "CUST-001",
-        customerName: "顧客企業A",
-      },
-    ];
-
-    // 抽出されたデータが正確に含まれていることを検証
-    expect(result.extractedData).toEqual(expectedExtractedData);
-
-    // 集計値の検証
-    expect(result.totalQuantity).toBe(33);
-    expect(result.totalAmount).toBe(33000);
-    expect(result.transactionCount).toBe(3);
-
-    // 説明資料の自動生成を検証
-    expect(result.explanationDocument).toBeDefined();
-    expect(result.explanationDocument.title).toBe(
-      "2024年1月 商品A 売上実績レポート"
-    );
-    expect(result.explanationDocument.summary).toContain("合計金額: 33000円");
-    expect(result.explanationDocument.summary).toContain("売上件数: 3件");
-
-    // 根拠データと説明資料の内容が一致していることを検証
-    const transactionDetails = result.explanationDocument.details;
-    expect(transactionDetails).toHaveLength(3);
-    expect(transactionDetails[0]).toEqual({
-      date: "2024-01-05",
-      product: "商品A",
-      quantity: 10,
-      amount: 10000,
-      salesperson: "田中太郎",
-      customer: "顧客企業A",
-    });
-    expect(transactionDetails[1]).toEqual({
-      date: "2024-01-12",
-      product: "商品A",
-      quantity: 15,
-      amount: 15000,
-      salesperson: "鈴木花子",
-      customer: "顧客企業B",
-    });
-    expect(transactionDetails[2]).toEqual({
-      date: "2024-01-20",
-      product: "商品A",
-      quantity: 8,
-      amount: 8000,
-      salesperson: "佐藤次郎",
-      customer: "顧客企業A",
-    });
-
-    // 説明資料がダウンロード可能な形式であることを検証
-    expect(result.downloadFormat).toBe("pdf");
-    expect(result.filename).toBe("2024年1月_商品A_売上実績レポート.pdf");
-
-    // 抽出データにおいて必須項目が完全に含まれていることを検証
-    result.extractedData.forEach((record: any) => {
-      expect(record).toHaveProperty("transactionId");
-      expect(record).toHaveProperty("transactionDate");
-      expect(record).toHaveProperty("productName");
-      expect(record).toHaveProperty("quantity");
-      expect(record).toHaveProperty("unitPrice");
-      expect(record).toHaveProperty("totalAmount");
-      expect(record).toHaveProperty("salesPerson");
-      expect(record).toHaveProperty("customerId");
-      expect(record).toHaveProperty("customerName");
-    });
-
-    // 説明資料の構造が正確であることを検証
-    expect(result.explanationDocument).toHaveProperty("title");
-    expect(result.explanationDocument).toHaveProperty("summary");
-    expect(result.explanationDocument).toHaveProperty("details");
-    expect(result.explanationDocument).toHaveProperty("generatedAt");
-    expect(typeof result.explanationDocument.generatedAt).toBe("string");
-
-    // 質問への回答が根拠データに基づいて正確であることを検証
-    expect(result.answer).toBe(
-      "2024年1月の商品Aの売上実績は、全3件の取引で合計33,000円です。詳細は以下の通りです。"
-    );
-
-    // データの整合性確認：データベースに存在しないデータが抽出されていないこと
-    const extractedTransactionIds = result.extractedData.map(
-      (d: any) => d.transactionId
-    );
-    expect(extractedTransactionIds).not.toContain("TXN-004");
-
-    // 日付範囲の検証：期間外のデータが含まれていないこと
-    result.extractedData.forEach((record: any) => {
-      const recordDate = new Date(record.transactionDate);
-      const startDate = new Date(query.targetPeriod.startDate);
-      const endDate = new Date(query.targetPeriod.endDate);
-      expect(recordDate.getTime()).toBeGreaterThanOrEqual(startDate.getTime());
-      expect(recordDate.getTime()).toBeLessThanOrEqual(endDate.getTime());
-    });
-
-    // 商品名フィルタの検証：指定された商品のみが抽出されていること
-    result.extractedData.forEach((record: any) => {
-      expect(record.productName).toBe("商品A");
-    });
-  });
-
-  test("SCEN-1045-ERR: 不正な日付範囲を指定した場合、エラーを返す", () => {
-    const invalidQuery = {
-      queryText: "2024年1月の商品Aの売上実績は？",
-      targetPeriod: {
-        startDate: "2024-01-31",
-        endDate: "2024-01-01",
-      },
-      productName: "商品A",
-      queryType: "sales_performance",
+    // ケース1：すべての条件を満たすテストデータ
+    const validData = {
+      customer_name: 'テスト顧客A',
+      sales_amount: 100000,
+      transaction_date: '2024-12-15'
     };
 
-    const mockSalesData: any[] = [];
+    const result1 = validateSalesDataWithCompositeRules(compositeRule, validData);
+    expect(result1.validation_status).toBe('pass');
+    expect(result1.validation_errors).toEqual([]);
+    expect(result1.error_count).toBe(0);
 
-    expect(() =>
-      extractSalesDataFromQuery(invalidQuery, mockSalesData)
-    ).toThrow(/日付範囲/);
-  });
-
-  test("SCEN-1045-ERR: 質問テキストが空の場合、エラーを返す", () => {
-    const emptyQuery = {
-      queryText: "",
-      targetPeriod: {
-        startDate: "2024-01-01",
-        endDate: "2024-01-31",
-      },
-      productName: "商品A",
-      queryType: "sales_performance",
+    // ケース2：1つの条件を満たさないテストデータ（売上金額が負）
+    const invalidData1 = {
+      customer_name: 'テスト顧客B',
+      sales_amount: -50000,
+      transaction_date: '2024-12-10'
     };
 
-    const mockSalesData: any[] = [];
+    const result2 = validateSalesDataWithCompositeRules(compositeRule, invalidData1);
+    expect(result2.validation_status).toBe('fail');
+    expect(result2.error_count).toBe(1);
+    expect(result2.validation_errors.length).toBe(1);
+    expect(result2.validation_errors[0]).toMatchObject({
+      condition_id: 'cond_002',
+      field_name: 'sales_amount',
+      error_message: '売上金額は0以上である必要があります',
+      actual_value: -50000
+    });
 
-    expect(() =>
-      extractSalesDataFromQuery(emptyQuery, mockSalesData)
-    ).toThrow(/質問内容/);
-  });
-
-  test("SCEN-1045-ERR: データベースが空の場合、抽出結果が空配列を返す", () => {
-    const query = {
-      queryText: "2024年1月の商品Aの売上実績は？",
-      targetPeriod: {
-        startDate: "2024-01-01",
-        endDate: "2024-01-31",
-      },
-      productName: "商品A",
-      queryType: "sales_performance",
+    // ケース3：複数の条件を満たさないテストデータ（顧客名なし、売上金額が負、取引日が未来）
+    const invalidData2 = {
+      customer_name: '',
+      sales_amount: -30000,
+      transaction_date: '2025-06-01'
     };
 
-    const emptyDatabase: any[] = [];
+    const result3 = validateSalesDataWithCompositeRules(compositeRule, invalidData2);
+    expect(result3.validation_status).toBe('fail');
+    expect(result3.error_count).toBe(3);
+    expect(result3.validation_errors.length).toBe(3);
 
-    const result = extractSalesDataFromQuery(query, emptyDatabase);
+    const errorConditionIds = result3.validation_errors.map((e: any) => e.condition_id);
+    expect(errorConditionIds).toContain('cond_001');
+    expect(errorConditionIds).toContain('cond_002');
+    expect(errorConditionIds).toContain('cond_003');
 
-    expect(result.extractedData).toEqual([]);
-    expect(result.totalQuantity).toBe(0);
-    expect(result.totalAmount).toBe(0);
-    expect(result.transactionCount).toBe(0);
-  });
+    const cond001Error = result3.validation_errors.find((e: any) => e.condition_id === 'cond_001');
+    expect(cond001Error).toMatchObject({
+      field_name: 'customer_name',
+      error_message: '顧客名は必須項目です'
+    });
 
-  test("SCEN-1045-ERR: 一致するデータが存在しない場合、警告メッセージを含める", () => {
-    const query = {
-      queryText: "2024年1月の商品Zの売上実績は？",
-      targetPeriod: {
-        startDate: "2024-01-01",
-        endDate: "2024-01-31",
-      },
-      productName: "商品Z",
-      queryType: "sales_performance",
+    const cond002Error = result3.validation_errors.find((e: any) => e.condition_id === 'cond_002');
+    expect(cond002Error).toMatchObject({
+      field_name: 'sales_amount',
+      error_message: '売上金額は0以上である必要があります',
+      actual_value: -30000
+    });
+
+    const cond003Error = result3.validation_errors.find((e: any) => e.condition_id === 'cond_003');
+    expect(cond003Error).toMatchObject({
+      field_name: 'transaction_date',
+      error_message: '取引日は現在日付以前である必要があります',
+      actual_value: '2025-06-01'
+    });
+
+    // ケース4：別の1つの条件を満たさないテストデータ（取引日が未来）
+    const invalidData3 = {
+      customer_name: 'テスト顧客D',
+      sales_amount: 50000,
+      transaction_date: '2025-01-15'
     };
 
-    const mockSalesData = [
-      {
-        transactionId: "TXN-001",
-        transactionDate: "2024-01-05",
-        productName: "商品A",
-        quantity: 10,
-        unitPrice: 1000,
-        totalAmount: 10000,
-        salesPerson: "田中太郎",
-        customerId: "CUST-001",
-        customerName: "顧客企業A",
-      },
-    ];
+    const result4 = validateSalesDataWithCompositeRules(compositeRule, invalidData3);
+    expect(result4.validation_status).toBe('fail');
+    expect(result4.error_count).toBe(1);
+    expect(result4.validation_errors.length).toBe(1);
+    expect(result4.validation_errors[0]).toMatchObject({
+      condition_id: 'cond_003',
+      field_name: 'transaction_date',
+      error_message: '取引日は現在日付以前である必要があります',
+      actual_value: '2025-01-15'
+    });
 
-    const result = extractSalesDataFromQuery(query, mockSalesData);
+    // ケース5：辺界値テスト - 売上金額がちょうど0
+    const boundaryData = {
+      customer_name: 'テスト顧客E',
+      sales_amount: 0,
+      transaction_date: '2024-12-31'
+    };
 
-    expect(result.extractedData).toEqual([]);
-    expect(result.warning).toContain("該当するデータ");
+    const result5 = validateSalesDataWithCompositeRules(compositeRule, boundaryData);
+    expect(result5.validation_status).toBe('pass');
+    expect(result5.error_count).toBe(0);
+    expect(result5.validation_errors).toEqual([]);
   });
 });

@@ -1,139 +1,123 @@
-import { describe, test, expect } from '@jest/globals';
-import { validateSalesDataQuality } from '../../src/logic/it-1781935279444-2-2-1';
+import {
+  validateSalesDataFinal,
+} from "../../src/logic/it-1781935279444-2-2-1";
 
-describe('営業データ品質基準チェック・承認機能', () => {
-  // SCEN-728: 修正済みデータの必須項目が空文字列である場合、検証エラーとして検出される
-  test('修正済みデータの必須項目が空文字列のとき、必須項目エラーを検出し承認ボタンを無効化する', () => {
-    // 必須項目が空文字列であるデータ
-    const corrected_data = {
-      customer_name: '',
-      amount: '10000',
-      transaction_date: '2024-01-15',
-      service_type: '営業支援',
-      appointment_count: '5',
-      contract_count: '2',
-      status: 'corrected'
-    };
+describe("営業データ最終検証・レポート生成可否判定", () => {
+  // SCEN-728
+  test("確定済みデータの欠落・異常値がすべて検出され、承認されず生成がスキップされる", () => {
+    // 準備: 複数の確定済み営業データレコード（意図的に欠落値や異常値を含める）
+    const sales_data_records = [
+      {
+        id: "sd_001",
+        customer_id: "cust_123",
+        service_id: "svc_A",
+        appointment_count: 5,
+        contract_count: 2,
+        contact_date: "2024-01-15",
+        amount: 50000,
+        status: "confirmed",
+        created_at: "2024-01-10T09:00:00Z",
+      },
+      {
+        id: "sd_002",
+        customer_id: "cust_124",
+        service_id: "svc_B",
+        appointment_count: null, // 欠落値
+        contract_count: 1,
+        contact_date: "2024-01-16",
+        amount: 75000,
+        status: "confirmed",
+        created_at: "2024-01-11T10:30:00Z",
+      },
+      {
+        id: "sd_003",
+        customer_id: "cust_125",
+        service_id: "svc_A",
+        appointment_count: 3,
+        contract_count: 5, // 異常値（アポ数より成約数が多い）
+        contact_date: "2024-01-17",
+        amount: -10000, // 異常値（負の金額）
+        status: "confirmed",
+        created_at: "2024-01-12T11:45:00Z",
+      },
+      {
+        id: "sd_004",
+        customer_id: "cust_126",
+        service_id: "svc_C",
+        appointment_count: 2,
+        contract_count: 1,
+        contact_date: "", // 欠落値
+        amount: 120000,
+        status: "confirmed",
+        created_at: "2024-01-13T14:20:00Z",
+      },
+    ];
 
-    // 検証実行
-    const validation_result = validateSalesDataQuality(corrected_data);
+    // 実行: データ最終検証機能を実行
+    const validation_result = validateSalesDataFinal({
+      records: sales_data_records,
+      target_period_start: "2024-01-01",
+      target_period_end: "2024-01-31",
+    });
 
-    // 期待値: 検証エラーが検出される
+    // 検証: 検証結果レポートを確認
     expect(validation_result.is_valid).toBe(false);
-    expect(validation_result.has_errors).toBe(true);
-    expect(validation_result.errors.length).toBeGreaterThan(0);
+    expect(validation_result.total_records_checked).toBe(4);
+    expect(validation_result.records_with_errors).toBe(3);
 
-    // 必須項目エラーが明確に指摘されていることを確認
-    const error_message = validation_result.errors[0].message;
-    expect(error_message).toMatch(/必須項目/);
-
-    // 承認ボタンが無効化される（is_approvable が false）
-    expect(validation_result.is_approvable).toBe(false);
-  });
-
-  // 複数の必須項目が空文字列の場合、すべてのエラーが検出される
-  test('複数の必須項目が空文字列のとき、すべてのエラーを検出する', () => {
-    const corrected_data = {
-      customer_name: '',
-      amount: '',
-      transaction_date: '2024-01-15',
-      service_type: '',
-      appointment_count: '5',
-      contract_count: '2',
-      status: 'corrected'
-    };
-
-    const validation_result = validateSalesDataQuality(corrected_data);
-
-    // 複数のエラーが検出されることを確認
-    expect(validation_result.is_valid).toBe(false);
-    expect(validation_result.errors.length).toBeGreaterThanOrEqual(3);
-
-    // すべてのエラーが必須項目に関するものであることを確認
-    const all_required_field_errors = validation_result.errors.every(
-      error => error.message.match(/必須項目/)
+    // 欠落値検出確認
+    expect(validation_result.error_details).toContainEqual(
+      expect.objectContaining({
+        record_id: "sd_002",
+        error_type: "missing_field",
+        field_name: "appointment_count",
+      })
     );
-    expect(all_required_field_errors).toBe(true);
 
-    // 承認ボタンが無効化される
-    expect(validation_result.is_approvable).toBe(false);
-  });
-
-  // 必須項目がすべて入力されている場合、検証エラーが検出されず承認可能となる
-  test('すべての必須項目が正しく入力されているとき、検証エラーが検出されず承認可能となる', () => {
-    const corrected_data = {
-      customer_name: '株式会社ABC',
-      amount: '10000',
-      transaction_date: '2024-01-15',
-      service_type: '営業支援',
-      appointment_count: '5',
-      contract_count: '2',
-      status: 'corrected'
-    };
-
-    const validation_result = validateSalesDataQuality(corrected_data);
-
-    // 検証エラーが検出されないことを確認
-    expect(validation_result.is_valid).toBe(true);
-    expect(validation_result.has_errors).toBe(false);
-    expect(validation_result.errors.length).toBe(0);
-
-    // 承認ボタンが有効化される
-    expect(validation_result.is_approvable).toBe(true);
-  });
-
-  // 必須項目が空文字列で、データ型エラーも同時に存在する場合
-  test('必須項目が空文字列かつデータ型エラーが存在するとき、すべてのエラーが検出される', () => {
-    const corrected_data = {
-      customer_name: '',
-      amount: 'invalid_amount',
-      transaction_date: '2024-01-15',
-      service_type: '営業支援',
-      appointment_count: '5',
-      contract_count: '2',
-      status: 'corrected'
-    };
-
-    const validation_result = validateSalesDataQuality(corrected_data);
-
-    // 複数のエラーが検出されることを確認
-    expect(validation_result.is_valid).toBe(false);
-    expect(validation_result.errors.length).toBeGreaterThanOrEqual(2);
-
-    // 必須項目エラーが含まれていることを確認
-    const has_required_field_error = validation_result.errors.some(
-      error => error.message.match(/必須項目/)
+    expect(validation_result.error_details).toContainEqual(
+      expect.objectContaining({
+        record_id: "sd_004",
+        error_type: "missing_field",
+        field_name: "contact_date",
+      })
     );
-    expect(has_required_field_error).toBe(true);
 
-    // 承認ボタンが無効化される
-    expect(validation_result.is_approvable).toBe(false);
-  });
+    // 異常値検出確認
+    expect(validation_result.error_details).toContainEqual(
+      expect.objectContaining({
+        record_id: "sd_003",
+        error_type: "logical_inconsistency",
+        description: "contract_count exceeds appointment_count",
+      })
+    );
 
-  // 必須項目のうち1つのみが空文字列の場合、その項目のみエラーが検出される
-  test('必須項目の1つのみが空文字列のとき、その項目に限定したエラーが検出される', () => {
-    const corrected_data = {
-      customer_name: '株式会社ABC',
-      amount: '',
-      transaction_date: '2024-01-15',
-      service_type: '営業支援',
-      appointment_count: '5',
-      contract_count: '2',
-      status: 'corrected'
-    };
+    expect(validation_result.error_details).toContainEqual(
+      expect.objectContaining({
+        record_id: "sd_003",
+        error_type: "invalid_value",
+        field_name: "amount",
+        description: "amount must be non-negative",
+      })
+    );
 
-    const validation_result = validateSalesDataQuality(corrected_data);
+    // 承認フロー進行ブロック確認
+    expect(validation_result.can_proceed_to_approval).toBe(false);
+    expect(validation_result.approval_status).toBe("blocked");
 
-    // 検証エラーが検出されることを確認
-    expect(validation_result.is_valid).toBe(false);
-    expect(validation_result.has_errors).toBe(true);
+    // レポート生成スキップ確認
+    expect(validation_result.should_generate_report).toBe(false);
 
-    // エラーが amount フィールドに限定されていることを確認
-    expect(validation_result.errors.length).toBe(1);
-    const error_field = validation_result.errors[0].field_name;
-    expect(error_field).toBe('amount');
+    // 検証エラーの詳細が明確に記録されていることを確認
+    expect(validation_result.error_details.length).toBe(4);
+    expect(validation_result.error_summary).toBe(
+      "3 records contain errors: 2 missing fields, 1 logical inconsistency, 1 invalid value"
+    );
 
-    // 承認ボタンが無効化される
-    expect(validation_result.is_approvable).toBe(false);
+    // 検証完了タイムスタンプが正しく記録されていることを確認
+    expect(validation_result.validation_completed_at).toBeDefined();
+    expect(typeof validation_result.validation_completed_at).toBe("string");
+
+    // 成功したレコードも特定されていることを確認
+    expect(validation_result.valid_records).toEqual(["sd_001"]);
   });
 });

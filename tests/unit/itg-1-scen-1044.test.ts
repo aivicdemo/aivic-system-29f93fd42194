@@ -1,105 +1,87 @@
-import { describe, test, expect, beforeEach, afterEach } from '@jest/globals';
-import { classifyCustomerInquiry, determinePriorityLevel } from '../../src/logic/it-1-2-1';
+import { defineMonthlyTemplate } from '../../src/logic/it-1-br-1781935279444-1-2-1';
 
-describe('顧客質問内容の分類と優先度判定 - 月次レポート生成直後の即時処理', () => {
-  let fetchMock: any;
+describe('月次サマリーテンプレートの定義・管理', () => {
+  test('SCEN-1044: テンプレート項目の表示順序が空の場合、デフォルト順序として自動設定される', () => {
+    // Precondition: 営業データ品質管理・請求自動化システムに月次サマリーテンプレート管理画面がある
+    // Trigger: テンプレート項目を複数選択して追加し、表示順序フィールドを空のまま保存
+    // Expected Outcome: 表示順序がデフォルト順序で自動設定され、プレビュー表示でも正しい順序で表示される
 
-  beforeEach(() => {
-    fetchMock = require('jest-fetch-mock');
-    fetchMock.enableMocks();
-    fetchMock.resetMocks();
-  });
-
-  afterEach(() => {
-    fetchMock.disableMocks();
-  });
-
-  // SCEN-1044
-  test('月次レポート生成直後に顧客質問を受信したとき、1秒以内に優先度判定が実行される', async () => {
-    const reportGenerationTime = new Date('2024-01-15T23:59:59Z');
-    const inquiryReceiptTime = new Date('2024-01-16T00:00:00Z');
-    const elapsedTimeMs = inquiryReceiptTime.getTime() - reportGenerationTime.getTime();
-
-    expect(elapsedTimeMs).toBeLessThanOrEqual(1000);
-
-    const inquiryContent =
-      '月次レポートに記載された請求額が契約時の単価と異なっています。確認をお願いします。';
-    const inquiryMetadata = {
-      customerId: 'CUST-20240116-001',
-      receiptTimestamp: inquiryReceiptTime.toISOString(),
-      reportGenerationTimestamp: reportGenerationTime.toISOString(),
-      contactChannel: 'email',
+    const template_input = {
+      template_id: 'template_001',
+      template_name: '月次営業成果サマリー',
+      description: '営業成果の月次集計テンプレート',
+      items: [
+        {
+          item_id: 'item_sales',
+          item_name: '売上',
+          item_type: 'numeric',
+          calculation_logic: 'SUM(revenue)',
+          display_order: null // 表示順序未設定（空）
+        },
+        {
+          item_id: 'item_count',
+          item_name: '件数',
+          item_type: 'numeric',
+          calculation_logic: 'COUNT(transactions)',
+          display_order: null // 表示順序未設定（空）
+        },
+        {
+          item_id: 'item_rate',
+          item_name: '達成率',
+          item_type: 'percentage',
+          calculation_logic: '(achievement / target) * 100',
+          display_order: null // 表示順序未設定（空）
+        }
+      ],
+      created_at: new Date('2024-01-15T10:00:00Z'),
+      created_by: 'user_001',
+      status: 'draft'
     };
 
-    const classificationRequest = {
-      inquiryContent,
-      inquiryMetadata,
-    };
+    const result = defineMonthlyTemplate(template_input);
 
-    fetchMock.mockResponseOnce(
-      JSON.stringify({
-        classification: '請求エラー',
-        confidence: 0.98,
-        classificationTimestamp: new Date('2024-01-16T00:00:00Z').toISOString(),
-      }),
-      { status: 200 }
-    );
+    // Assertion 1: テンプレートが正常に定義されている
+    expect(result).toBeDefined();
+    expect(result.template_id).toBe('template_001');
+    expect(result.template_name).toBe('月次営業成果サマリー');
 
-    const classificationResult = await classifyCustomerInquiry(classificationRequest);
+    // Assertion 2: テンプレート項目が3件存在する
+    expect(result.items).toHaveLength(3);
 
-    expect(classificationResult).toEqual({
-      classification: '請求エラー',
-      confidence: 0.98,
-      classificationTimestamp: '2024-01-16T00:00:00Z',
-    });
+    // Assertion 3: 表示順序がデフォルト順序で自動設定されている（追加順序＝1, 2, 3）
+    expect(result.items[0].display_order).toBe(1);
+    expect(result.items[1].display_order).toBe(2);
+    expect(result.items[2].display_order).toBe(3);
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const classificationCallArgs = fetchMock.mock.calls[0];
-    expect(classificationCallArgs[1]?.method).toBe('POST');
+    // Assertion 4: 各項目のデータが保持されている
+    expect(result.items[0].item_id).toBe('item_sales');
+    expect(result.items[0].item_name).toBe('売上');
+    expect(result.items[1].item_id).toBe('item_count');
+    expect(result.items[1].item_name).toBe('件数');
+    expect(result.items[2].item_id).toBe('item_rate');
+    expect(result.items[2].item_name).toBe('達成率');
 
-    const priorityDeterminationRequest = {
-      inquiryClassification: '請求エラー',
-      classificationConfidence: 0.98,
-      elapsedTimeFromReportGenerationMs: elapsedTimeMs,
-      contactChannel: 'email',
-      inquiryReceiptTimestamp: inquiryReceiptTime.toISOString(),
-    };
+    // Assertion 5: テンプレートのステータスが'active'に更新されている
+    expect(result.status).toBe('active');
 
-    fetchMock.mockResponseOnce(
-      JSON.stringify({
-        priorityLevel: 'HIGH',
-        priorityReason: '請求エラーかつレポート生成直後の即時質問のため最優先',
-        priorityDeterminationStartTime: new Date('2024-01-16T00:00:00Z').toISOString(),
-        processingTimeMs: 85,
-      }),
-      { status: 200 }
-    );
+    // Assertion 6: テンプレート項目の計算ロジックが正確に保持されている
+    expect(result.items[0].calculation_logic).toBe('SUM(revenue)');
+    expect(result.items[1].calculation_logic).toBe('COUNT(transactions)');
+    expect(result.items[2].calculation_logic).toBe('(achievement / target) * 100');
 
-    const priorityResult = await determinePriorityLevel(priorityDeterminationRequest);
+    // Assertion 7: テンプレート項目の型情報が正確に保持されている
+    expect(result.items[0].item_type).toBe('numeric');
+    expect(result.items[1].item_type).toBe('numeric');
+    expect(result.items[2].item_type).toBe('percentage');
 
-    expect(priorityResult).toEqual({
-      priorityLevel: 'HIGH',
-      priorityReason: '請求エラーかつレポート生成直後の即時質問のため最優先',
-      priorityDeterminationStartTime: '2024-01-16T00:00:00Z',
-      processingTimeMs: 85,
-    });
+    // Assertion 8: プレビュー出力が正しい順序で構成される
+    expect(result.preview_order).toEqual(['売上', '件数', '達成率']);
 
-    expect(priorityResult.processingTimeMs).toBeLessThanOrEqual(1000);
+    // Assertion 9: テンプレートの作成者と作成日時が記録されている
+    expect(result.created_by).toBe('user_001');
+    expect(result.created_at).toEqual(new Date('2024-01-15T10:00:00Z'));
 
-    expect(priorityResult.priorityLevel).toMatch(/HIGH|MEDIUM|LOW/);
-
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    const priorityCallArgs = fetchMock.mock.calls[1];
-    expect(priorityCallArgs[1]?.method).toBe('POST');
-
-    const priorityDeterminationStartTime = new Date(
-      priorityResult.priorityDeterminationStartTime
-    ).getTime();
-    const inquiryReceiptTimeMs = inquiryReceiptTime.getTime();
-    const timeDifferenceMs = priorityDeterminationStartTime - inquiryReceiptTimeMs;
-
-    expect(timeDifferenceMs).toBeLessThanOrEqual(1000);
-
-    expect(priorityResult.priorityLevel).toBe('HIGH');
+    // Assertion 10: エラーが発生していない
+    expect(result.error).toBeUndefined();
   });
 });

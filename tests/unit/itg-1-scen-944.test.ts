@@ -1,77 +1,45 @@
-import { validateSalesDataQuality } from '../../src/logic/it-1781935279444-2-2-1';
+import { calculateDiscountedBillingAmount } from "../../src/logic/it-1-2-1";
 
-describe('営業データ品質検証・異常検出機能', () => {
-  // SCEN-944: [error] 複数の品質検証エラーが同時発生した場合、すべてが正しく特定される
-  test('複数の品質検証エラーを同時に検出し、すべてのエラーが正確に記録される', () => {
-    const sales_data_record = {
-      customer_name: '',
-      amount: -5000,
-      transaction_date: '2024-13-45',
-      email_address: 'invalid-email-format',
-      service_type: 'Type-A',
-      transaction_id: 'TRX-001'
+describe("営業成果データから請求対象項目を自動抽出し、顧客ごと・サービスごとの請求額を集計する機能", () => {
+  // SCEN-944: [error] 契約別割引基準の確認機能 - 割引ルールがマスタに存在しない場合、該当割引は適用されずエラーが記録される
+  test("割引ルールがマスタに存在しない場合、該当割引は適用されずエラーが記録される", () => {
+    const contract_id = "CONTRACT-001";
+    const customer_id = "CUST-A";
+    const service_id = "SRV-001";
+    const base_billing_amount = 100000;
+    const discount_rule_id = "DISCOUNT-NONEXISTENT-999";
+    const discount_master_data = [
+      {
+        discount_rule_id: "DISCOUNT-001",
+        discount_name: "Early Bird Discount",
+        discount_rate: 0.1,
+      },
+      {
+        discount_rule_id: "DISCOUNT-002",
+        discount_name: "Volume Discount",
+        discount_rate: 0.05,
+      },
+    ];
+
+    const input_params = {
+      contract_id: contract_id,
+      customer_id: customer_id,
+      service_id: service_id,
+      base_billing_amount: base_billing_amount,
+      discount_rule_id: discount_rule_id,
+      discount_master_data: discount_master_data,
     };
 
-    const validation_result = validateSalesDataQuality(sales_data_record);
+    const result = calculateDiscountedBillingAmount(input_params);
 
-    // エラー総数の検証: 4つのエラーが検出されることを確認
-    expect(validation_result.error_list.length).toBe(4);
-
-    // エラーコードの検証
-    const error_codes = validation_result.error_list.map((err: any) => err.error_code);
-    expect(error_codes).toContain('MISSING_CUSTOMER_NAME');
-    expect(error_codes).toContain('INVALID_AMOUNT');
-    expect(error_codes).toContain('INVALID_DATE_FORMAT');
-    expect(error_codes).toContain('INVALID_EMAIL_FORMAT');
-
-    // エラーメッセージの検証
-    const customer_name_error = validation_result.error_list.find(
-      (err: any) => err.error_code === 'MISSING_CUSTOMER_NAME'
-    );
-    expect(customer_name_error).toBeDefined();
-    expect(customer_name_error.error_message).toMatch(/顧客名/);
-
-    const amount_error = validation_result.error_list.find(
-      (err: any) => err.error_code === 'INVALID_AMOUNT'
-    );
-    expect(amount_error).toBeDefined();
-    expect(amount_error.error_message).toMatch(/金額/);
-
-    const date_error = validation_result.error_list.find(
-      (err: any) => err.error_code === 'INVALID_DATE_FORMAT'
-    );
-    expect(date_error).toBeDefined();
-    expect(date_error.error_message).toMatch(/日付/);
-
-    const email_error = validation_result.error_list.find(
-      (err: any) => err.error_code === 'INVALID_EMAIL_FORMAT'
-    );
-    expect(email_error).toBeDefined();
-    expect(email_error.error_message).toMatch(/メール/);
-
-    // エラー発生箇所（フィールド名）の検証
-    expect(customer_name_error.field_name).toBe('customer_name');
-    expect(amount_error.field_name).toBe('amount');
-    expect(date_error.field_name).toBe('transaction_date');
-    expect(email_error.field_name).toBe('email_address');
-
-    // エラーの重要度レベルの検証
-    expect(customer_name_error.severity_level).toBe('Critical');
-    expect(amount_error.severity_level).toBe('Critical');
-    expect(date_error.severity_level).toBe('Warning');
-    expect(email_error.severity_level).toBe('Warning');
-
-    // 重複するエラーがないことを検証
-    const unique_error_codes = new Set(error_codes);
-    expect(unique_error_codes.size).toBe(4);
-
-    // 全体的な検証結果ステータスが不合格であることを確認
-    expect(validation_result.validation_status).toBe('FAILED');
-
-    // すべてのエラーにタイムスタンプが記録されていることを確認
-    validation_result.error_list.forEach((err: any) => {
-      expect(err.detected_timestamp).toBeDefined();
-      expect(typeof err.detected_timestamp).toBe('string');
-    });
+    expect(result.billing_amount).toBe(100000);
+    expect(result.discount_applied).toBe(false);
+    expect(result.error_occurred).toBe(true);
+    expect(result.error_code).toBe("DISCOUNT_RULE_NOT_FOUND");
+    expect(result.error_message).toMatch(/割引/);
+    expect(result.error_log).toBeDefined();
+    expect(result.error_log.contract_id).toBe(contract_id);
+    expect(result.error_log.discount_rule_id).toBe(discount_rule_id);
+    expect(result.error_log.error_reason).toMatch(/マスタ/);
   });
 });

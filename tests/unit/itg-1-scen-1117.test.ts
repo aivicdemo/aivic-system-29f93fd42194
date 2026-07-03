@@ -1,122 +1,177 @@
 import { describe, test, expect } from "@jest/globals";
-import { validateGraduationRequirement } from "../../src/logic/it-1781935279444-2-2-1";
+import { transformSalesDataToStandardFormat } from "../../src/logic/it-1-br-1781935279444-1-2-1";
 
-describe("新入スタッフ卒業要件判定機能 - ドキュメント反映状況の検証", () => {
-  // SCEN-1117
-  test("ドキュメント反映状況データが不完全な場合、卒業要件判定がエラーで終了される", () => {
-    // 不完全なドキュメント反映状況データ（ドキュメント名が空）
-    const incompleteDocumentReflectionData = {
-      documentName: "",
-      reflectionDateTime: "2024-01-15T09:30:00Z",
-      completionStatus: "completed",
-      staffId: "staff-001",
-      requirementId: "req-001"
+describe("月次サマリーテンプレート定義・管理 - 標準フォーマット変換ルール検証", () => {
+  test("SCEN-1117: 営業データが標準レポートフォーマットに正確にマッピングされる", () => {
+    // ハッピーパス: 標準的な営業データサンプル
+    const salesDataSample1 = {
+      customerName: "株式会社ABC商事",
+      salesAmount: 150000,
+      salesDate: "2024-01-15",
+      productCategory: "ソフトウェアライセンス",
+      salesRepName: "山田太郎",
     };
 
-    expect(() =>
-      validateGraduationRequirement(incompleteDocumentReflectionData)
-    ).toThrow(/ドキュメント名/);
-  });
+    const result1 = transformSalesDataToStandardFormat(salesDataSample1);
 
-  test("反映日時が空の場合、卒業要件判定がエラーで終了される", () => {
-    const incompleteData = {
-      documentName: "請求書作成業務マニュアル",
-      reflectionDateTime: "",
-      completionStatus: "completed",
-      staffId: "staff-001",
-      requirementId: "req-001"
-    };
-
-    expect(() => validateGraduationRequirement(incompleteData)).toThrow(
-      /反映日時/
-    );
-  });
-
-  test("完了ステータスが空の場合、卒業要件判定がエラーで終了される", () => {
-    const incompleteData = {
-      documentName: "営業報告書集計業務マニュアル",
-      reflectionDateTime: "2024-01-15T10:00:00Z",
-      completionStatus: "",
-      staffId: "staff-001",
-      requirementId: "req-001"
-    };
-
-    expect(() => validateGraduationRequirement(incompleteData)).toThrow(
-      /完了ステータス/
-    );
-  });
-
-  test("スタッフIDが空の場合、卒業要件判定がエラーで終了される", () => {
-    const incompleteData = {
-      documentName: "契約書管理業務マニュアル",
-      reflectionDateTime: "2024-01-15T11:00:00Z",
-      completionStatus: "completed",
-      staffId: "",
-      requirementId: "req-001"
-    };
-
-    expect(() => validateGraduationRequirement(incompleteData)).toThrow(
-      /スタッフID/
-    );
-  });
-
-  test("要件IDが空の場合、卒業要件判定がエラーで終了される", () => {
-    const incompleteData = {
-      documentName: "請求書作成業務マニュアル",
-      reflectionDateTime: "2024-01-15T12:00:00Z",
-      completionStatus: "completed",
-      staffId: "staff-001",
-      requirementId: ""
-    };
-
-    expect(() => validateGraduationRequirement(incompleteData)).toThrow(
-      /要件ID/
-    );
-  });
-
-  test("完全なドキュメント反映状況データの場合、卒業要件判定が成功する", () => {
-    const completeData = {
-      documentName: "請求書作成業務マニュアル",
-      reflectionDateTime: "2024-01-15T09:30:00Z",
-      completionStatus: "completed",
-      staffId: "staff-001",
-      requirementId: "req-001"
-    };
-
-    const result = validateGraduationRequirement(completeData);
-    expect(result).toEqual({
-      isValid: true,
-      hasErrors: false,
-      staffId: "staff-001",
-      requirementId: "req-001"
+    // 期待結果: 標準レポートフォーマットへの正確なマッピング
+    expect(result1).toEqual({
+      customer_name: "株式会社ABC商事",
+      sales_amount_jpy: 150000,
+      sales_date_yyyy_mm_dd: "2024-01-15",
+      product_category_code: "SWL",
+      sales_rep_name: "山田太郎",
+      record_type: "SALES_TRANSACTION",
+      format_version: "1.0",
     });
-  });
 
-  test("無効な完了ステータス値の場合、卒業要件判定がエラーで終了される", () => {
-    const invalidStatusData = {
-      documentName: "営業報告書集計業務マニュアル",
-      reflectionDateTime: "2024-01-15T14:00:00Z",
-      completionStatus: "invalid_status",
-      staffId: "staff-001",
-      requirementId: "req-001"
+    // データ型検証: 金額は数値型
+    expect(typeof result1.sales_amount_jpy).toBe("number");
+    // 金額は正の整数
+    expect(result1.sales_amount_jpy).toBeGreaterThan(0);
+    expect(Number.isInteger(result1.sales_amount_jpy)).toBe(true);
+
+    // 日付形式検証: YYYY-MM-DD形式
+    expect(/^\d{4}-\d{2}-\d{2}$/.test(result1.sales_date_yyyy_mm_dd)).toBe(true);
+
+    // カテゴリコード検証: 3文字の英数字コード
+    expect(/^[A-Z]{3}$/.test(result1.product_category_code)).toBe(true);
+
+    // フォーマットバージョン検証
+    expect(result1.format_version).toBe("1.0");
+
+    // 記録タイプ検証
+    expect(result1.record_type).toBe("SALES_TRANSACTION");
+
+    // ===============================================
+    // パターン2: 異なる値でのテスト（エッジケース）
+    const salesDataSample2 = {
+      customerName: "個人事業主 田中花子",
+      salesAmount: 50000,
+      salesDate: "2024-12-31",
+      productCategory: "コンサルティングサービス",
+      salesRepName: "鈴木次郎",
     };
 
-    expect(() =>
-      validateGraduationRequirement(invalidStatusData)
-    ).toThrow(/完了ステータス/);
-  });
+    const result2 = transformSalesDataToStandardFormat(salesDataSample2);
 
-  test("複数の必須項目が空の場合、最初のエラー項目を特定して報告される", () => {
-    const multipleEmptyData = {
-      documentName: "",
-      reflectionDateTime: "",
-      completionStatus: "completed",
-      staffId: "staff-001",
-      requirementId: "req-001"
+    expect(result2).toEqual({
+      customer_name: "個人事業主 田中花子",
+      sales_amount_jpy: 50000,
+      sales_date_yyyy_mm_dd: "2024-12-31",
+      product_category_code: "CON",
+      sales_rep_name: "鈴木次郎",
+      record_type: "SALES_TRANSACTION",
+      format_version: "1.0",
+    });
+
+    // 期末の日付も正確にマッピング
+    expect(result2.sales_date_yyyy_mm_dd).toBe("2024-12-31");
+
+    // ===============================================
+    // パターン3: 高額取引のテスト
+    const salesDataSample3 = {
+      customerName: "大規模企業グループ",
+      salesAmount: 5000000,
+      salesDate: "2024-06-15",
+      productCategory: "エンタープライズシステム",
+      salesRepName: "佐藤三郎",
     };
 
+    const result3 = transformSalesDataToStandardFormat(salesDataSample3);
+
+    expect(result3).toEqual({
+      customer_name: "大規模企業グループ",
+      sales_amount_jpy: 5000000,
+      sales_date_yyyy_mm_dd: "2024-06-15",
+      product_category_code: "ENT",
+      sales_rep_name: "佐藤三郎",
+      record_type: "SALES_TRANSACTION",
+      format_version: "1.0",
+    });
+
+    // 大型金額も正確に数値として保持
+    expect(result3.sales_amount_jpy).toBe(5000000);
+
+    // ===============================================
+    // 複数パターンの共通検証: マッピング対応関係の確認
+    const allResults = [result1, result2, result3];
+
+    allResults.forEach((result) => {
+      // すべての必須フィールドが存在
+      expect(result).toHaveProperty("customer_name");
+      expect(result).toHaveProperty("sales_amount_jpy");
+      expect(result).toHaveProperty("sales_date_yyyy_mm_dd");
+      expect(result).toHaveProperty("product_category_code");
+      expect(result).toHaveProperty("sales_rep_name");
+      expect(result).toHaveProperty("record_type");
+      expect(result).toHaveProperty("format_version");
+
+      // フィールド数が正確に7個
+      expect(Object.keys(result).length).toBe(7);
+
+      // すべてのフィールドが非null、非undefined
+      Object.values(result).forEach((value) => {
+        expect(value).not.toBeNull();
+        expect(value).not.toBeUndefined();
+      });
+    });
+
+    // ===============================================
+    // エラーケース検証
+
+    // 必須フィールド欠落: customerName がない
     expect(() =>
-      validateGraduationRequirement(multipleEmptyData)
-    ).toThrow(/ドキュメント名/);
+      transformSalesDataToStandardFormat({
+        salesAmount: 100000,
+        salesDate: "2024-01-15",
+        productCategory: "ソフトウェア",
+        salesRepName: "太郎",
+      } as any)
+    ).toThrow(/顧客名/);
+
+    // 金額が負の値
+    expect(() =>
+      transformSalesDataToStandardFormat({
+        customerName: "テスト顧客",
+        salesAmount: -50000,
+        salesDate: "2024-01-15",
+        productCategory: "サービス",
+        salesRepName: "太郎",
+      })
+    ).toThrow(/金額/);
+
+    // 日付形式が不正
+    expect(() =>
+      transformSalesDataToStandardFormat({
+        customerName: "テスト顧客",
+        salesAmount: 100000,
+        salesDate: "2024/01/15",
+        productCategory: "サービス",
+        salesRepName: "太郎",
+      })
+    ).toThrow(/日付/);
+
+    // カテゴリが不正（マッピング対象外）
+    expect(() =>
+      transformSalesDataToStandardFormat({
+        customerName: "テスト顧客",
+        salesAmount: 100000,
+        salesDate: "2024-01-15",
+        productCategory: "不明なカテゴリ",
+        salesRepName: "太郎",
+      })
+    ).toThrow(/カテゴリ/);
+
+    // 営業担当者名が空
+    expect(() =>
+      transformSalesDataToStandardFormat({
+        customerName: "テスト顧客",
+        salesAmount: 100000,
+        salesDate: "2024-01-15",
+        productCategory: "ソフトウェア",
+        salesRepName: "",
+      })
+    ).toThrow(/営業担当者/);
   });
 });

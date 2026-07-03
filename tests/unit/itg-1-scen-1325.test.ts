@@ -1,157 +1,96 @@
-import { extractAndAggregateBillingItems } from '../../src/logic/it-1-2-1';
+import { createSalesDataMappingSpecification } from '../../src/logic/it-1781935279444-1-1-1';
 
-describe('営業成果データから請求対象項目を自動抽出し、顧客ごと・サービスごとの請求額を集計する機能', () => {
-  // SCEN-1325
-  test('マッピング定義が不正な場合、請求額集計処理がエラーとなる', () => {
-    // 準備: 営業データ
-    const salesData = [
-      {
-        customerId: 'CUST001',
-        serviceCode: 'SVC_A',
-        appointmentCount: 10,
-        contractAmount: 100000,
-        processDate: '2024-01-15',
-      },
-      {
-        customerId: 'CUST001',
-        serviceCode: 'SVC_B',
-        appointmentCount: 5,
-        contractAmount: 50000,
-        processDate: '2024-01-15',
-      },
+describe('営業データ項目のメタデータ管理機能 - マッピング仕様書作成', () => {
+  // SCEN-1325: [edge] 営業データマッピング仕様書の作成 - マッピング対象外のデータ項目が営業システムに存在する場合、スキップリストに追加される
+  test('マッピング対象外のデータ項目がスキップリストに追加される', () => {
+    // 営業システムのテストデータ - マッピング仕様書に定義されていない項目を含める
+    const salesSystemData = {
+      items: [
+        { fieldName: 'appointment_count', fieldType: 'integer', description: 'アポイント数' },
+        { fieldName: 'deal_count', fieldType: 'integer', description: '成約数' },
+        { fieldName: 'customer_reaction', fieldType: 'string', description: '顧客反応' },
+        { fieldName: 'unmapped_field_1', fieldType: 'string', description: '未マッピング項目1' },
+        { fieldName: 'unmapped_field_2', fieldType: 'boolean', description: '未マッピング項目2' },
+        { fieldName: 'contact_date', fieldType: 'date', description: '接触日' },
+        { fieldName: 'legacy_system_code', fieldType: 'string', description: 'レガシーシステムコード' },
+      ],
+    };
+
+    // マッピング仕様書に定義される対象項目
+    const mappingSpecification = {
+      targetMappings: [
+        { salesFieldName: 'appointment_count', reportFieldName: 'アポ数', unit: '件', dataType: 'integer', calculationLogic: 'SUM' },
+        { salesFieldName: 'deal_count', reportFieldName: '成約数', unit: '件', dataType: 'integer', calculationLogic: 'SUM' },
+        { salesFieldName: 'customer_reaction', reportFieldName: '顧客反応', unit: 'テキスト', dataType: 'string', calculationLogic: 'CONCAT' },
+        { salesFieldName: 'contact_date', reportFieldName: '接触日', unit: '日付', dataType: 'date', calculationLogic: 'MAX' },
+      ],
+    };
+
+    // マッピング仕様書作成処理を実行
+    const result = createSalesDataMappingSpecification({
+      salesSystemData: salesSystemData,
+      mappingSpecification: mappingSpecification,
+    });
+
+    // スキップリストに追加されるべき項目（マッピング対象外）
+    const expectedSkippedItems = [
+      { fieldName: 'unmapped_field_1', fieldType: 'string', description: '未マッピング項目1', reason: 'not_in_mapping_spec' },
+      { fieldName: 'unmapped_field_2', fieldType: 'boolean', description: '未マッピング項目2', reason: 'not_in_mapping_spec' },
+      { fieldName: 'legacy_system_code', fieldType: 'string', description: 'レガシーシステムコード', reason: 'not_in_mapping_spec' },
     ];
 
-    // ケース 1: 必須フィールド (customerId) が欠落したマッピング定義
-    const invalidMappingMissingField = [
-      {
-        // customerId フィールドが欠落
-        serviceCode: 'SVC_A',
-        billingItemCode: 'BILL_APT',
-        sourceField: 'appointmentCount',
-        unitPrice: 5000,
-      },
-    ];
+    // スキップリストが正確に生成されていることを検証
+    expect(result.skipList).toEqual(expectedSkippedItems);
+    expect(result.skipList).toHaveLength(3);
 
-    expect(() =>
-      extractAndAggregateBillingItems(salesData, invalidMappingMissingField)
-    ).toThrow(/customerId/);
+    // スキップリストの各項目が正確に記録されていることを検証
+    expect(result.skipList[0]).toEqual({
+      fieldName: 'unmapped_field_1',
+      fieldType: 'string',
+      description: '未マッピング項目1',
+      reason: 'not_in_mapping_spec',
+    });
+    expect(result.skipList[1]).toEqual({
+      fieldName: 'unmapped_field_2',
+      fieldType: 'boolean',
+      description: '未マッピング項目2',
+      reason: 'not_in_mapping_spec',
+    });
+    expect(result.skipList[2]).toEqual({
+      fieldName: 'legacy_system_code',
+      fieldType: 'string',
+      description: 'レガシーシステムコード',
+      reason: 'not_in_mapping_spec',
+    });
 
-    // ケース 2: 必須フィールド (serviceCode) が null のマッピング定義
-    const invalidMappingNullField = [
-      {
-        customerId: 'CUST001',
-        serviceCode: null,
-        billingItemCode: 'BILL_APT',
-        sourceField: 'appointmentCount',
-        unitPrice: 5000,
-      },
-    ];
+    // マッピング対象項目のリストが正確に生成されていることを検証
+    expect(result.mappedItems).toHaveLength(4);
+    expect(result.mappedItems.map((item: any) => item.salesFieldName)).toEqual([
+      'appointment_count',
+      'deal_count',
+      'customer_reaction',
+      'contact_date',
+    ]);
 
-    expect(() =>
-      extractAndAggregateBillingItems(salesData, invalidMappingNullField)
-    ).toThrow(/serviceCode/);
+    // 出力データにマッピング対象外の項目が含まれていないことを検証
+    const outputFieldNames = result.outputData.map((item: any) => item.fieldName);
+    expect(outputFieldNames).not.toContain('unmapped_field_1');
+    expect(outputFieldNames).not.toContain('unmapped_field_2');
+    expect(outputFieldNames).not.toContain('legacy_system_code');
 
-    // ケース 3: 必須フィールド (unitPrice) が不正な型 (文字列) のマッピング定義
-    const invalidMappingInvalidType = [
-      {
-        customerId: 'CUST001',
-        serviceCode: 'SVC_A',
-        billingItemCode: 'BILL_APT',
-        sourceField: 'appointmentCount',
-        unitPrice: 'not_a_number',
-      },
-    ];
+    // 出力データにはマッピング対象の項目のみが含まれていることを検証
+    expect(outputFieldNames).toContain('appointment_count');
+    expect(outputFieldNames).toContain('deal_count');
+    expect(outputFieldNames).toContain('customer_reaction');
+    expect(outputFieldNames).toContain('contact_date');
 
-    expect(() =>
-      extractAndAggregateBillingItems(salesData, invalidMappingInvalidType)
-    ).toThrow(/unitPrice/);
+    // 出力データのサイズがマッピング対象項目数と一致することを検証
+    expect(result.outputData).toHaveLength(4);
 
-    // ケース 4: 必須フィールド (sourceField) が欠落したマッピング定義
-    const invalidMappingMissingSourceField = [
-      {
-        customerId: 'CUST001',
-        serviceCode: 'SVC_A',
-        billingItemCode: 'BILL_APT',
-        // sourceField が欠落
-        unitPrice: 5000,
-      },
-    ];
-
-    expect(() =>
-      extractAndAggregateBillingItems(
-        salesData,
-        invalidMappingMissingSourceField
-      )
-    ).toThrow(/sourceField/);
-
-    // ケース 5: 必須フィールド (billingItemCode) が空文字列のマッピング定義
-    const invalidMappingEmptyBillingCode = [
-      {
-        customerId: 'CUST001',
-        serviceCode: 'SVC_A',
-        billingItemCode: '',
-        sourceField: 'appointmentCount',
-        unitPrice: 5000,
-      },
-    ];
-
-    expect(() =>
-      extractAndAggregateBillingItems(
-        salesData,
-        invalidMappingEmptyBillingCode
-      )
-    ).toThrow(/billingItemCode/);
-
-    // ケース 6: マッピング配列が空の場合
-    const emptyMapping: never[] = [];
-
-    expect(() =>
-      extractAndAggregateBillingItems(salesData, emptyMapping)
-    ).toThrow(/マッピング定義/);
-
-    // ケース 7: マッピング配列が null の場合
-    expect(() => extractAndAggregateBillingItems(salesData, null as any)).toThrow(
-      /マッピング定義/
-    );
-
-    // ケース 8: マッピング定義内の sourceField が存在しないカラム名の場合
-    const invalidMappingNonExistentField = [
-      {
-        customerId: 'CUST001',
-        serviceCode: 'SVC_A',
-        billingItemCode: 'BILL_APT',
-        sourceField: 'nonExistentColumn',
-        unitPrice: 5000,
-      },
-    ];
-
-    expect(() =>
-      extractAndAggregateBillingItems(
-        salesData,
-        invalidMappingNonExistentField
-      )
-    ).toThrow(/sourceField/);
-
-    // ケース 9: unitPrice が負の数値のマッピング定義
-    const invalidMappingNegativePrice = [
-      {
-        customerId: 'CUST001',
-        serviceCode: 'SVC_A',
-        billingItemCode: 'BILL_APT',
-        sourceField: 'appointmentCount',
-        unitPrice: -5000,
-      },
-    ];
-
-    expect(() =>
-      extractAndAggregateBillingItems(salesData, invalidMappingNegativePrice)
-    ).toThrow(/unitPrice/);
-
-    // ケース 10: マッピング定義が不正な形式 (オブジェクトではなく文字列) の場合
-    const invalidMappingWrongFormat = 'not_an_object' as any;
-
-    expect(() =>
-      extractAndAggregateBillingItems(salesData, invalidMappingWrongFormat)
-    ).toThrow(/マッピング定義/);
+    // マッピング仕様書作成結果全体が正確であることを検証
+    expect(result.success).toBe(true);
+    expect(result.totalInputItems).toBe(7);
+    expect(result.mappedItemsCount).toBe(4);
+    expect(result.skippedItemsCount).toBe(3);
   });
 });

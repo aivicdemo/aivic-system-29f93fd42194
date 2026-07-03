@@ -1,144 +1,62 @@
-import { validateResponseStatusHandling } from '../../src/logic/it-1781935279444-2-2-1';
+import { compareContractChanges } from '../../src/logic/it-1781935279444-2-1-1';
 
-const fetchMock = require('jest-fetch-mock');
-
-describe('対応内容の構造化データ保存・ポータル反映機能', () => {
-  // SCEN-838: 対応ステータスが無効な値の場合、エラーが返却される
-  test('対応ステータスが無効な値の場合、適切なHTTPエラーステータスコードとエラーメッセージが返却され、ポータルに反映されないこと', async () => {
-    fetchMock.enableMocks();
-    fetchMock.resetMocks();
-
-    // テストケース 1: 対応ステータスが 'invalid_status' の場合
-    fetchMock.mockResponseOnce(
-      JSON.stringify({
-        status_code: 400,
-        error_code: 'INVALID_STATUS',
-        error_message: '対応ステータスが無効です'
-      }),
-      { status: 400 }
-    );
-
-    const invalid_status_payload = {
-      customer_id: 'CUST001',
-      response_status: 'invalid_status',
-      response_content: '対応内容テスト',
-      response_date: '2024-01-15T09:00:00Z',
-      respondent_name: '営業担当者A'
+describe('Contract Change Comparison and Diff Visualization', () => {
+  test('SCEN-838: Multiple contract items changed - all diffs displayed individually with visual distinction', () => {
+    // Precondition: existing contract with multiple items to be changed
+    const previous_contract = {
+      contract_id: 'C001',
+      contract_amount_yen: 1000000,
+      delivery_deadline: '2024-03-31',
+      delivery_scope: 'Scope_A'
     };
 
-    const response_invalid_status = await validateResponseStatusHandling(invalid_status_payload);
-
-    expect(response_invalid_status.status).toBe(400);
-    expect(response_invalid_status.error_code).toBe('INVALID_STATUS');
-    expect(response_invalid_status.error_message).toMatch(/対応ステータス/);
-    expect(response_invalid_status.portal_reflected).toBe(false);
-
-    // テストケース 2: 対応ステータスが空文字列の場合
-    fetchMock.resetMocks();
-    fetchMock.mockResponseOnce(
-      JSON.stringify({
-        status_code: 400,
-        error_code: 'INVALID_STATUS',
-        error_message: '対応ステータスが無効です'
-      }),
-      { status: 400 }
-    );
-
-    const empty_status_payload = {
-      customer_id: 'CUST002',
-      response_status: '',
-      response_content: '対応内容テスト',
-      response_date: '2024-01-15T10:00:00Z',
-      respondent_name: '営業担当者B'
+    const updated_contract = {
+      contract_id: 'C001',
+      contract_amount_yen: 1200000,
+      delivery_deadline: '2024-04-30',
+      delivery_scope: 'Scope_A,Scope_B'
     };
 
-    const response_empty_status = await validateResponseStatusHandling(empty_status_payload);
+    // Execute: compare contract changes
+    const result = compareContractChanges(previous_contract, updated_contract);
 
-    expect(response_empty_status.status).toBe(400);
-    expect(response_empty_status.error_code).toBe('INVALID_STATUS');
-    expect(response_empty_status.error_message).toMatch(/対応ステータス/);
-    expect(response_empty_status.portal_reflected).toBe(false);
+    // Assert: all three items have individual diffs displayed
+    expect(result.diffs).toHaveLength(3);
 
-    // テストケース 3: 対応ステータスが null の場合
-    fetchMock.resetMocks();
-    fetchMock.mockResponseOnce(
-      JSON.stringify({
-        status_code: 400,
-        error_code: 'INVALID_STATUS',
-        error_message: '対応ステータスが無効です'
-      }),
-      { status: 400 }
-    );
+    // Assert: contract amount diff is present and correct
+    const amount_diff = result.diffs.find((d: any) => d.field_name === 'contract_amount_yen');
+    expect(amount_diff).toBeDefined();
+    expect(amount_diff.previous_value).toBe(1000000);
+    expect(amount_diff.updated_value).toBe(1200000);
+    expect(amount_diff.change_amount).toBe(200000);
+    expect(amount_diff.visual_highlight_type).toBe('amount_change');
 
-    const null_status_payload = {
-      customer_id: 'CUST003',
-      response_status: null,
-      response_content: '対応内容テスト',
-      response_date: '2024-01-15T11:00:00Z',
-      respondent_name: '営業担当者C'
-    };
+    // Assert: delivery deadline diff is present and correct
+    const deadline_diff = result.diffs.find((d: any) => d.field_name === 'delivery_deadline');
+    expect(deadline_diff).toBeDefined();
+    expect(deadline_diff.previous_value).toBe('2024-03-31');
+    expect(deadline_diff.updated_value).toBe('2024-04-30');
+    expect(deadline_diff.days_extended).toBe(30);
+    expect(deadline_diff.visual_highlight_type).toBe('date_change');
 
-    const response_null_status = await validateResponseStatusHandling(null_status_payload);
+    // Assert: delivery scope diff is present and correct
+    const scope_diff = result.diffs.find((d: any) => d.field_name === 'delivery_scope');
+    expect(scope_diff).toBeDefined();
+    expect(scope_diff.previous_value).toBe('Scope_A');
+    expect(scope_diff.updated_value).toBe('Scope_A,Scope_B');
+    expect(scope_diff.added_scopes).toEqual(['Scope_B']);
+    expect(scope_diff.visual_highlight_type).toBe('scope_addition');
 
-    expect(response_null_status.status).toBe(400);
-    expect(response_null_status.error_code).toBe('INVALID_STATUS');
-    expect(response_null_status.error_message).toMatch(/対応ステータス/);
-    expect(response_null_status.portal_reflected).toBe(false);
+    // Assert: all diffs are visually distinguished
+    expect(result.diffs.every((d: any) => d.visual_highlight_type)).toBe(true);
 
-    // テストケース 4: 対応ステータスが未定義の場合
-    fetchMock.resetMocks();
-    fetchMock.mockResponseOnce(
-      JSON.stringify({
-        status_code: 400,
-        error_code: 'INVALID_STATUS',
-        error_message: '対応ステータスが無効です'
-      }),
-      { status: 400 }
-    );
+    // Assert: all diffs are viewable on single screen
+    expect(result.single_screen_display).toBe(true);
+    expect(result.display_format).toBe('tabular');
 
-    const undefined_status_payload = {
-      customer_id: 'CUST004',
-      response_status: undefined,
-      response_content: '対応内容テスト',
-      response_date: '2024-01-15T12:00:00Z',
-      respondent_name: '営業担当者D'
-    };
-
-    const response_undefined_status = await validateResponseStatusHandling(undefined_status_payload);
-
-    expect(response_undefined_status.status).toBe(400);
-    expect(response_undefined_status.error_code).toBe('INVALID_STATUS');
-    expect(response_undefined_status.error_message).toMatch(/対応ステータス/);
-    expect(response_undefined_status.portal_reflected).toBe(false);
-
-    // テストケース 5: 有効な対応ステータス値で成功ケースを確認
-    fetchMock.resetMocks();
-    fetchMock.mockResponseOnce(
-      JSON.stringify({
-        status_code: 200,
-        error_code: null,
-        error_message: null,
-        response_id: 'RESP001',
-        portal_reflected: true
-      }),
-      { status: 200 }
-    );
-
-    const valid_status_payload = {
-      customer_id: 'CUST005',
-      response_status: 'confirmed',
-      response_content: '対応内容テスト',
-      response_date: '2024-01-15T13:00:00Z',
-      respondent_name: '営業担当者E'
-    };
-
-    const response_valid_status = await validateResponseStatusHandling(valid_status_payload);
-
-    expect(response_valid_status.status).toBe(200);
-    expect(response_valid_status.error_code).toBeNull();
-    expect(response_valid_status.portal_reflected).toBe(true);
-    expect(response_valid_status.response_id).toBe('RESP001');
-
-    fetchMock.disableMocks();
+    // Assert: comparison result contains both previous and updated state
+    expect(result.comparison_id).toMatch(/^COMP_/);
+    expect(result.comparison_timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(result.total_changed_fields).toBe(3);
   });
 });

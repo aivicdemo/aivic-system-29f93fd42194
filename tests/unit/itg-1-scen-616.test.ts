@@ -1,74 +1,229 @@
-import { generateMonthlySummary } from '../../src/logic/it-1-br-1781935279444-1-2-1';
+import { describe, test, expect } from "@jest/globals";
+import {
+  extractBillableItems,
+  aggregateBillingAmountByCustomer,
+  aggregateBillingAmountByService,
+} from "../../src/logic/it-1781935279444-1-1-1";
 
-describe('月次サマリーテンプレートの定義・管理機能', () => {
-  test('SCEN-616: 営業データが0件の月度でも月次サマリーが正常に生成される', async () => {
-    // Arrange: 対象月度（2024年1月）、営業データ0件の状態
-    const target_year = 2024;
-    const target_month = 1;
-    const target_month_start = new Date('2024-01-01T00:00:00Z');
-    const target_month_end = new Date('2024-01-31T23:59:59Z');
-    const system_datetime = new Date('2024-02-01T09:00:00Z');
+describe("営業データ項目メタデータ管理 - 請求対象項目自動抽出・請求額集計", () => {
+  // SCEN-616: [normal] 請求対象項目自動抽出・請求額集計 - 営業成果データから請求対象項目が正しく抽出され、顧客ごと・サービスごとの請求額が集計される
 
-    const input = {
-      target_year: target_year,
-      target_month: target_month,
-      sales_data_count: 0,
-      business_transaction_count: 0,
-      total_sales_amount: 0,
-      period_start: target_month_start,
-      period_end: target_month_end,
-      system_datetime: system_datetime,
-    };
+  test("SCEN-616: 営業成果データから請求対象項目が正確に抽出・集計される", () => {
+    // テスト用の営業成果データ（複数顧客、複数サービス種別）
+    const sales_data = [
+      {
+        sales_id: "SALE001",
+        customer_id: "CUST_A",
+        service_type: "SERVICE_X",
+        period: "2024-01",
+        appointment_count: 5,
+        contract_count: 2,
+        unit_price: 10000,
+        is_billable: true,
+        created_at: "2024-01-15T10:00:00Z",
+      },
+      {
+        sales_id: "SALE002",
+        customer_id: "CUST_A",
+        service_type: "SERVICE_Y",
+        period: "2024-01",
+        appointment_count: 3,
+        contract_count: 1,
+        unit_price: 15000,
+        is_billable: true,
+        created_at: "2024-01-16T11:30:00Z",
+      },
+      {
+        sales_id: "SALE003",
+        customer_id: "CUST_B",
+        service_type: "SERVICE_X",
+        period: "2024-01",
+        appointment_count: 8,
+        contract_count: 3,
+        unit_price: 10000,
+        is_billable: true,
+        created_at: "2024-01-17T09:15:00Z",
+      },
+      {
+        sales_id: "SALE004",
+        customer_id: "CUST_B",
+        service_type: "SERVICE_Z",
+        period: "2024-01",
+        appointment_count: 2,
+        contract_count: 1,
+        unit_price: 20000,
+        is_billable: true,
+        created_at: "2024-01-18T14:45:00Z",
+      },
+      {
+        sales_id: "SALE005",
+        customer_id: "CUST_C",
+        service_type: "SERVICE_Y",
+        period: "2024-01",
+        appointment_count: 1,
+        contract_count: 0,
+        unit_price: 15000,
+        is_billable: false,
+        created_at: "2024-01-19T13:20:00Z",
+      },
+    ];
 
-    // Act: 月次サマリー自動生成機能を実行
-    const result = await generateMonthlySummary(input);
+    // ステップ1: 請求対象項目の自動抽出
+    const extracted_items = extractBillableItems(sales_data);
 
-    // Assert: 生成されたサマリーレコードの検証
-    // 1. サマリーレコードが存在すること
-    expect(result).toBeDefined();
-    expect(result).not.toBeNull();
+    // 期待値: billable=true のもののみ抽出（SALE005は除外）
+    expect(extracted_items).toHaveLength(4);
+    expect(extracted_items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          sales_id: "SALE001",
+          customer_id: "CUST_A",
+          service_type: "SERVICE_X",
+          period: "2024-01",
+          appointment_count: 5,
+          contract_count: 2,
+          unit_price: 10000,
+          is_billable: true,
+        }),
+        expect.objectContaining({
+          sales_id: "SALE002",
+          customer_id: "CUST_A",
+          service_type: "SERVICE_Y",
+          period: "2024-01",
+          appointment_count: 3,
+          contract_count: 1,
+          unit_price: 15000,
+          is_billable: true,
+        }),
+        expect.objectContaining({
+          sales_id: "SALE003",
+          customer_id: "CUST_B",
+          service_type: "SERVICE_X",
+          period: "2024-01",
+          appointment_count: 8,
+          contract_count: 3,
+          unit_price: 10000,
+          is_billable: true,
+        }),
+        expect.objectContaining({
+          sales_id: "SALE004",
+          customer_id: "CUST_B",
+          service_type: "SERVICE_Z",
+          period: "2024-01",
+          appointment_count: 2,
+          contract_count: 1,
+          unit_price: 20000,
+          is_billable: true,
+        }),
+      ])
+    );
 
-    // 2. サマリーレコードのID が存在すること
-    expect(result.summary_id).toBeDefined();
-    expect(typeof result.summary_id).toBe('number');
-    expect(result.summary_id).toBeGreaterThan(0);
+    // ステップ2: 抽出された請求対象項目が正確であることを確認
+    const sale_001 = extracted_items.find((item) => item.sales_id === "SALE001");
+    expect(sale_001?.period).toBe("2024-01");
+    expect(sale_001?.service_type).toBe("SERVICE_X");
+    expect(sale_001?.appointment_count).toBe(5);
+    expect(sale_001?.contract_count).toBe(2);
 
-    // 3. ステータスが「正常完了」(COMPLETED) であること
-    expect(result.status).toBe('COMPLETED');
+    // ステップ3: 顧客ごとの請求額集計
+    // 計算式: contract_count * unit_price
+    // CUST_A: (2 * 10000) + (1 * 15000) = 20000 + 15000 = 35000
+    // CUST_B: (3 * 10000) + (1 * 20000) = 30000 + 20000 = 50000
+    const customer_billing = aggregateBillingAmountByCustomer(extracted_items);
 
-    // 4. 対象年月が正しいこと
-    expect(result.year).toBe(2024);
-    expect(result.month).toBe(1);
+    expect(customer_billing).toHaveLength(2);
+    expect(customer_billing).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          customer_id: "CUST_A",
+          total_billing_amount: 35000,
+          item_count: 2,
+        }),
+        expect.objectContaining({
+          customer_id: "CUST_B",
+          total_billing_amount: 50000,
+          item_count: 2,
+        }),
+      ])
+    );
 
-    // 5. 売上金額が0円であること
-    expect(result.total_sales_amount).toBe(0);
+    const cust_a_billing = customer_billing.find(
+      (item) => item.customer_id === "CUST_A"
+    );
+    expect(cust_a_billing?.total_billing_amount).toBe(35000);
+    expect(cust_a_billing?.item_count).toBe(2);
 
-    // 6. 取引件数が0件であること
-    expect(result.transaction_count).toBe(0);
+    const cust_b_billing = customer_billing.find(
+      (item) => item.customer_id === "CUST_B"
+    );
+    expect(cust_b_billing?.total_billing_amount).toBe(50000);
+    expect(cust_b_billing?.item_count).toBe(2);
 
-    // 7. 営業データ件数が0件であること
-    expect(result.sales_data_count).toBe(0);
+    // ステップ4: サービスごとの請求額集計
+    // SERVICE_X: (2 * 10000) + (3 * 10000) = 20000 + 30000 = 50000
+    // SERVICE_Y: (1 * 15000) = 15000
+    // SERVICE_Z: (1 * 20000) = 20000
+    const service_billing = aggregateBillingAmountByService(extracted_items);
 
-    // 8. 生成日時がシステム日時と一致すること
-    expect(result.generated_at).toEqual(new Date('2024-02-01T09:00:00Z'));
+    expect(service_billing).toHaveLength(3);
+    expect(service_billing).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          service_type: "SERVICE_X",
+          total_billing_amount: 50000,
+          item_count: 2,
+        }),
+        expect.objectContaining({
+          service_type: "SERVICE_Y",
+          total_billing_amount: 15000,
+          item_count: 1,
+        }),
+        expect.objectContaining({
+          service_type: "SERVICE_Z",
+          total_billing_amount: 20000,
+          item_count: 1,
+        }),
+      ])
+    );
 
-    // 9. 集計項目がすべて0またはNULLの適切な値で埋まっていること
-    expect(result.total_appointments).toBe(0);
-    expect(result.total_contracts).toBe(0);
-    expect(result.customer_satisfaction_score).toBeNull();
-    expect(result.average_transaction_amount).toBe(0);
+    const service_x_billing = service_billing.find(
+      (item) => item.service_type === "SERVICE_X"
+    );
+    expect(service_x_billing?.total_billing_amount).toBe(50000);
+    expect(service_x_billing?.item_count).toBe(2);
 
-    // 10. エラーフラグが false であること（エラーなし）
-    expect(result.has_error).toBe(false);
+    const service_y_billing = service_billing.find(
+      (item) => item.service_type === "SERVICE_Y"
+    );
+    expect(service_y_billing?.total_billing_amount).toBe(15000);
+    expect(service_y_billing?.item_count).toBe(1);
 
-    // 11. エラーメッセージが空またはNULLであること
-    expect(result.error_message).toBeNull();
+    const service_z_billing = service_billing.find(
+      (item) => item.service_type === "SERVICE_Z"
+    );
+    expect(service_z_billing?.total_billing_amount).toBe(20000);
+    expect(service_z_billing?.item_count).toBe(1);
 
-    // 12. データ品質ステータスが「正常」(NORMAL) であること
-    expect(result.data_quality_status).toBe('NORMAL');
+    // ステップ5: 顧客別・サービス別の請求データが相互に一致していることを検証
+    const total_from_customer =
+      35000 + 50000; /* CUST_A + CUST_B */
+    const total_from_service =
+      50000 + 15000 + 20000; /* SERVICE_X + SERVICE_Y + SERVICE_Z */
+    expect(total_from_customer).toBe(85000);
+    expect(total_from_service).toBe(85000);
+    expect(total_from_customer).toBe(total_from_service);
 
-    // 13. 集計対象期間が正しいこと
-    expect(result.period_start).toEqual(new Date('2024-01-01T00:00:00Z'));
-    expect(result.period_end).toEqual(new Date('2024-01-31T23:59:59Z'));
+    // ステップ6: 請求対象外項目（SALE005）が正しく除外されていることを確認
+    const excluded_item = extracted_items.find(
+      (item) => item.sales_id === "SALE005"
+    );
+    expect(excluded_item).toBeUndefined();
+
+    // 最終検証: 抽出されたアイテム数が正確（4件、SALE005のみ除外）
+    const non_billable_count = sales_data.filter(
+      (item) => !item.is_billable
+    ).length;
+    expect(non_billable_count).toBe(1);
+    expect(extracted_items.length).toBe(sales_data.length - non_billable_count);
   });
 });

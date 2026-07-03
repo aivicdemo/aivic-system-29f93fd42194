@@ -1,100 +1,125 @@
-import { validateAndFilterBillingRecords } from "../../src/logic/it-1781935279444-2-2-1";
+import { validateExtractionRuleDefinition } from '../../src/logic/it-1-br-1781935279444-1-2-1';
 
-describe("請求額算出・検証教育プロセス - 異常請求額検出・排除", () => {
-  test("SCEN-998: 請求額が0円または負数となる異常ケースが検出・排除される", () => {
-    // Arrange: テストデータの準備
-    const billingRecordsInput = [
-      {
-        billingRecordId: "BR-001",
-        customerId: "C-100",
-        serviceId: "S-A",
-        billingAmount: 50000,
-        month: "2024-01",
-        status: "pending",
-      },
-      {
-        billingRecordId: "BR-002",
-        customerId: "C-101",
-        serviceId: "S-B",
-        billingAmount: 0,
-        month: "2024-01",
-        status: "pending",
-      },
-      {
-        billingRecordId: "BR-003",
-        customerId: "C-102",
-        serviceId: "S-C",
-        billingAmount: 75000,
-        month: "2024-01",
-        status: "pending",
-      },
-      {
-        billingRecordId: "BR-004",
-        customerId: "C-103",
-        serviceId: "S-D",
-        billingAmount: -1000,
-        month: "2024-01",
-        status: "pending",
-      },
-      {
-        billingRecordId: "BR-005",
-        customerId: "C-104",
-        serviceId: "S-E",
-        billingAmount: 125000,
-        month: "2024-01",
-        status: "pending",
-      },
-    ];
+describe('月次サマリーテンプレートの定義・管理機能', () => {
+  // SCEN-998
+  test('営業データ抽出・集計ルール定義 - 請求対象外の項目が誤って含められた場合に検出される', () => {
+    const extractionRule = {
+      rule_id: 'rule_001',
+      rule_name: '月次営業成果集計ルール',
+      target_items: [
+        {
+          item_id: 'apo_count',
+          item_name: 'アポ数',
+          billable: true,
+        },
+        {
+          item_id: 'internal_memo',
+          item_name: '内部メモ',
+          billable: false,
+        },
+        {
+          item_id: 'draft_status',
+          item_name: '下書き状態データ',
+          billable: false,
+        },
+        {
+          item_id: 'contract_count',
+          item_name: '成約数',
+          billable: true,
+        },
+      ],
+      extraction_enabled: true,
+      created_at: new Date('2024-01-15T09:00:00Z'),
+      created_by: 'operator_001',
+    };
 
-    // Act: 請求額算出・検証教育プロセス実行
-    const result = validateAndFilterBillingRecords(billingRecordsInput);
+    expect(() => validateExtractionRuleDefinition(extractionRule)).toThrow(/請求対象外の項目が含まれています/);
+  });
 
-    // Assert: 異常ケースが検出されたことを確認
-    expect(result.validRecords).toHaveLength(3);
-    expect(result.validRecords[0].billingRecordId).toBe("BR-001");
-    expect(result.validRecords[0].billingAmount).toBe(50000);
-    expect(result.validRecords[1].billingRecordId).toBe("BR-003");
-    expect(result.validRecords[1].billingAmount).toBe(75000);
-    expect(result.validRecords[2].billingRecordId).toBe("BR-005");
-    expect(result.validRecords[2].billingAmount).toBe(125000);
+  test('営業データ抽出・集計ルール定義 - すべての項目が請求対象の場合は検証成功', () => {
+    const extractionRule = {
+      rule_id: 'rule_002',
+      rule_name: '月次営業成果集計ルール',
+      target_items: [
+        {
+          item_id: 'apo_count',
+          item_name: 'アポ数',
+          billable: true,
+        },
+        {
+          item_id: 'contract_count',
+          item_name: '成約数',
+          billable: true,
+        },
+        {
+          item_id: 'customer_response',
+          item_name: '顧客反応',
+          billable: true,
+        },
+      ],
+      extraction_enabled: true,
+      created_at: new Date('2024-01-15T09:00:00Z'),
+      created_by: 'operator_001',
+    };
 
-    // Assert: 異常レコード（0円）が検出されたことを確認
-    expect(result.anomalousRecords).toHaveLength(2);
-    const zeroRecord = result.anomalousRecords.find(
-      (r) => r.billingRecordId === "BR-002"
-    );
-    expect(zeroRecord).toBeDefined();
-    expect(zeroRecord?.billingAmount).toBe(0);
-    expect(zeroRecord?.reason).toMatch(/ゼロ円|0円/);
+    const result = validateExtractionRuleDefinition(extractionRule);
+    expect(result).toEqual({
+      is_valid: true,
+      error_message: null,
+      non_billable_items: [],
+    });
+  });
 
-    // Assert: 異常レコード（負数）が検出されたことを確認
-    const negativeRecord = result.anomalousRecords.find(
-      (r) => r.billingRecordId === "BR-004"
-    );
-    expect(negativeRecord).toBeDefined();
-    expect(negativeRecord?.billingAmount).toBe(-1000);
-    expect(negativeRecord?.reason).toMatch(/負数|マイナス/);
+  test('営業データ抽出・集計ルール定義 - 複数の請求対象外項目が検出される', () => {
+    const extractionRule = {
+      rule_id: 'rule_003',
+      rule_name: '月次営業成果集計ルール',
+      target_items: [
+        {
+          item_id: 'apo_count',
+          item_name: 'アポ数',
+          billable: true,
+        },
+        {
+          item_id: 'internal_memo',
+          item_name: '内部メモ',
+          billable: false,
+        },
+        {
+          item_id: 'temporary_note',
+          item_name: '一時メモ',
+          billable: false,
+        },
+        {
+          item_id: 'draft_status',
+          item_name: '下書き状態データ',
+          billable: false,
+        },
+      ],
+      extraction_enabled: true,
+      created_at: new Date('2024-01-15T09:00:00Z'),
+      created_by: 'operator_001',
+    };
 
-    // Assert: 排除されたレコードが監査ログに記録されていることを確認
-    expect(result.auditLog).toHaveLength(2);
-    const auditEntry1 = result.auditLog.find(
-      (log) => log.recordId === "BR-002"
-    );
-    expect(auditEntry1?.action).toBe("removed");
-    expect(auditEntry1?.reason).toMatch(/ゼロ円|0円/);
-    expect(auditEntry1?.timestamp).toBeDefined();
+    const result = () => validateExtractionRuleDefinition(extractionRule);
+    expect(result).toThrow(/請求対象外の項目が含まれています/);
+  });
 
-    const auditEntry2 = result.auditLog.find(
-      (log) => log.recordId === "BR-004"
-    );
-    expect(auditEntry2?.action).toBe("removed");
-    expect(auditEntry2?.reason).toMatch(/負数|マイナス/);
-    expect(auditEntry2?.timestamp).toBeDefined();
+  test('営業データ抽出・集計ルール定義 - 対象項目が空の場合は検証スキップ', () => {
+    const extractionRule = {
+      rule_id: 'rule_004',
+      rule_name: '月次営業成果集計ルール',
+      target_items: [],
+      extraction_enabled: true,
+      created_at: new Date('2024-01-15T09:00:00Z'),
+      created_by: 'operator_001',
+    };
 
-    // Assert: 結果サマリーの検証
-    expect(result.summary.totalInput).toBe(5);
-    expect(result.summary.validCount).toBe(3);
-    expect(result.summary.anomalousCount).toBe(2);
-    expect(result.summary.totalValidAmount).toBe(250000);
+    const result = validateExtractionRuleDefinition(extractionRule);
+    expect(result).toEqual({
+      is_valid: true,
+      error_message: null,
+      non_billable_items: [],
+    });
   });
 });

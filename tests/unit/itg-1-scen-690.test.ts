@@ -1,93 +1,192 @@
-import { describe, it, expect, beforeEach } from '@jest/globals';
-import { validateSalesDataRangeMinimum } from '../../src/logic/it-1781935279444-2-2-1';
+import { validateSalesActivityData } from "../../src/logic/it-1781935279444-2-1-1";
 
-describe('営業データの完全性・正確性を自動検証し、不足データ・誤りを検出・通知する機能', () => {
-  beforeEach(() => {
-    jest.clearAllMocks();
-  });
-
-  it('SCEN-690: 数値項目が最小値未満である場合に範囲外エラーが検出される', () => {
-    // 入力値: 最小値が100の数値項目に対して99を入力
+describe("営業データ入力時の品質検証ルール定義・実行機能", () => {
+  // SCEN-690: 必須項目がすべて入力された営業活動データが検証に合格する
+  test("必須項目がすべて正しい形式で入力された営業活動データが検証に合格する", () => {
     const inputData = {
-      item_name: 'monthly_appointments',
-      minimum_value: 100,
-      input_value: 99,
-      field_type: 'numeric'
+      salesPersonName: "山田太郎",
+      customerName: "株式会社ABC",
+      activityType: "初回訪問",
+      activityDateTime: new Date("2024-01-15T10:30:00Z"),
+      amount: 150000,
     };
 
-    // 期待値: 範囲外エラーが検出され、エラーメッセージが返される
-    expect(() => validateSalesDataRangeMinimum(inputData)).toThrow(/最小値/);
+    const result = validateSalesActivityData(inputData);
+
+    expect(result.isValid).toBe(true);
+    expect(result.errors).toEqual([]);
+    expect(result.message).toBe("データ登録完了");
   });
 
-  it('SCEN-690: 数値項目が最小値と同じ値の場合は妥当', () => {
-    // 入力値: 最小値が100の数値項目に対して100を入力
+  test("営業担当者名が20文字以内であることが検証される", () => {
     const inputData = {
-      item_name: 'monthly_appointments',
-      minimum_value: 100,
-      input_value: 100,
-      field_type: 'numeric'
+      salesPersonName: "山田太郎",
+      customerName: "株式会社ABC",
+      activityType: "初回訪問",
+      activityDateTime: new Date("2024-01-15T10:30:00Z"),
+      amount: 150000,
     };
 
-    // 期待値: バリデーション成功、エラーなし
-    const result = validateSalesDataRangeMinimum(inputData);
-    expect(result).toEqual({
-      is_valid: true,
-      error_message: null,
-      validation_timestamp: expect.any(String),
-      checked_value: 100,
-      constraint_minimum: 100
-    });
+    const result = validateSalesActivityData(inputData);
+
+    expect(result.isValid).toBe(true);
   });
 
-  it('SCEN-690: 数値項目が最小値より大きい場合は妥当', () => {
-    // 入力値: 最小値が100の数値項目に対して150を入力
+  test("営業担当者名が21文字以上の場合エラーが検出される", () => {
     const inputData = {
-      item_name: 'monthly_appointments',
-      minimum_value: 100,
-      input_value: 150,
-      field_type: 'numeric'
+      salesPersonName: "山田太郎山田太郎山田太郎",
+      customerName: "株式会社ABC",
+      activityType: "初回訪問",
+      activityDateTime: new Date("2024-01-15T10:30:00Z"),
+      amount: 150000,
     };
 
-    // 期待値: バリデーション成功、エラーなし
-    const result = validateSalesDataRangeMinimum(inputData);
-    expect(result).toEqual({
-      is_valid: true,
-      error_message: null,
-      validation_timestamp: expect.any(String),
-      checked_value: 150,
-      constraint_minimum: 100
-    });
+    const result = validateSalesActivityData(inputData);
+
+    expect(result.isValid).toBe(false);
+    expect(result.errors.length).toBeGreaterThan(0);
+    expect(result.errors[0]).toMatch(/営業担当者名/);
   });
 
-  it('SCEN-690: 複数の境界値をテスト（最小値0でマイナス値を入力）', () => {
-    // 入力値: 最小値が0の数値項目に対して-1を入力
+  test("顧客名が空文字の場合エラーが検出される", () => {
     const inputData = {
-      item_name: 'contract_count',
-      minimum_value: 0,
-      input_value: -1,
-      field_type: 'numeric'
+      salesPersonName: "山田太郎",
+      customerName: "",
+      activityType: "初回訪問",
+      activityDateTime: new Date("2024-01-15T10:30:00Z"),
+      amount: 150000,
     };
 
-    // 期待値: 範囲外エラーが検出される
-    expect(() => validateSalesDataRangeMinimum(inputData)).toThrow(/最小値/);
+    const result = validateSalesActivityData(inputData);
+
+    expect(result.isValid).toBe(false);
+    expect(result.errors.length).toBeGreaterThan(0);
+    expect(result.errors[0]).toMatch(/顧客名/);
   });
 
-  it('SCEN-690: エラーログが記録される', () => {
-    // 入力値: 最小値が100の数値項目に対して50を入力
+  test("金額が数値でない場合エラーが検出される", () => {
     const inputData = {
-      item_name: 'deal_count',
-      minimum_value: 100,
-      input_value: 50,
-      field_type: 'numeric'
+      salesPersonName: "山田太郎",
+      customerName: "株式会社ABC",
+      activityType: "初回訪問",
+      activityDateTime: new Date("2024-01-15T10:30:00Z"),
+      amount: "150000" as any,
     };
 
-    try {
-      validateSalesDataRangeMinimum(inputData);
-      fail('エラーが発生すべき');
-    } catch (error: unknown) {
-      if (error instanceof Error) {
-        expect(error.message).toMatch(/最小値/);
-      }
-    }
+    const result = validateSalesActivityData(inputData);
+
+    expect(result.isValid).toBe(false);
+    expect(result.errors.length).toBeGreaterThan(0);
+    expect(result.errors[0]).toMatch(/金額/);
+  });
+
+  test("金額が負の数の場合エラーが検出される", () => {
+    const inputData = {
+      salesPersonName: "山田太郎",
+      customerName: "株式会社ABC",
+      activityType: "初回訪問",
+      activityDateTime: new Date("2024-01-15T10:30:00Z"),
+      amount: -50000,
+    };
+
+    const result = validateSalesActivityData(inputData);
+
+    expect(result.isValid).toBe(false);
+    expect(result.errors.length).toBeGreaterThan(0);
+    expect(result.errors[0]).toMatch(/金額/);
+  });
+
+  test("活動日時が無効な場合エラーが検出される", () => {
+    const inputData = {
+      salesPersonName: "山田太郎",
+      customerName: "株式会社ABC",
+      activityType: "初回訪問",
+      activityDateTime: null as any,
+      amount: 150000,
+    };
+
+    const result = validateSalesActivityData(inputData);
+
+    expect(result.isValid).toBe(false);
+    expect(result.errors.length).toBeGreaterThan(0);
+    expect(result.errors[0]).toMatch(/活動日時/);
+  });
+
+  test("活動種別が空文字の場合エラーが検出される", () => {
+    const inputData = {
+      salesPersonName: "山田太郎",
+      customerName: "株式会社ABC",
+      activityType: "",
+      activityDateTime: new Date("2024-01-15T10:30:00Z"),
+      amount: 150000,
+    };
+
+    const result = validateSalesActivityData(inputData);
+
+    expect(result.isValid).toBe(false);
+    expect(result.errors.length).toBeGreaterThan(0);
+    expect(result.errors[0]).toMatch(/活動種別/);
+  });
+
+  test("複数の必須項目が欠落している場合すべてのエラーが検出される", () => {
+    const inputData = {
+      salesPersonName: "",
+      customerName: "",
+      activityType: "初回訪問",
+      activityDateTime: new Date("2024-01-15T10:30:00Z"),
+      amount: 150000,
+    };
+
+    const result = validateSalesActivityData(inputData);
+
+    expect(result.isValid).toBe(false);
+    expect(result.errors.length).toBe(2);
+    expect(result.errors.some((err: string) => err.match(/営業担当者名/))).toBe(true);
+    expect(result.errors.some((err: string) => err.match(/顧客名/))).toBe(true);
+  });
+
+  test("金額が0の場合は有効と判定される", () => {
+    const inputData = {
+      salesPersonName: "山田太郎",
+      customerName: "株式会社ABC",
+      activityType: "初回訪問",
+      activityDateTime: new Date("2024-01-15T10:30:00Z"),
+      amount: 0,
+    };
+
+    const result = validateSalesActivityData(inputData);
+
+    expect(result.isValid).toBe(true);
+    expect(result.errors).toEqual([]);
+  });
+
+  test("金額が1000000の場合は有効と判定される", () => {
+    const inputData = {
+      salesPersonName: "山田太郎",
+      customerName: "株式会社ABC",
+      activityType: "初回訪問",
+      activityDateTime: new Date("2024-01-15T10:30:00Z"),
+      amount: 1000000,
+    };
+
+    const result = validateSalesActivityData(inputData);
+
+    expect(result.isValid).toBe(true);
+    expect(result.errors).toEqual([]);
+  });
+
+  test("営業担当者名が20文字ちょうどの場合は有効と判定される", () => {
+    const inputData = {
+      salesPersonName: "山田太郎山田太郎山田",
+      customerName: "株式会社ABC",
+      activityType: "初回訪問",
+      activityDateTime: new Date("2024-01-15T10:30:00Z"),
+      amount: 150000,
+    };
+
+    const result = validateSalesActivityData(inputData);
+
+    expect(result.isValid).toBe(true);
+    expect(result.errors).toEqual([]);
   });
 });

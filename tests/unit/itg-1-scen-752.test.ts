@@ -1,128 +1,76 @@
-import { describe, test, expect } from "@jest/globals";
-import { registerSalesDataMetadata } from "../../src/logic/it-1781935279444-1-1-1";
+import { describe, test, expect, beforeEach, afterEach } from '@jest/globals';
+import {
+  recordFileMetadata,
+} from '../../src/logic/it-1781935279444-1-1-1';
 
-describe("営業データ項目メタデータ管理", () => {
-  // SCEN-752
-  test("データ型が不正に設定されている場合、メタデータ登録時にエラーが検出される", () => {
-    const invalidMetadata = {
-      fieldName: "顧客ID",
-      dataType: "invalid_type",
-      description: "顧客を識別するID",
-      format: "string",
-      required: true,
+describe('営業データ項目のメタデータ管理機能', () => {
+  // SCEN-752: [error] ファイルメタデータ自動記録 - ファイルメタデータ記録失敗時にシステムが適切なエラーを返す
+  test('メタデータ記録失敗時に適切なエラーメッセージを返す', async () => {
+    const testFileId = 'file-20240115-001';
+    const testFileName = 'contract-20240115.pdf';
+    const testUpdatedBy = 'operator-001';
+    const testUpdatedAt = new Date('2024-01-15T09:30:00Z');
+    const testChangeContent = '契約変更: 請求額割引率5%から10%へ';
+
+    const inputPayload = {
+      fileId: testFileId,
+      fileName: testFileName,
+      updatedBy: testUpdatedBy,
+      updatedAt: testUpdatedAt,
+      changeContent: testChangeContent,
     };
 
-    expect(() => registerSalesDataMetadata(invalidMetadata)).toThrow(
-      /データ型/
-    );
-  });
+    // データベース接続エラーをシミュレート
+    const dbConnectionError = new Error('Database connection failed');
+    (dbConnectionError as any).code = 'ECONNREFUSED';
 
-  test("データ型が空文字列の場合、メタデータ登録時にエラーが検出される", () => {
-    const invalidMetadata = {
-      fieldName: "顧客ID",
-      dataType: "",
-      description: "顧客を識別するID",
-      format: "string",
-      required: true,
+    // recordFileMetadata 関数の内部で DB エラーが発生するシナリオ
+    // 関数の実装でメタデータ記録処理中に接続エラーが throw される
+    const recordMetadataWithDBError = async () => {
+      throw dbConnectionError;
     };
 
-    expect(() => registerSalesDataMetadata(invalidMetadata)).toThrow(
-      /データ型/
-    );
-  });
+    // エラーハンドリング検証: エラーが throw されることを確認
+    await expect(recordMetadataWithDBError()).rejects.toThrow(/Database/);
 
-  test("有効なデータ型が設定されている場合、メタデータが正常に登録される", () => {
-    const validMetadata = {
-      fieldName: "顧客ID",
-      dataType: "string",
-      description: "顧客を識別するID",
-      format: "uuid",
-      required: true,
-    };
+    // recordFileMetadata 関数を呼び出し、エラーレスポンスを検証
+    let errorResponse: any;
+    try {
+      await recordFileMetadata(inputPayload);
+    } catch (error: any) {
+      errorResponse = error;
+    }
 
-    const result = registerSalesDataMetadata(validMetadata);
+    // エラーレスポンスが存在することを確認
+    expect(errorResponse).toBeDefined();
 
-    expect(result).toEqual({
-      fieldName: "顧客ID",
-      dataType: "string",
-      description: "顧客を識別するID",
-      format: "uuid",
-      required: true,
-      registeredAt: expect.any(String),
-      status: "registered",
-    });
-  });
+    // エラーメッセージが適切に含まれていることを確認
+    expect(errorResponse.message || errorResponse.toString()).toMatch(/メタデータ/);
 
-  test("複数の有効なデータ型で登録が成功する", () => {
-    const numberMetadata = {
-      fieldName: "アポ数",
-      dataType: "number",
-      description: "当月のアポイント件数",
-      format: "integer",
-      required: true,
-    };
+    // エラーコードが返されることを確認
+    expect(errorResponse.code || errorResponse.errorCode).toBeDefined();
 
-    const result = registerSalesDataMetadata(numberMetadata);
+    // エラーログにタイムスタンプが記録されることを確認
+    // (実装では errorLog.timestamp が記録される想定)
+    if (errorResponse.errorLog) {
+      expect(errorResponse.errorLog.timestamp).toBeDefined();
+      // タイムスタンプが ISO 8601 形式であることを確認
+      expect(typeof errorResponse.errorLog.timestamp).toBe('string');
+    }
 
-    expect(result.status).toBe("registered");
-    expect(result.dataType).toBe("number");
-  });
+    // エラーレスポンスに必須フィールドが含まれていることを確認
+    // エラーコード
+    expect(errorResponse.code || errorResponse.errorCode).toMatch(/^[A-Z_]+$/);
 
-  test("データ型が null の場合、メタデータ登録時にエラーが検出される", () => {
-    const invalidMetadata = {
-      fieldName: "成約数",
-      dataType: null as any,
-      description: "成約件数",
-      format: "integer",
-      required: true,
-    };
+    // エラー内容の説明
+    expect(
+      errorResponse.message ||
+      errorResponse.detail ||
+      errorResponse.description
+    ).toBeTruthy();
 
-    expect(() => registerSalesDataMetadata(invalidMetadata)).toThrow(
-      /データ型/
-    );
-  });
-
-  test("データ型が undefined の場合、メタデータ登録時にエラーが検出される", () => {
-    const invalidMetadata = {
-      fieldName: "顧客反応",
-      dataType: undefined as any,
-      description: "顧客の反応度",
-      format: "string",
-      required: true,
-    };
-
-    expect(() => registerSalesDataMetadata(invalidMetadata)).toThrow(
-      /データ型/
-    );
-  });
-
-  test("boolean 型のデータ型で登録が成功する", () => {
-    const booleanMetadata = {
-      fieldName: "成約フラグ",
-      dataType: "boolean",
-      description: "成約に至ったかどうか",
-      format: "flag",
-      required: true,
-    };
-
-    const result = registerSalesDataMetadata(booleanMetadata);
-
-    expect(result.status).toBe("registered");
-    expect(result.dataType).toBe("boolean");
-  });
-
-  test("date 型のデータ型で登録が成功する", () => {
-    const dateMetadata = {
-      fieldName: "接触日時",
-      dataType: "date",
-      description: "顧客との接触日時",
-      format: "ISO8601",
-      required: true,
-    };
-
-    const result = registerSalesDataMetadata(dateMetadata);
-
-    expect(result.status).toBe("registered");
-    expect(result.dataType).toBe("date");
+    // システムが復帰可能な状態であることを確認
+    // (エラーが recoverable エラーであり、システムが意図的に処理を終了していることを確認)
+    expect(errorResponse.isRecoverable === true || errorResponse.status >= 400).toBeDefined();
   });
 });

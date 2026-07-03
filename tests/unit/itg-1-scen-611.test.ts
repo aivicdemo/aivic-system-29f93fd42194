@@ -1,175 +1,305 @@
-import { describe, test, expect } from '@jest/globals';
-import { executeComplexMetadataCalculation } from '../../src/logic/it-1781935279444-1-1-1';
+import {
+  generateMonthlySummaryReport,
+} from "../../src/logic/it-1-br-1781935279444-1-2-1";
 
-describe('営業データ項目メタデータ管理', () => {
-  test('SCEN-611: 複合条件を含む計算ロジックが複雑な式を正確に実行する', () => {
-    // ===== テストケース 1: 基本的な複合条件 (AND条件が真) =====
-    // 条件: (fieldA > 100 AND fieldB < 50) OR (fieldC = '特定値' AND fieldD != 0)
-    // テストデータ: fieldA=150, fieldB=30, fieldC='その他', fieldD=0
-    // 期待: 最初のOR条件が真 (150>100 AND 30<50 = true AND true = true)
-    const testData_1 = {
-      fieldA: 150,
-      fieldB: 30,
-      fieldC: 'その他',
-      fieldD: 0,
-    };
-    const result_1 = executeComplexMetadataCalculation(testData_1);
-    expect(result_1.evaluated).toBe(true);
-    expect(result_1.matchedCondition).toBe('first_or_condition');
+describe("Monthly Summary Template - Multi-item Report Generation", () => {
+  // SCEN-611
+  test("複数テンプレート項目の組み合わせで正確にレポートが生成される", () => {
+    const template_items = [
+      {
+        item_id: "cust_name",
+        item_label: "顧客名",
+        data_type: "text",
+        format_pattern: null,
+        calculation_formula: null,
+        sort_order: 1,
+      },
+      {
+        item_id: "sales_amount",
+        item_label: "売上金額",
+        data_type: "number",
+        format_pattern: "0.00",
+        calculation_formula: null,
+        sort_order: 2,
+      },
+      {
+        item_id: "discount_rate",
+        item_label: "割引率",
+        data_type: "number",
+        format_pattern: "0.00%",
+        calculation_formula: null,
+        sort_order: 3,
+      },
+      {
+        item_id: "discount_amount",
+        item_label: "割引金額",
+        data_type: "number",
+        format_pattern: "0.00",
+        calculation_formula: "sales_amount * discount_rate",
+        sort_order: 4,
+      },
+      {
+        item_id: "tax_rate",
+        item_label: "税率",
+        data_type: "number",
+        format_pattern: "0.00%",
+        calculation_formula: null,
+        sort_order: 5,
+      },
+      {
+        item_id: "tax_amount",
+        item_label: "税金",
+        data_type: "number",
+        format_pattern: "0.00",
+        calculation_formula: "(sales_amount - discount_amount) * tax_rate",
+        sort_order: 6,
+      },
+      {
+        item_id: "total_amount",
+        item_label: "合計金額",
+        data_type: "number",
+        format_pattern: "0.00",
+        calculation_formula:
+          "sales_amount - discount_amount + tax_amount",
+        sort_order: 7,
+      },
+      {
+        item_id: "invoice_date",
+        item_label: "請求日",
+        data_type: "date",
+        format_pattern: "YYYY-MM-DD",
+        calculation_formula: null,
+        sort_order: 8,
+      },
+    ];
 
-    // ===== テストケース 2: 第2OR条件が真 =====
-    // テストデータ: fieldA=50, fieldB=60, fieldC='特定値', fieldD=5
-    // 期待: 最初のOR条件が偽、第2OR条件が真 ('特定値'='特定値' AND 5!=0 = true AND true = true)
-    const testData_2 = {
-      fieldA: 50,
-      fieldB: 60,
-      fieldC: '特定値',
-      fieldD: 5,
-    };
-    const result_2 = executeComplexMetadataCalculation(testData_2);
-    expect(result_2.evaluated).toBe(true);
-    expect(result_2.matchedCondition).toBe('second_or_condition');
+    const customer_data = [
+      {
+        customer_id: "cust_001",
+        customer_name: "顧客A",
+        sales_amount: 100000.0,
+        discount_rate: 0.1,
+        tax_rate: 0.1,
+        invoice_date: "2024-01-15",
+      },
+      {
+        customer_id: "cust_002",
+        customer_name: "顧客B",
+        sales_amount: 250000.0,
+        discount_rate: 0.15,
+        tax_rate: 0.1,
+        invoice_date: "2024-01-15",
+      },
+      {
+        customer_id: "cust_003",
+        customer_name: "顧客C",
+        sales_amount: 50000.0,
+        discount_rate: 0.05,
+        tax_rate: 0.1,
+        invoice_date: "2024-01-15",
+      },
+      {
+        customer_id: "cust_004",
+        customer_name: "顧客D",
+        sales_amount: 500000.0,
+        discount_rate: 0.2,
+        tax_rate: 0.1,
+        invoice_date: "2024-01-15",
+      },
+      {
+        customer_id: "cust_005",
+        customer_name: "顧客E",
+        sales_amount: 10000.0,
+        discount_rate: 0.0,
+        tax_rate: 0.1,
+        invoice_date: "2024-01-15",
+      },
+    ];
 
-    // ===== テストケース 3: 境界値 - 第1OR条件の境界 (AND条件が偽) =====
-    // テストデータ: fieldA=100, fieldB=50, fieldC='その他', fieldD=0
-    // 期待: fieldA=100 (NOT > 100)、fieldB=50 (NOT < 50) → 第1条件偽
-    //       fieldC != '特定値'、fieldD = 0 → 第2条件偽
-    //       結果: 全体偽
-    const testData_3 = {
-      fieldA: 100,
-      fieldB: 50,
-      fieldC: 'その他',
-      fieldD: 0,
-    };
-    const result_3 = executeComplexMetadataCalculation(testData_3);
-    expect(result_3.evaluated).toBe(false);
-    expect(result_3.matchedCondition).toBe('none');
+    const output_format = "json";
 
-    // ===== テストケース 4: 正常値での複雑な計算 =====
-    // テストデータ: fieldA=200, fieldB=0, fieldC='値A', fieldD=10
-    // 期待: 第1OR条件: 200>100 AND 0<50 = true AND true = true
-    const testData_4 = {
-      fieldA: 200,
-      fieldB: 0,
-      fieldC: '値A',
-      fieldD: 10,
-    };
-    const result_4 = executeComplexMetadataCalculation(testData_4);
-    expect(result_4.evaluated).toBe(true);
-    expect(result_4.matchedCondition).toBe('first_or_condition');
+    const result = generateMonthlySummaryReport(
+      template_items,
+      customer_data,
+      output_format
+    );
 
-    // ===== テストケース 5: 異常値 - すべての条件が偽 =====
-    // テストデータ: fieldA=50, fieldB=60, fieldC='異なる値', fieldD=0
-    // 期待: 第1条件: 50>100=false, 偽AND真=偽
-    //       第2条件: '異なる値'!='特定値'=true AND 0!=0=false, 真AND偽=偽
-    //       OR演算: 偽 OR 偽 = 偽
-    const testData_5 = {
-      fieldA: 50,
-      fieldB: 60,
-      fieldC: '異なる値',
-      fieldD: 0,
-    };
-    const result_5 = executeComplexMetadataCalculation(testData_5);
-    expect(result_5.evaluated).toBe(false);
-    expect(result_5.matchedCondition).toBe('none');
+    expect(result).toBeDefined();
+    expect(result.status).toBe("success");
+    expect(result.report_data).toBeDefined();
+    expect(Array.isArray(result.report_data)).toBe(true);
+    expect(result.report_data.length).toBe(5);
 
-    // ===== テストケース 6: 第2OR条件のみ真 (fieldD境界値) =====
-    // テストデータ: fieldA=99, fieldB=51, fieldC='特定値', fieldD=1
-    // 期待: 第1条件: 99>100=false, false AND true=false
-    //       第2条件: '特定値'='特定値'=true AND 1!=0=true, true AND true=true
-    //       結果: false OR true = true
-    const testData_6 = {
-      fieldA: 99,
-      fieldB: 51,
-      fieldC: '特定値',
-      fieldD: 1,
-    };
-    const result_6 = executeComplexMetadataCalculation(testData_6);
-    expect(result_6.evaluated).toBe(true);
-    expect(result_6.matchedCondition).toBe('second_or_condition');
+    const row_1 = result.report_data[0];
+    expect(row_1.cust_name).toBe("顧客A");
+    expect(row_1.sales_amount).toBe(100000.0);
+    expect(row_1.discount_rate).toBe(0.1);
+    expect(row_1.discount_amount).toBe(10000.0);
+    expect(row_1.tax_rate).toBe(0.1);
+    expect(row_1.tax_amount).toBe(9000.0);
+    expect(row_1.total_amount).toBe(99000.0);
+    expect(row_1.invoice_date).toBe("2024-01-15");
 
-    // ===== テストケース 7: 負の値を含む複雑なケース =====
-    // テストデータ: fieldA=101, fieldB=-10, fieldC='特定値', fieldD=-5
-    // 期待: 第1条件: 101>100=true AND -10<50=true, true AND true=true
-    //       結果: true (第1条件が真でショートサーキット評価)
-    const testData_7 = {
-      fieldA: 101,
-      fieldB: -10,
-      fieldC: '特定値',
-      fieldD: -5,
-    };
-    const result_7 = executeComplexMetadataCalculation(testData_7);
-    expect(result_7.evaluated).toBe(true);
-    expect(result_7.matchedCondition).toBe('first_or_condition');
+    const row_2 = result.report_data[1];
+    expect(row_2.cust_name).toBe("顧客B");
+    expect(row_2.sales_amount).toBe(250000.0);
+    expect(row_2.discount_rate).toBe(0.15);
+    expect(row_2.discount_amount).toBe(37500.0);
+    expect(row_2.tax_rate).toBe(0.1);
+    expect(row_2.tax_amount).toBe(21250.0);
+    expect(row_2.total_amount).toBe(233750.0);
 
-    // ===== テストケース 8: 大きな数値での計算精度 =====
-    // テストデータ: fieldA=10000, fieldB=-999, fieldC='データ', fieldD=999999
-    // 期待: 第1条件: 10000>100=true AND -999<50=true, true AND true=true
-    const testData_8 = {
-      fieldA: 10000,
-      fieldB: -999,
-      fieldC: 'データ',
-      fieldD: 999999,
-    };
-    const result_8 = executeComplexMetadataCalculation(testData_8);
-    expect(result_8.evaluated).toBe(true);
-    expect(result_8.matchedCondition).toBe('first_or_condition');
+    const row_3 = result.report_data[2];
+    expect(row_3.cust_name).toBe("顧客C");
+    expect(row_3.sales_amount).toBe(50000.0);
+    expect(row_3.discount_rate).toBe(0.05);
+    expect(row_3.discount_amount).toBe(2500.0);
+    expect(row_3.tax_rate).toBe(0.1);
+    expect(row_3.tax_amount).toBe(4750.0);
+    expect(row_3.total_amount).toBe(52250.0);
 
-    // ===== テストケース 9: 演算子優先順位の検証 =====
-    // テストデータ: fieldA=150, fieldB=25, fieldC='特定値', fieldD=0
-    // AND優先度が正しく適用されることを検証
-    // 期待: (150>100 AND 25<50) OR ('特定値'='特定値' AND 0!=0)
-    //       (true AND true) OR (true AND false)
-    //       true OR false = true (第1条件が優先)
-    const testData_9 = {
-      fieldA: 150,
-      fieldB: 25,
-      fieldC: '特定値',
-      fieldD: 0,
-    };
-    const result_9 = executeComplexMetadataCalculation(testData_9);
-    expect(result_9.evaluated).toBe(true);
-    expect(result_9.matchedCondition).toBe('first_or_condition');
+    const row_4 = result.report_data[3];
+    expect(row_4.cust_name).toBe("顧客D");
+    expect(row_4.sales_amount).toBe(500000.0);
+    expect(row_4.discount_rate).toBe(0.2);
+    expect(row_4.discount_amount).toBe(100000.0);
+    expect(row_4.tax_rate).toBe(0.1);
+    expect(row_4.tax_amount).toBe(40000.0);
+    expect(row_4.total_amount).toBe(440000.0);
 
-    // ===== テストケース 10: すべての条件が微妙に外れるケース =====
-    // テストデータ: fieldA=100.5, fieldB=49.9, fieldC='特定値', fieldD=0.1
-    // 期待: 第1条件: 100.5>100=true AND 49.9<50=true, true AND true=true
-    //       結果: true
-    const testData_10 = {
-      fieldA: 100.5,
-      fieldB: 49.9,
-      fieldC: '特定値',
-      fieldD: 0.1,
-    };
-    const result_10 = executeComplexMetadataCalculation(testData_10);
-    expect(result_10.evaluated).toBe(true);
-    expect(result_10.matchedCondition).toBe('first_or_condition');
+    const row_5 = result.report_data[4];
+    expect(row_5.cust_name).toBe("顧客E");
+    expect(row_5.sales_amount).toBe(10000.0);
+    expect(row_5.discount_rate).toBe(0.0);
+    expect(row_5.discount_amount).toBe(0.0);
+    expect(row_5.tax_rate).toBe(0.1);
+    expect(row_5.tax_amount).toBe(1000.0);
+    expect(row_5.total_amount).toBe(11000.0);
 
-    // ===== 計算式の正確性を統合的に検証 =====
-    // すべてのテストケースが期待通り評価されたことを確認
-    expect([result_1, result_2, result_3, result_4, result_5, result_6, result_7, result_8, result_9, result_10]).toBeDefined();
-    
-    // エラーハンドリング: 必須フィールド不足
-    expect(() => executeComplexMetadataCalculation({
-      fieldA: 100,
-      fieldB: 50,
-      // fieldC, fieldD 不足
-    })).toThrow(/フィールド定義/);
+    expect(result.template_validation).toBeDefined();
+    expect(result.template_validation.total_items).toBe(8);
+    expect(result.template_validation.calculated_items).toBe(3);
+    expect(result.template_validation.formula_errors).toBe(0);
+    expect(result.template_validation.data_type_mismatches).toBe(0);
 
-    // エラーハンドリング: 無効なデータ型
-    expect(() => executeComplexMetadataCalculation({
-      fieldA: 'invalid',
-      fieldB: 50,
-      fieldC: '特定値',
-      fieldD: 0,
-    })).toThrow(/データ型/);
+    expect(result.output_format).toBe("json");
+    expect(result.generated_timestamp).toBeDefined();
+    expect(result.field_order).toEqual([
+      "cust_name",
+      "sales_amount",
+      "discount_rate",
+      "discount_amount",
+      "tax_rate",
+      "tax_amount",
+      "total_amount",
+      "invoice_date",
+    ]);
 
-    // エラーハンドリング: null/undefined 値
-    expect(() => executeComplexMetadataCalculation({
-      fieldA: null,
-      fieldB: 50,
-      fieldC: '特定値',
-      fieldD: 0,
-    })).toThrow(/必須項目/);
+    const edge_case_data = [
+      {
+        customer_id: "cust_max",
+        customer_name: "顧客MaxValue",
+        sales_amount: 9999999.99,
+        discount_rate: 0.5,
+        tax_rate: 0.1,
+        invoice_date: "2024-01-31",
+      },
+      {
+        customer_id: "cust_min",
+        customer_name: "顧客MinValue",
+        sales_amount: 0.01,
+        discount_rate: 0.0,
+        tax_rate: 0.1,
+        invoice_date: "2024-01-01",
+      },
+      {
+        customer_id: "cust_zero",
+        customer_name: "顧客Zero",
+        sales_amount: 0.0,
+        discount_rate: 0.0,
+        tax_rate: 0.1,
+        invoice_date: "2024-01-15",
+      },
+    ];
+
+    const edge_result = generateMonthlySummaryReport(
+      template_items,
+      edge_case_data,
+      output_format
+    );
+
+    expect(edge_result.status).toBe("success");
+    expect(edge_result.report_data.length).toBe(3);
+
+    const max_row = edge_result.report_data[0];
+    expect(max_row.cust_name).toBe("顧客MaxValue");
+    expect(max_row.sales_amount).toBe(9999999.99);
+    expect(max_row.discount_amount).toBe(4999999.995);
+    expect(max_row.tax_amount).toBe(499999.9995);
+    expect(max_row.total_amount).toBeCloseTo(5499999.9845, 2);
+
+    const min_row = edge_result.report_data[1];
+    expect(min_row.cust_name).toBe("顧客MinValue");
+    expect(min_row.sales_amount).toBe(0.01);
+    expect(min_row.discount_amount).toBe(0.0);
+    expect(min_row.tax_amount).toBeCloseTo(0.001, 3);
+    expect(min_row.total_amount).toBeCloseTo(0.011, 3);
+
+    const zero_row = edge_result.report_data[2];
+    expect(zero_row.cust_name).toBe("顧客Zero");
+    expect(zero_row.sales_amount).toBe(0.0);
+    expect(zero_row.discount_amount).toBe(0.0);
+    expect(zero_row.tax_amount).toBe(0.0);
+    expect(zero_row.total_amount).toBe(0.0);
+
+    const excel_result = generateMonthlySummaryReport(
+      template_items,
+      customer_data,
+      "excel"
+    );
+    expect(excel_result.status).toBe("success");
+    expect(excel_result.output_format).toBe("excel");
+    expect(excel_result.report_data.length).toBe(5);
+
+    const csv_result = generateMonthlySummaryReport(
+      template_items,
+      customer_data,
+      "csv"
+    );
+    expect(csv_result.status).toBe("success");
+    expect(csv_result.output_format).toBe("csv");
+    expect(csv_result.report_data.length).toBe(5);
+
+    expect(result.report_data[0]).toEqual(
+      excel_result.report_data[0]
+    );
+    expect(result.report_data[0]).toEqual(csv_result.report_data[0]);
+
+    expect(() => {
+      generateMonthlySummaryReport([], customer_data, output_format);
+    }).toThrow(/テンプレート項目/);
+
+    expect(() => {
+      generateMonthlySummaryReport(template_items, [], output_format);
+    }).toThrow(/顧客データ/);
+
+    const invalid_formula_items = [
+      {
+        item_id: "invalid_calc",
+        item_label: "無効計算",
+        data_type: "number",
+        format_pattern: "0.00",
+        calculation_formula: "undefined_field * 2",
+        sort_order: 1,
+      },
+    ];
+
+    expect(() => {
+      generateMonthlySummaryReport(
+        invalid_formula_items,
+        customer_data,
+        output_format
+      );
+    }).toThrow(/計算式/);
   });
 });

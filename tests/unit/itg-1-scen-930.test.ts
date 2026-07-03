@@ -1,123 +1,126 @@
-import { describe, test, expect } from "@jest/globals";
-import {
-  createStandardProcedureNewVersion,
-  recordChangeHistory,
-  identifyLatestVersion,
-} from "../../src/logic/it-1-br-1781935279444-1-2-1";
+import { validateSalesDataQuality } from "../../src/logic/it-1781935279444-2-2-1";
 
-describe("月次サマリーテンプレートの定義・管理機能 - 手順書バージョン管理・自動特定", () => {
-  test("SCEN-930: 標準手順書の新バージョンが作成され、変更履歴が記録され、最新版が自動特定される", () => {
-    // ===== Setup: 既存の標準手順書 =====
-    const existingProcedureId = "PROC-001";
-    const existingVersionNumber = 1;
-    const existingCreatedAt = new Date("2024-01-01T09:00:00Z");
-    const existingCreatedBy = "user_admin_01";
-
-    // ===== Input: 新バージョン作成のパラメータ =====
-    const newVersionInput = {
-      procedureId: existingProcedureId,
-      baseVersionNumber: existingVersionNumber,
-      editedContent: {
-        title: "月次締め業務標準手順書",
-        steps: [
-          {
-            stepNumber: 1,
-            description: "営業システムからデータを抽出する",
-          },
-          {
-            stepNumber: 2,
-            description: "営業データ品質チェックを実行する（新規ステップ）",
-          },
-          {
-            stepNumber: 3,
-            description: "請求対象項目を確認する（修正内容）",
-          },
-        ],
+describe("営業データの完全性・正確性を自動検証し、不足データ・誤りを検出・通知する機能", () => {
+  // SCEN-930: [edge] 営業データ品質検証ルール適用 - 必須項目値が空文字列の場合、欠落と同等に検出される
+  test("必須項目が空文字列の場合、null/undefinedと同等のエラー（欠落エラー）が検出される", () => {
+    const validationRules = {
+      requiredFields: ["customer_name", "amount", "contact_date"],
+      fieldTypes: {
+        customer_name: "string",
+        amount: "number",
+        contact_date: "string",
       },
-      changeReason:
-        "月次締め日の業務フローを明確化し、新規ステップを追加しました。",
-      createdAt: new Date("2024-02-15T10:30:00Z"),
-      createdBy: "user_manager_02",
     };
 
-    // ===== Step 1: 新バージョンを作成する =====
-    const createResult = createStandardProcedureNewVersion(newVersionInput);
-
-    // ===== Assertion: 新バージョンが正しく作成されたか =====
-    expect(createResult).toBeDefined();
-    expect(createResult.versionNumber).toBe(2);
-    expect(createResult.procedureId).toBe(existingProcedureId);
-    expect(createResult.content).toEqual(newVersionInput.editedContent);
-    expect(createResult.createdAt).toEqual(
-      new Date("2024-02-15T10:30:00Z").toISOString()
-    );
-    expect(createResult.createdBy).toBe("user_manager_02");
-
-    // ===== Step 2: 変更履歴を記録する =====
-    const changeHistoryInput = {
-      procedureId: existingProcedureId,
-      versionNumber: createResult.versionNumber,
-      changeReason: newVersionInput.changeReason,
-      changedFields: ["steps[1]", "steps[2].description"],
-      createdAt: newVersionInput.createdAt,
-      createdBy: newVersionInput.createdBy,
+    // テストケース1: 必須項目が空文字列で設定されたデータ
+    const salesDataWithEmptyString = {
+      customer_name: "",
+      amount: 50000,
+      contact_date: "2024-01-15",
     };
 
-    const changeHistoryResult = recordChangeHistory(changeHistoryInput);
+    // テストケース2: 同じ項目がnullで設定されたデータ
+    const salesDataWithNull = {
+      customer_name: null,
+      amount: 50000,
+      contact_date: "2024-01-15",
+    };
 
-    // ===== Assertion: 変更履歴が正しく記録されたか =====
-    expect(changeHistoryResult).toBeDefined();
-    expect(changeHistoryResult.procedureId).toBe(existingProcedureId);
-    expect(changeHistoryResult.versionNumber).toBe(2);
-    expect(changeHistoryResult.changeReason).toBe(
-      "月次締め日の業務フローを明確化し、新規ステップを追加しました。"
+    // テストケース3: 同じ項目がundefinedで設定されたデータ
+    const salesDataWithUndefined = {
+      customer_name: undefined,
+      amount: 50000,
+      contact_date: "2024-01-15",
+    };
+
+    // 空文字列での検証実行
+    const resultEmptyString = validateSalesDataQuality(
+      salesDataWithEmptyString,
+      validationRules
     );
-    expect(changeHistoryResult.changedFields).toEqual([
-      "steps[1]",
-      "steps[2].description",
-    ]);
-    expect(changeHistoryResult.recordedAt).toEqual(
-      new Date("2024-02-15T10:30:00Z").toISOString()
+
+    // nullでの検証実行
+    const resultNull = validateSalesDataQuality(
+      salesDataWithNull,
+      validationRules
     );
-    expect(changeHistoryResult.recordedBy).toBe("user_manager_02");
 
-    // ===== Step 3: 複数バージョンから最新版を自動特定する =====
-    const allVersions = [
-      {
-        procedureId: existingProcedureId,
-        versionNumber: 1,
-        createdAt: new Date("2024-01-01T09:00:00Z").toISOString(),
-        createdBy: "user_admin_01",
-      },
-      {
-        procedureId: existingProcedureId,
-        versionNumber: 2,
-        createdAt: new Date("2024-02-15T10:30:00Z").toISOString(),
-        createdBy: "user_manager_02",
-      },
-    ];
+    // undefinedでの検証実行
+    const resultUndefined = validateSalesDataQuality(
+      salesDataWithUndefined,
+      validationRules
+    );
 
-    const latestVersionResult = identifyLatestVersion({
-      procedureId: existingProcedureId,
-      versions: allVersions,
+    // 空文字列の場合、エラーが検出されることを確認
+    expect(resultEmptyString.isValid).toBe(false);
+    expect(resultEmptyString.errors).toContainEqual({
+      field: "customer_name",
+      errorCode: "REQUIRED_FIELD_MISSING",
+      message: "顧客名は必須項目です",
     });
 
-    // ===== Assertion: 最新版が正しく特定されたか =====
-    expect(latestVersionResult).toBeDefined();
-    expect(latestVersionResult.latestVersionNumber).toBe(2);
-    expect(latestVersionResult.latestCreatedAt).toBe(
-      new Date("2024-02-15T10:30:00Z").toISOString()
-    );
-    expect(latestVersionResult.latestCreatedBy).toBe("user_manager_02");
-    expect(latestVersionResult.previousVersionNumber).toBe(1);
-    expect(latestVersionResult.totalVersionCount).toBe(2);
+    // nullの場合、同じエラーが検出されることを確認
+    expect(resultNull.isValid).toBe(false);
+    expect(resultNull.errors).toContainEqual({
+      field: "customer_name",
+      errorCode: "REQUIRED_FIELD_MISSING",
+      message: "顧客名は必須項目です",
+    });
 
-    // ===== Assertion: 新バージョンが表示対象として選択されるか =====
-    expect(latestVersionResult.isLatestVersionForDisplay).toBe(true);
+    // undefinedの場合、同じエラーが検出されることを確認
+    expect(resultUndefined.isValid).toBe(false);
+    expect(resultUndefined.errors).toContainEqual({
+      field: "customer_name",
+      errorCode: "REQUIRED_FIELD_MISSING",
+      message: "顧客名は必須項目です",
+    });
 
-    // ===== Assertion: 複数バージョンの場合の正確性 =====
-    expect(latestVersionResult.latestVersionNumber).toBeGreaterThan(
-      latestVersionResult.previousVersionNumber
+    // 3つのケースすべてで同じエラーコードが返されることを確認
+    expect(resultEmptyString.errors[0].errorCode).toBe(
+      resultNull.errors[0].errorCode
     );
+    expect(resultNull.errors[0].errorCode).toBe(
+      resultUndefined.errors[0].errorCode
+    );
+
+    // 3つのケースすべてで同じエラーメッセージが返されることを確認
+    expect(resultEmptyString.errors[0].message).toBe(
+      resultNull.errors[0].message
+    );
+    expect(resultNull.errors[0].message).toBe(
+      resultUndefined.errors[0].message
+    );
+
+    // 複数の必須項目が空文字列の場合、複数のエラーが検出されることを確認
+    const multipleEmptyFields = {
+      customer_name: "",
+      amount: 50000,
+      contact_date: "",
+    };
+
+    const resultMultiple = validateSalesDataQuality(
+      multipleEmptyFields,
+      validationRules
+    );
+
+    expect(resultMultiple.isValid).toBe(false);
+    expect(resultMultiple.errors).toHaveLength(2);
+    expect(resultMultiple.errors[0].field).toBe("customer_name");
+    expect(resultMultiple.errors[1].field).toBe("contact_date");
+
+    // 必須項目が正常に入力されている場合、検証に合格することを確認
+    const validSalesData = {
+      customer_name: "テスト顧客A",
+      amount: 50000,
+      contact_date: "2024-01-15",
+    };
+
+    const resultValid = validateSalesDataQuality(
+      validSalesData,
+      validationRules
+    );
+
+    expect(resultValid.isValid).toBe(true);
+    expect(resultValid.errors).toHaveLength(0);
   });
 });

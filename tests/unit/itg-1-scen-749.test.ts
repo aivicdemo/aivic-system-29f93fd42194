@@ -1,61 +1,86 @@
-import { extractBillingItemsAndAggregate } from '../../src/logic/it-1-2-1';
+import { describe, test, expect, beforeEach } from "@jest/globals";
+import { extractBillingDataForMonthlyInvoice } from "../../src/logic/it-1-2-1";
 
-describe('営業成果データから請求対象項目を自動抽出し、顧客ごと・サービスごとの請求額を集計する機能', () => {
-  // SCEN-749: [error] 請求対象項目の自動抽出と請求額集計 - 営業データの請求計算に使用される単価マスタが存在しない場合、集計処理がエラーとして検出される
-  test('単価マスタに存在しない商品コードを含む営業データで集計処理を実行した場合、エラーが検出され処理が中断される', () => {
-    // テストデータ準備: 単価マスタに存在しない商品コード "PROD-999" を含む営業データ
-    const salesData = [
+describe("月次請求書生成用データ出力 - 請求対象データが存在しない顧客の除外", () => {
+  // SCEN-749
+  test("請求対象データが存在しない顧客は出力から除外され、除外処理がログに記録される", () => {
+    const input_data = [
       {
-        customer_id: 'CUST-001',
-        service_id: 'SVC-001',
-        product_code: 'PROD-999', // 単価マスタに存在しない商品コード
-        quantity: 5,
-        date: '2024-01-15',
-      },
-    ];
-
-    // 単価マスタ: "PROD-999" は意図的に除外
-    const pricemaster = [
-      {
-        product_code: 'PROD-001',
+        customer_id: "CUST001",
+        customer_name: "顧客A",
+        service_id: "SRV001",
+        service_name: "営業支援",
+        billing_target_count: 5,
         unit_price: 10000,
       },
       {
-        product_code: 'PROD-002',
-        unit_price: 20000,
+        customer_id: "CUST002",
+        customer_name: "顧客B",
+        service_id: "SRV002",
+        service_name: "マーケティング支援",
+        billing_target_count: 0,
+        unit_price: 8000,
+      },
+      {
+        customer_id: "CUST003",
+        customer_name: "顧客C",
+        service_id: "SRV001",
+        service_name: "営業支援",
+        billing_target_count: 3,
+        unit_price: 10000,
+      },
+      {
+        customer_id: "CUST004",
+        customer_name: "顧客D",
+        service_id: "SRV003",
+        service_name: "コンサルティング",
+        billing_target_count: 0,
+        unit_price: 15000,
       },
     ];
 
-    // システムログ記録用のモック
-    const systemLogs: Array<{ level: string; message: string; timestamp: string }> = [];
+    const result = extractBillingDataForMonthlyInvoice({
+      billing_records: input_data,
+      period_start_date: "2024-01-01",
+      period_end_date: "2024-01-31",
+    });
 
-    // 集計処理を実行
-    const result = extractBillingItemsAndAggregate(
-      {
-        sales_data: salesData,
-        price_master: pricemaster,
-        system_logs: systemLogs,
-      },
+    expect(result.output_data).toBeDefined();
+    expect(result.output_data.length).toBe(2);
+
+    const output_customer_ids = result.output_data.map(
+      (item) => item.customer_id
     );
+    expect(output_customer_ids).toContain("CUST001");
+    expect(output_customer_ids).toContain("CUST003");
+    expect(output_customer_ids).not.toContain("CUST002");
+    expect(output_customer_ids).not.toContain("CUST004");
 
-    // エラーが検出されたことを確認
-    expect(result.error).toBeDefined();
-    expect(result.error?.message).toMatch(/単価マスタ/);
+    expect(result.output_data[0].customer_id).toBe("CUST001");
+    expect(result.output_data[0].billing_amount).toBe(50000);
+    expect(result.output_data[1].customer_id).toBe("CUST003");
+    expect(result.output_data[1].billing_amount).toBe(30000);
 
-    // エラーメッセージが適切に表示されていることを検証
-    expect(result.error?.message).toMatch(/PROD-999/);
+    expect(result.excluded_customers).toBeDefined();
+    expect(result.excluded_customers.length).toBe(2);
+    expect(result.excluded_customers).toContainEqual({
+      customer_id: "CUST002",
+      customer_name: "顧客B",
+      reason: "請求対象データなし",
+    });
+    expect(result.excluded_customers).toContainEqual({
+      customer_id: "CUST004",
+      customer_name: "顧客D",
+      reason: "請求対象データなし",
+    });
 
-    // システムログにエラー情報が記録されていることを確認
-    expect(systemLogs.length).toBeGreaterThan(0);
-    const errorLog = systemLogs.find((log) => log.level === 'ERROR');
-    expect(errorLog).toBeDefined();
-    expect(errorLog?.message).toMatch(/単価マスタ/);
-
-    // 処理が中断されたことを確認 (集計結果が確定していない)
-    expect(result.aggregated_billing).toBeNull();
-    expect(result.is_processing_halted).toBe(true);
-
-    // 不正な請求額が確定していないことを検証
-    expect(result.confirmed_billing_amount).toBeUndefined();
+    expect(result.audit_log).toBeDefined();
+    expect(result.audit_log.total_input_customers).toBe(4);
+    expect(result.audit_log.total_output_customers).toBe(2);
+    expect(result.audit_log.excluded_count).toBe(2);
+    expect(result.audit_log.processing_timestamp).toMatch(
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/
+    );
+    expect(result.audit_log.status).toBe("success");
   });
 });

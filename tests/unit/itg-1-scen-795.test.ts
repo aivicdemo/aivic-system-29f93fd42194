@@ -1,191 +1,101 @@
-import { describe, test, expect } from '@jest/globals';
-import { determineLatestVersionByPriority } from '../../src/logic/it-1781935279444-1-1-1';
+import { determineLatestDocumentVersion } from "../../src/logic/it-1781935279444-1-1-1";
 
-describe('営業データ項目メタデータ管理 - 複数バージョン存在時の優先度ルール適用機能', () => {
-  test('SCEN-795: 同一案件に対して複数の有効なバージョンが存在する場合、優先度ルールに基づいて唯一の最新版が特定される', () => {
-    // テストケース1: バージョンA(優先度1), バージョンB(優先度2), バージョンC(優先度3) - バージョンAが最新版として特定されるべき
-    const versions_pattern1 = [
-      {
-        versionId: 'version-a-001',
-        proposalId: 'proposal-123',
-        versionNumber: 'A',
+describe("営業データ項目のメタデータ管理機能 - 文書バージョン最新版自動判定", () => {
+  test("SCEN-795: 同一タイムスタンプを持つ複数バージョンが存在する場合に最新版が正しく判定される", () => {
+    // テストデータ: 同一タイムスタンプを持つ3つのバージョン
+    const commonTimestamp = "2024-01-15T10:30:00Z";
+    const versionV1 = {
+      versionId: "v1-uuid-001",
+      versionNumber: 1,
+      documentId: "doc-001",
+      content: "Initial version content",
+      createdAt: commonTimestamp,
+      updatedAt: commonTimestamp,
+      metadata: {
         priority: 1,
-        effectiveFrom: new Date('2024-01-01T00:00:00Z'),
-        effectiveTo: new Date('2024-12-31T23:59:59Z'),
-        isActive: true
+        status: "active",
       },
-      {
-        versionId: 'version-b-002',
-        proposalId: 'proposal-123',
-        versionNumber: 'B',
+    };
+
+    const versionV2 = {
+      versionId: "v2-uuid-002",
+      versionNumber: 2,
+      documentId: "doc-001",
+      content: "Updated version content v2",
+      createdAt: commonTimestamp,
+      updatedAt: commonTimestamp,
+      metadata: {
         priority: 2,
-        effectiveFrom: new Date('2024-01-01T00:00:00Z'),
-        effectiveTo: new Date('2024-12-31T23:59:59Z'),
-        isActive: true
+        status: "active",
       },
-      {
-        versionId: 'version-c-003',
-        proposalId: 'proposal-123',
-        versionNumber: 'C',
+    };
+
+    const versionV3 = {
+      versionId: "v3-uuid-003",
+      versionNumber: 3,
+      documentId: "doc-001",
+      content: "Latest version content v3",
+      createdAt: commonTimestamp,
+      updatedAt: commonTimestamp,
+      metadata: {
         priority: 3,
-        effectiveFrom: new Date('2024-01-01T00:00:00Z'),
-        effectiveTo: new Date('2024-12-31T23:59:59Z'),
-        isActive: true
-      }
-    ];
+        status: "active",
+      },
+    };
 
-    const result_pattern1 = determineLatestVersionByPriority(versions_pattern1, 'proposal-123');
-    expect(result_pattern1).toEqual({
-      versionId: 'version-a-001',
-      versionNumber: 'A',
-      priority: 1
-    });
+    const versions = [versionV1, versionV2, versionV3];
 
-    // テストケース2: 優先度パターン変更 - バージョンC(優先度1), バージョンB(優先度2), バージョンA(優先度3) - バージョンCが最新版として特定されるべき
-    const versions_pattern2 = [
-      {
-        versionId: 'version-a-001',
-        proposalId: 'proposal-456',
-        versionNumber: 'A',
+    // 関数実行: 文書バージョン最新版自動判定機能を実行
+    const result = determineLatestDocumentVersion(versions);
+
+    // 検証: 最新版が正しく判定されているか
+    // versionNumber が最大のバージョン（v3）が最新版として返されることを確認
+    expect(result).toEqual({
+      versionId: "v3-uuid-003",
+      versionNumber: 3,
+      documentId: "doc-001",
+      content: "Latest version content v3",
+      createdAt: commonTimestamp,
+      updatedAt: commonTimestamp,
+      metadata: {
         priority: 3,
-        effectiveFrom: new Date('2024-01-01T00:00:00Z'),
-        effectiveTo: new Date('2024-12-31T23:59:59Z'),
-        isActive: true
+        status: "active",
       },
-      {
-        versionId: 'version-b-002',
-        proposalId: 'proposal-456',
-        versionNumber: 'B',
-        priority: 2,
-        effectiveFrom: new Date('2024-01-01T00:00:00Z'),
-        effectiveTo: new Date('2024-12-31T23:59:59Z'),
-        isActive: true
-      },
-      {
-        versionId: 'version-c-003',
-        proposalId: 'proposal-456',
-        versionNumber: 'C',
-        priority: 1,
-        effectiveFrom: new Date('2024-01-01T00:00:00Z'),
-        effectiveTo: new Date('2024-12-31T23:59:59Z'),
-        isActive: true
-      }
-    ];
-
-    const result_pattern2 = determineLatestVersionByPriority(versions_pattern2, 'proposal-456');
-    expect(result_pattern2).toEqual({
-      versionId: 'version-c-003',
-      versionNumber: 'C',
-      priority: 1
     });
 
-    // テストケース3: 非アクティブなバージョンを除外 - アクティブなバージョンのみから最新版を特定
-    const versions_pattern3 = [
-      {
-        versionId: 'version-a-001',
-        proposalId: 'proposal-789',
-        versionNumber: 'A',
+    // 検証: 判定ロジックが記録されているか（返却結果に判定基準の情報が含まれているか）
+    expect(result.versionNumber).toBe(3);
+    expect(result.metadata.priority).toBe(3);
+
+    // 検証: 同じタイムスタンプを持つバージョン間で一意に最新版が決定されていることを確認
+    // 複数回実行しても同じバージョンを最新版として返すことを確認（一貫性チェック）
+    const result2 = determineLatestDocumentVersion(versions);
+    expect(result2.versionId).toBe("v3-uuid-003");
+    expect(result2.versionNumber).toBe(3);
+
+    // 検証: 別の順序で入力した場合も同じ最新版が判定されることを確認
+    const versionsReordered = [versionV3, versionV1, versionV2];
+    const result3 = determineLatestDocumentVersion(versionsReordered);
+    expect(result3.versionId).toBe("v3-uuid-003");
+    expect(result3.versionNumber).toBe(3);
+
+    // 検証: バージョン番号の大小が判定基準となることを確認
+    const versionWithHigherNumberButLowerPriority = {
+      versionId: "v4-uuid-004",
+      versionNumber: 4,
+      documentId: "doc-001",
+      content: "Even newer version",
+      createdAt: commonTimestamp,
+      updatedAt: commonTimestamp,
+      metadata: {
         priority: 1,
-        effectiveFrom: new Date('2024-01-01T00:00:00Z'),
-        effectiveTo: new Date('2024-12-31T23:59:59Z'),
-        isActive: false
+        status: "active",
       },
-      {
-        versionId: 'version-b-002',
-        proposalId: 'proposal-789',
-        versionNumber: 'B',
-        priority: 2,
-        effectiveFrom: new Date('2024-01-01T00:00:00Z'),
-        effectiveTo: new Date('2024-12-31T23:59:59Z'),
-        isActive: true
-      },
-      {
-        versionId: 'version-c-003',
-        proposalId: 'proposal-789',
-        versionNumber: 'C',
-        priority: 3,
-        effectiveFrom: new Date('2024-01-01T00:00:00Z'),
-        effectiveTo: new Date('2024-12-31T23:59:59Z'),
-        isActive: true
-      }
-    ];
+    };
 
-    const result_pattern3 = determineLatestVersionByPriority(versions_pattern3, 'proposal-789');
-    expect(result_pattern3).toEqual({
-      versionId: 'version-b-002',
-      versionNumber: 'B',
-      priority: 2
-    });
-
-    // テストケース4: 複数バージョンが同一優先度の場合、エラーを検出
-    const versions_pattern4 = [
-      {
-        versionId: 'version-a-001',
-        proposalId: 'proposal-error-1',
-        versionNumber: 'A',
-        priority: 1,
-        effectiveFrom: new Date('2024-01-01T00:00:00Z'),
-        effectiveTo: new Date('2024-12-31T23:59:59Z'),
-        isActive: true
-      },
-      {
-        versionId: 'version-b-002',
-        proposalId: 'proposal-error-1',
-        versionNumber: 'B',
-        priority: 1,
-        effectiveFrom: new Date('2024-01-01T00:00:00Z'),
-        effectiveTo: new Date('2024-12-31T23:59:59Z'),
-        isActive: true
-      }
-    ];
-
-    expect(() => {
-      determineLatestVersionByPriority(versions_pattern4, 'proposal-error-1');
-    }).toThrow(/優先度/);
-
-    // テストケース5: バージョンが存在しない場合、エラーを検出
-    const versions_pattern5: any[] = [];
-
-    expect(() => {
-      determineLatestVersionByPriority(versions_pattern5, 'proposal-not-found');
-    }).toThrow(/バージョン/);
-
-    // テストケース6: 複合優先度シナリオ - バージョンB(優先度1), バージョンD(優先度1.5), バージョンA(優先度2) - バージョンBが最新版として特定されるべき
-    const versions_pattern6 = [
-      {
-        versionId: 'version-a-001',
-        proposalId: 'proposal-complex',
-        versionNumber: 'A',
-        priority: 2,
-        effectiveFrom: new Date('2024-01-01T00:00:00Z'),
-        effectiveTo: new Date('2024-12-31T23:59:59Z'),
-        isActive: true
-      },
-      {
-        versionId: 'version-b-002',
-        proposalId: 'proposal-complex',
-        versionNumber: 'B',
-        priority: 1,
-        effectiveFrom: new Date('2024-01-01T00:00:00Z'),
-        effectiveTo: new Date('2024-12-31T23:59:59Z'),
-        isActive: true
-      },
-      {
-        versionId: 'version-d-004',
-        proposalId: 'proposal-complex',
-        versionNumber: 'D',
-        priority: 1.5,
-        effectiveFrom: new Date('2024-01-01T00:00:00Z'),
-        effectiveTo: new Date('2024-12-31T23:59:59Z'),
-        isActive: true
-      }
-    ];
-
-    const result_pattern6 = determineLatestVersionByPriority(versions_pattern6, 'proposal-complex');
-    expect(result_pattern6).toEqual({
-      versionId: 'version-b-002',
-      versionNumber: 'B',
-      priority: 1
-    });
+    const versionsWithV4 = [versionV1, versionV2, versionV3, versionWithHigherNumberButLowerPriority];
+    const result4 = determineLatestDocumentVersion(versionsWithV4);
+    expect(result4.versionNumber).toBe(4);
+    expect(result4.versionId).toBe("v4-uuid-004");
   });
 });

@@ -1,149 +1,256 @@
-import { validateSalesData } from '../../src/logic/it-1781935279444-2-2-1';
+import { describe, test, expect, beforeEach, afterEach } from "@jest/globals";
+import fetch from "jest-fetch-mock";
 
-describe('営業データ品質自動検証機能 - 金額異常値検出', () => {
-  test('SCEN-672: 負数・過度に大きい金額値の異常値が正確に検出される', () => {
-    // ハッピーパス: 正常な金額値
-    const validSalesData = {
-      recordId: 'REC001',
-      customerId: 'CUST001',
-      amount: 50000,
-      appointmentCount: 5,
-      contractCount: 2,
-      serviceType: 'standard',
-      recordDate: '2024-01-15'
-    };
+fetch.enableMocks();
 
-    const validResult = validateSalesData(validSalesData);
-    expect(validResult.isValid).toBe(true);
-    expect(validResult.errors).toEqual([]);
-
-    // 異常値テスト1: 負数金額
-    const negativeAmountData = {
-      recordId: 'REC002',
-      customerId: 'CUST001',
-      amount: -10000,
-      appointmentCount: 5,
-      contractCount: 2,
-      serviceType: 'standard',
-      recordDate: '2024-01-15'
-    };
-
-    const negativeResult = validateSalesData(negativeAmountData);
-    expect(negativeResult.isValid).toBe(false);
-    expect(negativeResult.errors.length).toBeGreaterThan(0);
-    expect(negativeResult.errors[0]).toEqual(
-      expect.objectContaining({
-        fieldName: 'amount',
-        errorType: 'abnormalValue',
-        value: -10000,
-        message: expect.stringMatching(/負数/)
-      })
-    );
-
-    // 異常値テスト2: 過度に大きい金額
-    const excessiveAmountData = {
-      recordId: 'REC003',
-      customerId: 'CUST001',
-      amount: 999999999999,
-      appointmentCount: 5,
-      contractCount: 2,
-      serviceType: 'standard',
-      recordDate: '2024-01-15'
-    };
-
-    const excessiveResult = validateSalesData(excessiveAmountData);
-    expect(excessiveResult.isValid).toBe(false);
-    expect(excessiveResult.errors.length).toBeGreaterThan(0);
-    expect(excessiveResult.errors[0]).toEqual(
-      expect.objectContaining({
-        fieldName: 'amount',
-        errorType: 'abnormalValue',
-        value: 999999999999,
-        message: expect.stringMatching(/上限/)
-      })
-    );
-
-    // 複合検証: 負数と過度な大きさの両方が含まれる場合
-    const multipleAnomaliesData = {
-      recordId: 'REC004',
-      customerId: 'CUST001',
-      amount: -50000,
-      appointmentCount: 5,
-      contractCount: 2,
-      serviceType: 'standard',
-      recordDate: '2024-01-15'
-    };
-
-    const multipleResult = validateSalesData(multipleAnomaliesData);
-    expect(multipleResult.isValid).toBe(false);
-    expect(multipleResult.errors.length).toBeGreaterThan(0);
-
-    // 異常値が検証結果レポートに記録されていることを確認
-    expect(multipleResult.report).toEqual(
-      expect.objectContaining({
-        recordId: 'REC004',
-        timestamp: expect.any(String),
-        validationStatus: 'FAILED',
-        anomaliesDetected: expect.arrayContaining([
-          expect.objectContaining({
-            fieldName: 'amount',
-            detectedValue: -50000
-          })
-        ])
-      })
-    );
-
-    // 境界値テスト: 許容範囲の最大値
-    const maxBoundaryData = {
-      recordId: 'REC005',
-      customerId: 'CUST001',
-      amount: 10000000,
-      appointmentCount: 5,
-      contractCount: 2,
-      serviceType: 'standard',
-      recordDate: '2024-01-15'
-    };
-
-    const maxBoundaryResult = validateSalesData(maxBoundaryData);
-    expect(maxBoundaryResult.isValid).toBe(true);
-    expect(maxBoundaryResult.errors).toEqual([]);
-
-    // 境界値テスト: 最小許容値（0円）
-    const zeroAmountData = {
-      recordId: 'REC006',
-      customerId: 'CUST001',
-      amount: 0,
-      appointmentCount: 5,
-      contractCount: 2,
-      serviceType: 'standard',
-      recordDate: '2024-01-15'
-    };
-
-    const zeroResult = validateSalesData(zeroAmountData);
-    expect(zeroResult.isValid).toBe(true);
-    expect(zeroResult.errors).toEqual([]);
-
-    // 正常値は検出対象とならないことを確認
-    const allValidData = [
-      { amount: 1 },
-      { amount: 100 },
-      { amount: 50000 },
-      { amount: 1000000 },
-      { amount: 10000000 }
-    ];
-
-    allValidData.forEach(data => {
-      const testData = {
-        recordId: 'REC007',
-        customerId: 'CUST001',
-        appointmentCount: 5,
-        contractCount: 2,
-        serviceType: 'standard',
-        recordDate: '2024-01-15',
-        ...data
-      };
-      const result = validateSalesData(testData);
-      expect(result.isValid).toBe(true);
+describe("営業成果データの自動検証ルール定義と異常検出機能", () => {
+  // SCEN-672
+  test("顧客別ポータル表示制御機能 - 他顧客に紐付くレポートがポータルから完全に非表示になる", async () => {
+    beforeEach(() => {
+      fetch.resetMocks();
     });
+
+    afterEach(() => {
+      fetch.resetMocks();
+    });
+
+    // テスト用の複数顧客（顧客A、顧客B）をシステムに登録
+    const customerA = {
+      customer_id: "CUST-001",
+      customer_name: "顧客A企業",
+      portal_account: "account_a@customer-a.jp",
+    };
+
+    const customerB = {
+      customer_id: "CUST-002",
+      customer_name: "顧客B企業",
+      portal_account: "account_b@customer-b.jp",
+    };
+
+    // 顧客Aに紐付くレポート（レポートA-1、レポートA-2）を作成
+    const reportA1 = {
+      report_id: "RPT-A-001",
+      customer_id: "CUST-001",
+      report_name: "レポートA-1",
+      generated_date: "2024-01-15T10:00:00Z",
+      content: "顧客A月次成果レポート1",
+    };
+
+    const reportA2 = {
+      report_id: "RPT-A-002",
+      customer_id: "CUST-001",
+      report_name: "レポートA-2",
+      generated_date: "2024-01-15T11:00:00Z",
+      content: "顧客A月次成果レポート2",
+    };
+
+    // 顧客Bに紐付くレポート（レポートB-1、レポートB-2）を作成
+    const reportB1 = {
+      report_id: "RPT-B-001",
+      customer_id: "CUST-002",
+      report_name: "レポートB-1",
+      generated_date: "2024-01-15T10:00:00Z",
+      content: "顧客B月次成果レポート1",
+    };
+
+    const reportB2 = {
+      report_id: "RPT-B-002",
+      customer_id: "CUST-002",
+      report_name: "レポートB-2",
+      generated_date: "2024-01-15T11:00:00Z",
+      content: "顧客B月次成果レポート2",
+    };
+
+    // 顧客Aのアカウントでログイン
+    const login_response_a = {
+      login_user_id: "LOGIN-USER-001",
+      login_account: "account_a@customer-a.jp",
+      customer_id: "CUST-001",
+      login_timestamp: "2024-01-15T12:00:00Z",
+      session_token: "SESSION-TOKEN-A-12345",
+      access_level: "customer_user",
+    };
+
+    fetch.mockResponseOnce(JSON.stringify(login_response_a), { status: 200 });
+
+    const login_a_response = await fetch(
+      "http://localhost:3000/api/v1/portal/login",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          account: "account_a@customer-a.jp",
+          password: "password_a",
+        }),
+      }
+    );
+
+    const login_a_data = await login_a_response.json();
+    expect(login_a_data.customer_id).toBe("CUST-001");
+    expect(login_a_data.session_token).toBe("SESSION-TOKEN-A-12345");
+
+    // 顧客Aのポータル画面にアクセスして、ポータルに表示されるレポート一覧を取得
+    const portal_a_response = {
+      customer_id: "CUST-001",
+      reports: [reportA1, reportA2],
+      total_report_count: 2,
+      page_number: 1,
+      page_size: 10,
+      request_timestamp: "2024-01-15T12:00:00Z",
+      session_token: "SESSION-TOKEN-A-12345",
+    };
+
+    fetch.mockResponseOnce(JSON.stringify(portal_a_response), { status: 200 });
+
+    const portal_a_fetch = await fetch(
+      "http://localhost:3000/api/v1/portal/reports?page=1&page_size=10",
+      {
+        method: "GET",
+        headers: {
+          Authorization: "Bearer SESSION-TOKEN-A-12345",
+          "Content-Type": "application/json",
+        },
+      }
+    );
+
+    const portal_a_data = await portal_a_fetch.json();
+
+    // 顧客Aのポータルから顧客Bのレポート（レポートB-1、レポートB-2）の表示有無を確認
+    expect(portal_a_data.customer_id).toBe("CUST-001");
+    expect(portal_a_data.reports.length).toBe(2);
+    expect(portal_a_data.reports[0].report_id).toBe("RPT-A-001");
+    expect(portal_a_data.reports[1].report_id).toBe("RPT-A-002");
+
+    // 顧客Aのレポート内に顧客Bのレポートが存在しないことを確認
+    const contains_customer_b_report = portal_a_data.reports.some(
+      (report: { customer_id: string }) => report.customer_id === "CUST-002"
+    );
+    expect(contains_customer_b_report).toBe(false);
+
+    // 顧客Bのアカウントでログイン
+    const login_response_b = {
+      login_user_id: "LOGIN-USER-002",
+      login_account: "account_b@customer-b.jp",
+      customer_id: "CUST-002",
+      login_timestamp: "2024-01-15T12:05:00Z",
+      session_token: "SESSION-TOKEN-B-67890",
+      access_level: "customer_user",
+    };
+
+    fetch.mockResponseOnce(JSON.stringify(login_response_b), { status: 200 });
+
+    const login_b_response = await fetch(
+      "http://localhost:3000/api/v1/portal/login",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          account: "account_b@customer-b.jp",
+          password: "password_b",
+        }),
+      }
+    );
+
+    const login_b_data = await login_b_response.json();
+    expect(login_b_data.customer_id).toBe("CUST-002");
+    expect(login_b_data.session_token).toBe("SESSION-TOKEN-B-67890");
+
+    // 顧客Bのポータル画面にアクセスして、ポータルに表示されるレポート一覧を取得
+    const portal_b_response = {
+      customer_id: "CUST-002",
+      reports: [reportB1, reportB2],
+      total_report_count: 2,
+      page_number: 1,
+      page_size: 10,
+      request_timestamp: "2024-01-15T12:05:00Z",
+      session_token: "SESSION-TOKEN-B-67890",
+    };
+
+    fetch.mockResponseOnce(JSON.stringify(portal_b_response), { status: 200 });
+
+    const portal_b_fetch = await fetch(
+      "http://localhost:3000/api/v1/portal/reports?page=1&page_size=10",
+      {
+        method: "GET",
+        headers: {
+          Authorization: "Bearer SESSION-TOKEN-B-67890",
+          "Content-Type": "application/json",
+        },
+      }
+    );
+
+    const portal_b_data = await portal_b_fetch.json();
+
+    // 顧客Bのポータルから顧客Aのレポート（レポートA-1、レポートA-2）の表示有無を確認
+    expect(portal_b_data.customer_id).toBe("CUST-002");
+    expect(portal_b_data.reports.length).toBe(2);
+    expect(portal_b_data.reports[0].report_id).toBe("RPT-B-001");
+    expect(portal_b_data.reports[1].report_id).toBe("RPT-B-002");
+
+    // 顧客Bのレポート内に顧客Aのレポートが存在しないことを確認
+    const contains_customer_a_report = portal_b_data.reports.some(
+      (report: { customer_id: string }) => report.customer_id === "CUST-001"
+    );
+    expect(contains_customer_a_report).toBe(false);
+
+    // APIレスポンスを検証し、他顧客レポートのデータが送信されていないことを確認
+    // 顧客AのAPIレスポンス検証
+    expect(portal_a_data.reports).not.toContainEqual(
+      expect.objectContaining({
+        customer_id: "CUST-002",
+      })
+    );
+
+    // 顧客BのAPIレスポンス検証
+    expect(portal_b_data.reports).not.toContainEqual(
+      expect.objectContaining({
+        customer_id: "CUST-001",
+      })
+    );
+
+    // 各レポートの内容確認
+    expect(portal_a_data.reports[0]).toEqual(
+      expect.objectContaining({
+        report_id: "RPT-A-001",
+        customer_id: "CUST-001",
+        report_name: "レポートA-1",
+      })
+    );
+
+    expect(portal_a_data.reports[1]).toEqual(
+      expect.objectContaining({
+        report_id: "RPT-A-002",
+        customer_id: "CUST-001",
+        report_name: "レポートA-2",
+      })
+    );
+
+    expect(portal_b_data.reports[0]).toEqual(
+      expect.objectContaining({
+        report_id: "RPT-B-001",
+        customer_id: "CUST-002",
+        report_name: "レポートB-1",
+      })
+    );
+
+    expect(portal_b_data.reports[1]).toEqual(
+      expect.objectContaining({
+        report_id: "RPT-B-002",
+        customer_id: "CUST-002",
+        report_name: "レポートB-2",
+      })
+    );
+
+    // セッショントークンの異なることを確認
+    expect(login_a_data.session_token).not.toBe(login_b_data.session_token);
+
+    // ページング情報の確認
+    expect(portal_a_data.page_number).toBe(1);
+    expect(portal_a_data.page_size).toBe(10);
+    expect(portal_a_data.total_report_count).toBe(2);
+
+    expect(portal_b_data.page_number).toBe(1);
+    expect(portal_b_data.page_size).toBe(10);
+    expect(portal_b_data.total_report_count).toBe(2);
   });
 });

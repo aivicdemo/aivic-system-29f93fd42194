@@ -1,58 +1,59 @@
-import { validateInvoiceApproval } from '../../src/logic/it-1-2-1';
+import { describe, test, expect, beforeEach } from "@jest/globals";
+import { recalculateAndAdjustBillingAmount } from "../../src/logic/it-1781935279444-2-1-1";
 
-describe('請求額検証・承認判定機能', () => {
-  test('SCEN-973: 計算結果が手順書の基準を満たさない場合、不承認と判定して理由を返す', () => {
-    // 基本情報
-    const customer_id = 'CUST-001';
-    const service_id = 'SRV-APPT';
-    const calculation_amount = 45000; // 基準値 50000 未満
-    const standard_amount = 50000;
-    const calculation_logic = 'appointmentCount * unitPrice'; // 単価ルール
-    const unit_price = 5000;
-    const appointment_count = 9; // 9件 * 5000円 = 45000円
-    const discount_rate = 0;
-    const calculation_result_amount = 45000;
-    const approval_threshold_amount = 50000;
+describe("顧客異議に基づく再計算・修正判定", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
 
-    const invoice_data = {
-      customer_id,
-      service_id,
-      calculation_amount,
-      calculation_logic,
-      unit_price,
-      appointment_count,
-      discount_rate,
-      calculation_result_amount,
-      approval_threshold_amount,
-    };
+  // SCEN-973
+  test("顧客異議から算出される修正請求額が再計算ルール境界値に該当し、正確に新金額が決定される", () => {
+    // テストデータ設定：顧客異議が登録された請求レコード
+    const originalBillingAmount = 150000; // 元請求額: 150,000円
+    const customerObjectionAmount = 140000; // 顧客異議に基づく修正後金額: 140,000円
+    const billingAdjustmentThreshold = 10000; // 再計算ルール境界値: 10,000円未満は調整対象、10,000円以上は別プロセス
+    const calculatedDifference = originalBillingAmount - customerObjectionAmount; // 差分: 10,000円
 
-    const result = validateInvoiceApproval(invoice_data);
+    // 再計算ルール境界値ちょうど（10,000円）に該当するケース
+    expect(calculatedDifference).toBe(10000);
 
-    // 不承認ステータス確認
-    expect(result.approval_status).toBe('不承認');
-
-    // 理由メッセージ確認
-    expect(result.approval_reason).toContain('計算結果が手順書の基準を満たしていません');
-
-    // エラーコード確認
-    expect(result.error_code).toBe('THRESHOLD_NOT_MET');
-
-    // 基準値との比較情報確認
-    expect(result.reason_details).toEqual({
-      calculated_amount: 45000,
-      required_minimum_amount: 50000,
-      shortfall_amount: 5000,
-      calculation_basis: 'appointmentCount * unitPrice',
-      applied_unit_price: 5000,
-      transaction_count: 9,
+    // 修正請求額の再計算処理を実行
+    const result = recalculateAndAdjustBillingAmount({
+      originalBillingAmount,
+      customerObjectionAmount,
+      billingAdjustmentThreshold,
+      customerId: "CUST-001",
+      billingRecordId: "BIL-202401-001",
+      objectionReason: "過剰計上と割引漏れ",
+      adjustmentProcessedAt: "2024-01-15T10:30:00Z",
     });
 
-    // 承認コードがnullであることを確認
-    expect(result.approval_code).toBeNull();
+    // システムが正しいルール分岐を選択したことを確認
+    // 差分が境界値（10,000円）以上のため、別プロセスが適用される
+    expect(result.appliedAdjustmentRule).toBe("advanced_review_required");
 
-    // タイムスタンプが ISO 形式であること確認
-    expect(result.validated_at).toMatch(
-      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/
-    );
+    // 新しい請求金額が正確に計算・決定されたことを確認
+    expect(result.revisedBillingAmount).toBe(140000);
+
+    // 修正後の請求レコードが正常に更新されたことを検証
+    expect(result.billingRecordStatus).toBe("adjustment_approved");
+
+    // 修正金額の根拠を検証
+    expect(result.adjustmentJustification).toContain("10000");
+
+    // 監査ログに修正履歴が正確に記録されていることを確認
+    expect(result.auditLog).toBeDefined();
+    expect(result.auditLog.action).toBe("billing_adjustment");
+    expect(result.auditLog.previousAmount).toBe(150000);
+    expect(result.auditLog.newAmount).toBe(140000);
+    expect(result.auditLog.adjustmentReason).toBe("customer_objection");
+    expect(result.auditLog.timestamp).toBe("2024-01-15T10:30:00Z");
+    expect(result.auditLog.customerId).toBe("CUST-001");
+    expect(result.auditLog.billingRecordId).toBe("BIL-202401-001");
+    expect(result.auditLog.recordedAt).toBeDefined();
+
+    // トレーサビリティが確保されていることを確認
+    expect(result.traceabilityId).toBeDefined();
+    expect(result.traceabilityId).toMatch(/^TRACE-/);
   });
 });

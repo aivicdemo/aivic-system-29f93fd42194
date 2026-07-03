@@ -1,100 +1,225 @@
-import { describe, test, expect, beforeEach, afterEach } from '@jest/globals';
-import { determineMonthlySummarizationPeriod } from '../../src/logic/it-1-br-1781935279444-1-2-1';
+import { validateSalesDataIntegrity } from "../../src/logic/it-1781935279444-2-2-1";
 
-describe('月次レポート作成期間の自動確定と対象データ抽出', () => {
-  // SCEN-1050: 月の最終秒が正確に集計対象期間の上限境界として確定される
-  test('SCEN-1050: 月末23:59:59を期間終了時刻とする場合、集計対象期間が正確に確定され境界判定が正確に行われること', () => {
-    // 準備: テストデータとして月末23:59:59を期間終了時刻に設定
-    const reportStartDate = new Date('2024-01-01T00:00:00Z');
-    const reportEndDate = new Date('2024-01-31T23:59:59Z');
-    const monthlyReportCondition = {
-      period_start_datetime: reportStartDate,
-      period_end_datetime: reportEndDate,
-      target_month: '2024-01'
+describe("営業データの完全性・正確性自動検証", () => {
+  test("SCEN-1050: 営業データに矛盾する値が含まれている場合、矛盾内容が検出・通知される", () => {
+    // テストデータ: 契約金額と請求金額が不一致
+    const sales_data_with_contradiction = {
+      sales_data_id: "SD-2024-001",
+      customer_id: "CUST-001",
+      sales_date: "2024-01-15",
+      contract_amount: 1000000,
+      billing_amount: 1200000,
+      contract_start_date: "2024-01-01",
+      contract_end_date: "2024-12-31",
+      service_type: "advisory",
+      created_at: "2024-01-15T11:00:00Z",
+      created_by: "sales_user_001",
     };
 
-    // 営業データセット: 1日00:00:00から月末23:59:59までのデータを登録
-    const salesDataWithinPeriod = [
-      {
-        id: 'data_0001',
-        customer_id: 'cust_001',
-        activity_datetime: new Date('2024-01-01T00:00:00Z'),
-        activity_type: 'appointment',
-        value: 1
-      },
-      {
-        id: 'data_0002',
-        customer_id: 'cust_002',
-        activity_datetime: new Date('2024-01-15T12:30:45Z'),
-        activity_type: 'deal',
-        value: 5000
-      },
-      {
-        id: 'data_0003',
-        customer_id: 'cust_003',
-        activity_datetime: new Date('2024-01-31T23:59:59Z'),
-        activity_type: 'appointment',
-        value: 2
-      }
-    ];
+    const result = validateSalesDataIntegrity(sales_data_with_contradiction);
 
-    // 期間直前秒（月末23:59:58）のデータ - これは含まれる
-    const dataBefore = {
-      id: 'data_before_boundary',
-      customer_id: 'cust_004',
-      activity_datetime: new Date('2024-01-31T23:59:58Z'),
-      activity_type: 'response',
-      value: 1
-    };
-
-    // 期間直後のデータ（翌月）- これは除外される
-    const dataAfter = {
-      id: 'data_after_boundary',
-      customer_id: 'cust_005',
-      activity_datetime: new Date('2024-02-01T00:00:00Z'),
-      activity_type: 'appointment',
-      value: 1
-    };
-
-    // 月次レポート作成機能を実行し、集計対象期間の自動確定処理を開始
-    const result = determineMonthlySummarizationPeriod({
-      base_report_condition: monthlyReportCondition,
-      all_sales_data: [
-        ...salesDataWithinPeriod,
-        dataBefore,
-        dataAfter
-      ]
+    // (1) 矛盾内容が具体的に特定・ログされる
+    expect(result.validation_status).toBe("failed");
+    expect(result.contradictions).toHaveLength(1);
+    expect(result.contradictions[0]).toEqual({
+      field_1: "contract_amount",
+      field_2: "billing_amount",
+      value_1: 1000000,
+      value_2: 1200000,
+      contradiction_type: "amount_mismatch",
+      detail: "契約金額1000000と請求金額1200000の不一致",
     });
 
-    // システムが確定した集計対象期間の開始時刻と終了時刻をログから取得
-    expect(result.determined_period_start).toBe('2024-01-01T00:00:00Z');
-    expect(result.determined_period_end).toBe('2024-01-31T23:59:59Z');
+    // (2) エラーメッセージが明確に表示される
+    expect(result.error_message).toMatch(/契約金額/);
+    expect(result.error_message).toMatch(/請求金額/);
+    expect(result.error_message).toMatch(/不一致/);
 
-    // 期間開始の1日00時00分00秒から月の最終秒までのすべてのデータが集計対象として含まれる
-    expect(result.extracted_data_count).toBe(4); // 3件の期間内データ + 1件の23:59:58データ
-    expect(result.excluded_data_count).toBe(1); // 翌月のデータは除外
+    // (3) 関連する営業担当者・管理者に対して矛盾内容の通知が送信される
+    expect(result.notifications).toHaveLength(2);
+    expect(result.notifications[0].recipient_type).toBe("sales_user");
+    expect(result.notifications[0].recipient_id).toBe("sales_user_001");
+    expect(result.notifications[0].notification_channel).toBe("email");
+    expect(result.notifications[0].notification_content).toMatch(/矛盾/);
 
-    // 期間の直前秒（月の最終秒の1秒前）と直後のデータが正確に境界判定されていることを確認
-    expect(result.boundary_before_included).toBe(true); // 23:59:58は含まれる
-    expect(result.boundary_after_excluded).toBe(true); // 2024-02-01は除外される
+    expect(result.notifications[1].recipient_type).toBe("admin");
+    expect(result.notifications[1].notification_channel).toMatch(/(system_alert|dashboard)/);
 
-    // 抽出されたデータの時系列順序が正確であることを検証
-    const extractedRecords = result.extracted_records;
-    expect(extractedRecords[0].activity_datetime).toBe('2024-01-01T00:00:00Z');
-    expect(extractedRecords[1].activity_datetime).toBe('2024-01-15T12:30:45Z');
-    expect(extractedRecords[2].activity_datetime).toBe('2024-01-31T23:59:58Z');
-    expect(extractedRecords[3].activity_datetime).toBe('2024-01-31T23:59:59Z');
+    // (4) 不正なデータが請求処理に進まないようブロックされる
+    expect(result.billing_process_blocked).toBe(true);
+    expect(result.block_reason).toBe("data_contradiction_detected");
+  });
 
-    // レポート内の集計件数がデータベースの登録件数と完全に一致することを確認
-    const expectedRecordCountInPeriod = 4;
-    expect(result.extracted_data_count).toBe(expectedRecordCountInPeriod);
-    expect(result.summary_record_count).toBe(expectedRecordCountInPeriod);
+  test("SCEN-1050: 契約期間が逆順の矛盾データの場合、矛盾が検出・ログされる", () => {
+    const sales_data_with_date_contradiction = {
+      sales_data_id: "SD-2024-002",
+      customer_id: "CUST-002",
+      sales_date: "2024-01-15",
+      contract_amount: 1000000,
+      billing_amount: 1000000,
+      contract_start_date: "2024-12-31",
+      contract_end_date: "2024-01-01",
+      service_type: "advisory",
+      created_at: "2024-01-15T11:00:00Z",
+      created_by: "sales_user_002",
+    };
 
-    // 月末23:59:59が正確に上限境界として確定されたことを確認
-    expect(result.determined_period_end).toBe('2024-01-31T23:59:59Z');
-    expect(result.is_month_end_boundary_precise).toBe(true);
+    const result = validateSalesDataIntegrity(sales_data_with_date_contradiction);
 
-    // 翌月のデータが確実に除外されたことを確認
-    expect(result.next_month_data_excluded).toBe(true);
+    // 契約期間逆順の矛盾を検出
+    expect(result.validation_status).toBe("failed");
+    expect(result.contradictions).toHaveLength(1);
+    expect(result.contradictions[0]).toEqual({
+      field_1: "contract_start_date",
+      field_2: "contract_end_date",
+      value_1: "2024-12-31",
+      value_2: "2024-01-01",
+      contradiction_type: "date_order_invalid",
+      detail: "契約開始日2024-12-31が契約終了日2024-01-01より後",
+    });
+
+    expect(result.error_message).toMatch(/契約開始日/);
+    expect(result.error_message).toMatch(/契約終了日/);
+    expect(result.error_message).toMatch(/逆順/);
+
+    expect(result.billing_process_blocked).toBe(true);
+    expect(result.block_reason).toBe("data_contradiction_detected");
+  });
+
+  test("SCEN-1050: 矛盾のない正常なデータの場合、検証成功になり通知は送信されない", () => {
+    const sales_data_valid = {
+      sales_data_id: "SD-2024-003",
+      customer_id: "CUST-003",
+      sales_date: "2024-01-15",
+      contract_amount: 1000000,
+      billing_amount: 1000000,
+      contract_start_date: "2024-01-01",
+      contract_end_date: "2024-12-31",
+      service_type: "advisory",
+      created_at: "2024-01-15T11:00:00Z",
+      created_by: "sales_user_003",
+    };
+
+    const result = validateSalesDataIntegrity(sales_data_valid);
+
+    // (1) 検証ステータスが成功
+    expect(result.validation_status).toBe("passed");
+
+    // (2) 矛盾が検出されない
+    expect(result.contradictions).toHaveLength(0);
+
+    // (3) エラーメッセージは空
+    expect(result.error_message).toBe("");
+
+    // (4) 通知は送信されない
+    expect(result.notifications).toHaveLength(0);
+
+    // (5) 請求処理がブロックされない
+    expect(result.billing_process_blocked).toBe(false);
+  });
+
+  test("SCEN-1050: 複数の矛盾がある場合、すべての矛盾が検出・ログされる", () => {
+    const sales_data_multiple_contradictions = {
+      sales_data_id: "SD-2024-004",
+      customer_id: "CUST-004",
+      sales_date: "2024-01-15",
+      contract_amount: 1000000,
+      billing_amount: 1200000,
+      contract_start_date: "2024-12-31",
+      contract_end_date: "2024-01-01",
+      service_type: "advisory",
+      created_at: "2024-01-15T11:00:00Z",
+      created_by: "sales_user_004",
+    };
+
+    const result = validateSalesDataIntegrity(sales_data_multiple_contradictions);
+
+    // すべての矛盾が検出される
+    expect(result.validation_status).toBe("failed");
+    expect(result.contradictions.length).toBeGreaterThanOrEqual(2);
+
+    // 金額不一致が含まれる
+    const amount_contradiction = result.contradictions.find(
+      (c) => c.contradiction_type === "amount_mismatch"
+    );
+    expect(amount_contradiction).toBeDefined();
+    expect(amount_contradiction?.detail).toMatch(/契約金額/);
+
+    // 日付順序不正が含まれる
+    const date_contradiction = result.contradictions.find(
+      (c) => c.contradiction_type === "date_order_invalid"
+    );
+    expect(date_contradiction).toBeDefined();
+    expect(date_contradiction?.detail).toMatch(/契約開始日/);
+
+    // 請求処理がブロックされる
+    expect(result.billing_process_blocked).toBe(true);
+  });
+
+  test("SCEN-1050: 矛盾が検出された場合、notify 関数が呼ばれてエラー通知が送信される", () => {
+    const sales_data_contradiction = {
+      sales_data_id: "SD-2024-005",
+      customer_id: "CUST-005",
+      sales_date: "2024-01-15",
+      contract_amount: 500000,
+      billing_amount: 750000,
+      contract_start_date: "2024-01-01",
+      contract_end_date: "2024-06-30",
+      service_type: "consulting",
+      created_at: "2024-01-15T11:00:00Z",
+      created_by: "sales_user_005",
+    };
+
+    const result = validateSalesDataIntegrity(sales_data_contradiction);
+
+    // 通知オブジェクトが構造化されている
+    expect(result.notifications).toHaveLength(2);
+
+    // 営業ユーザーへのメール通知
+    const email_notification = result.notifications.find(
+      (n) => n.notification_channel === "email"
+    );
+    expect(email_notification).toBeDefined();
+    expect(email_notification?.recipient_type).toBe("sales_user");
+    expect(email_notification?.timestamp).toMatch(/\d{4}-\d{2}-\d{2}T/);
+
+    // 管理者へのシステム通知
+    const admin_notification = result.notifications.find(
+      (n) => n.recipient_type === "admin"
+    );
+    expect(admin_notification).toBeDefined();
+    expect(admin_notification?.priority).toMatch(/(high|urgent)/);
+  });
+
+  test("SCEN-1050: 矛盾検出時に呼ばれる blockBillingProcess が正しく実行されることを検証", () => {
+    const sales_data_contradiction = {
+      sales_data_id: "SD-2024-006",
+      customer_id: "CUST-006",
+      sales_date: "2024-01-20",
+      contract_amount: 2000000,
+      billing_amount: 2500000,
+      contract_start_date: "2024-02-01",
+      contract_end_date: "2024-08-31",
+      service_type: "advisory",
+      created_at: "2024-01-20T14:30:00Z",
+      created_by: "sales_user_006",
+    };
+
+    const result = validateSalesDataIntegrity(sales_data_contradiction);
+
+    // ブロック情報が記録される
+    expect(result.billing_process_blocked).toBe(true);
+    expect(result.block_reason).toBe("data_contradiction_detected");
+    expect(result.blocked_at).toMatch(/\d{4}-\d{2}-\d{2}T/);
+
+    // ブロック対象の請求処理 ID が記録される (該当フィールドがあれば)
+    expect(result.sales_data_id).toBe("SD-2024-006");
+
+    // 矛盾の詳細がログされている
+    expect(result.contradictions.length).toBeGreaterThan(0);
+    result.contradictions.forEach((contradiction) => {
+      expect(contradiction.detail).toBeDefined();
+      expect(contradiction.detail.length).toBeGreaterThan(0);
+    });
   });
 });

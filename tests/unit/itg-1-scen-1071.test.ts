@@ -1,87 +1,139 @@
-import { notifyContractOrDeliverableChange } from '../../src/logic/it-1-1-1';
+import { describe, it, expect, beforeEach } from "@jest/globals";
+import {
+  validateSalesDataForBilling,
+} from "../../src/logic/it-1781935279444-2-1-1";
 
-describe('営業成果データの自動検証ルール定義と異常検出機能', () => {
-  // SCEN-1071
-  test('契約内容または成果物納期の変更を検知し、顧客企業営業責任者へメール通知が送信される', () => {
-    const existing_contract = {
-      contract_id: 'CT-2024-001',
-      customer_name: 'テスト顧客企業',
-      contract_amount: 1000000,
-      delivery_date: '2024-06-30',
-      responsible_email: 'sales@customer.example.com',
-      responsible_name: '営業責任者 太郎',
+describe("営業データ入力時の品質検証ルール定義・実行機能", () => {
+  // SCEN-1071: [normal] 請求対象項目自動抽出・検証機能 - 営業データから抽出した入力値が全検証ルールに合致する場合に合格と判定される
+  it("should return PASS status when all sales data matches all validation rules", () => {
+    const validSalesData = {
+      customer_id: "CUST001",
+      customer_name: "顧客企業A",
+      contact_date: "2024-01-15",
+      service_type: "新規営業",
+      appointment_count: 5,
+      deal_count: 2,
+      deal_amount: 150000,
+      sales_rep_id: "REP001",
+      sales_rep_name: "山田太郎",
+      customer_feedback: "positive",
+      contract_status: "confirmed",
+      billing_target_flag: true,
+      data_entry_date: "2024-01-10T09:30:00Z",
     };
 
-    const change_data_contract_amount = {
-      contract_id: 'CT-2024-001',
-      field_name: 'contract_amount',
-      old_value: 1000000,
-      new_value: 1500000,
-      changed_at: '2024-05-15T10:30:00Z',
-      changed_by: 'operator@company.example.com',
-    };
+    const validationRules = [
+      {
+        rule_id: "RULE001",
+        field_name: "customer_id",
+        rule_type: "required",
+        expected_type: "string",
+        allow_null: false,
+      },
+      {
+        rule_id: "RULE002",
+        field_name: "customer_name",
+        rule_type: "required",
+        expected_type: "string",
+        allow_null: false,
+      },
+      {
+        rule_id: "RULE003",
+        field_name: "contact_date",
+        rule_type: "format",
+        expected_type: "string",
+        format_pattern: "YYYY-MM-DD",
+      },
+      {
+        rule_id: "RULE004",
+        field_name: "service_type",
+        rule_type: "enum",
+        expected_type: "string",
+        allowed_values: ["新規営業", "既存営業", "コンサルティング"],
+      },
+      {
+        rule_id: "RULE005",
+        field_name: "appointment_count",
+        rule_type: "range",
+        expected_type: "number",
+        min_value: 0,
+        max_value: 1000,
+      },
+      {
+        rule_id: "RULE006",
+        field_name: "deal_count",
+        rule_type: "range",
+        expected_type: "number",
+        min_value: 0,
+        max_value: 1000,
+      },
+      {
+        rule_id: "RULE007",
+        field_name: "deal_amount",
+        rule_type: "range",
+        expected_type: "number",
+        min_value: 0,
+        max_value: 10000000,
+      },
+      {
+        rule_id: "RULE008",
+        field_name: "sales_rep_id",
+        rule_type: "required",
+        expected_type: "string",
+        allow_null: false,
+      },
+      {
+        rule_id: "RULE009",
+        field_name: "sales_rep_name",
+        rule_type: "required",
+        expected_type: "string",
+        allow_null: false,
+      },
+      {
+        rule_id: "RULE010",
+        field_name: "customer_feedback",
+        rule_type: "enum",
+        expected_type: "string",
+        allowed_values: ["positive", "neutral", "negative", "no_response"],
+      },
+      {
+        rule_id: "RULE011",
+        field_name: "contract_status",
+        rule_type: "enum",
+        expected_type: "string",
+        allowed_values: ["confirmed", "pending", "cancelled"],
+      },
+      {
+        rule_id: "RULE012",
+        field_name: "billing_target_flag",
+        rule_type: "required",
+        expected_type: "boolean",
+        allow_null: false,
+      },
+    ];
 
-    const change_data_delivery_date = {
-      contract_id: 'CT-2024-001',
-      field_name: 'delivery_date',
-      old_value: '2024-06-30',
-      new_value: '2024-07-31',
-      changed_at: '2024-05-15T11:00:00Z',
-      changed_by: 'operator@company.example.com',
-    };
+    const result = validateSalesDataForBilling(validSalesData, validationRules);
 
-    const mail_result_contract = notifyContractOrDeliverableChange(
-      existing_contract,
-      change_data_contract_amount
+    expect(result.status).toBe("PASS");
+    expect(result.judgment).toBe("合格");
+    expect(result.validation_error_count).toBe(0);
+    expect(result.validation_warning_count).toBe(0);
+    expect(result.failed_rules).toEqual([]);
+    expect(result.passed_rules_count).toBe(12);
+    expect(result.total_rules_applied).toBe(12);
+    expect(result.validation_timestamp).toMatch(
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/
     );
+    expect(result.extractable_for_billing).toBe(true);
+    expect(result.validation_details).toBeDefined();
+    expect(Array.isArray(result.validation_details)).toBe(true);
+    expect(result.validation_details.length).toBe(12);
 
-    expect(mail_result_contract).toEqual({
-      success: true,
-      mail_sent: true,
-      recipient_email: 'sales@customer.example.com',
-      recipient_name: '営業責任者 太郎',
-      subject: '【契約内容変更通知】CT-2024-001 テスト顧客企業',
-      change_field: 'contract_amount',
-      old_value: 1000000,
-      new_value: 1500000,
-      changed_at: '2024-05-15T10:30:00Z',
-      mail_body_contains: ['契約金額', '100万円', '150万円', '2024-05-15'],
-      notification_id: expect.any(String),
-      sent_timestamp: expect.any(String),
+    result.validation_details.forEach((detail: any) => {
+      expect(detail.rule_id).toBeDefined();
+      expect(detail.field_name).toBeDefined();
+      expect(detail.validation_result).toBe("pass");
+      expect(detail.error_message).toBeUndefined();
     });
-
-    const mail_result_delivery = notifyContractOrDeliverableChange(
-      existing_contract,
-      change_data_delivery_date
-    );
-
-    expect(mail_result_delivery).toEqual({
-      success: true,
-      mail_sent: true,
-      recipient_email: 'sales@customer.example.com',
-      recipient_name: '営業責任者 太郎',
-      subject: '【成果物納期変更通知】CT-2024-001 テスト顧客企業',
-      change_field: 'delivery_date',
-      old_value: '2024-06-30',
-      new_value: '2024-07-31',
-      changed_at: '2024-05-15T11:00:00Z',
-      mail_body_contains: [
-        '納期',
-        '2024年6月30日',
-        '2024年7月31日',
-        '2024-05-15',
-      ],
-      notification_id: expect.any(String),
-      sent_timestamp: expect.any(String),
-    });
-
-    expect(mail_result_contract.mail_sent).toBe(true);
-    expect(mail_result_delivery.mail_sent).toBe(true);
-    expect(mail_result_contract.recipient_email).toBe(
-      'sales@customer.example.com'
-    );
-    expect(mail_result_delivery.recipient_email).toBe(
-      'sales@customer.example.com'
-    );
   });
 });

@@ -1,159 +1,129 @@
-import { describe, test, expect } from "@jest/globals";
-import { applyDiscountAndCampaignRules } from "../../src/logic/it-1781935279444-1-1-1";
+import { generateMonthlySummary } from '../../src/logic/it-1-br-1781935279444-1-2-1';
 
-describe("営業データ項目のメタデータ管理機能 - 割引・キャンペーン適用判定", () => {
-  // SCEN-899: [normal] 割引・キャンペーン適用判定機能 - 契約条件と成果データが一致し、割引率が正しく計算される
-  test("SCEN-899: 契約条件と成果データが完全に一致した場合、正しい割引率が計算・適用される", () => {
-    // 【前提】契約条件（契約期間、契約金額、顧客区分）が設定され、
-    // 対応する成果データ（売上実績、達成率、キャンペーン参加状況）が入力された状態
-    const contractCondition = {
-      contractId: "CONTRACT-20240115-001",
-      contractPeriodStart: new Date("2024-01-01"),
-      contractPeriodEnd: new Date("2024-12-31"),
-      contractAmount: 1000000,
-      customerCategory: "premium", // 顧客区分：プレミアム
-      baseDiscountRate: 0.1, // 基本割引率：10%
-      campaignCode: "CAMPAIGN-2024-Q1",
-    };
+describe('月次営業成果サマリー自動生成機能', () => {
+  // SCEN-899
+  test('営業データから顧客ごと・サービスごとの成果指標が正しく集計されレポートに反映される', () => {
+    // テストデータ: 複数顧客の営業データを準備
+    const salesData = [
+      // 顧客A のデータ
+      { customerId: 'CUST_A', serviceId: 'SVC_1', revenue: 100000, count: 5, profitRate: 0.20 },
+      { customerId: 'CUST_A', serviceId: 'SVC_2', revenue: 150000, count: 8, profitRate: 0.25 },
+      { customerId: 'CUST_A', serviceId: 'SVC_3', revenue: 80000, count: 3, profitRate: 0.15 },
+      // 顧客B のデータ
+      { customerId: 'CUST_B', serviceId: 'SVC_1', revenue: 120000, count: 6, profitRate: 0.18 },
+      { customerId: 'CUST_B', serviceId: 'SVC_2', revenue: 200000, count: 10, profitRate: 0.22 },
+      { customerId: 'CUST_B', serviceId: 'SVC_3', revenue: 90000, count: 4, profitRate: 0.17 },
+      // 顧客C のデータ
+      { customerId: 'CUST_C', serviceId: 'SVC_1', revenue: 110000, count: 5, profitRate: 0.19 },
+      { customerId: 'CUST_C', serviceId: 'SVC_2', revenue: 160000, count: 9, profitRate: 0.24 },
+      { customerId: 'CUST_C', serviceId: 'SVC_3', revenue: 85000, count: 4, profitRate: 0.16 },
+    ];
 
-    const performanceData = {
-      contractId: "CONTRACT-20240115-001",
-      reportedSalesAmount: 1200000, // 売上実績：120万
-      targetAchievementRate: 1.2, // 達成率：120%
-      campaignParticipationStatus: "active", // キャンペーン参加状況：参加中
-      reportPeriod: "2024-Q1",
-    };
+    const reportDate = new Date('2024-01-31');
 
-    const campaignRuleSet = {
-      "CAMPAIGN-2024-Q1": {
-        campaignDiscountRate: 0.05, // キャンペーン割引率：5%
-        achievementThreshold: 1.0, // 達成率閾値：100%
-        achievementBonusRate: 0.02, // 達成率ボーナス：2%（達成率100%超過につき）
-        maxCumulativeDiscount: 0.2, // 最大累積割引率：20%
-      },
-    };
-
-    // 【実行】割引・キャンペーン適用判定機能を実行
-    const result = applyDiscountAndCampaignRules({
-      contractCondition,
-      performanceData,
-      campaignRuleSet,
+    // 月次営業成果サマリー自動生成機能を実行
+    const result = generateMonthlySummary({
+      salesData,
+      reportDate,
     });
 
-    // 【検証】期待される計算結果
-    // 基本割引率: 10%
-    // + キャンペーン割引率: 5%
-    // + 達成率ボーナス（120% - 100% = 20% → 20% × 2% = 0.4%）: 0.4%
-    // = 小計: 15.4%
-    // 最大累積割引率 20% 以下なので: 15.4% が適用
-    const expectedTotalDiscountRate = 0.154; // 15.4%
+    // 生成されたレポートから顧客ごとの集計データを抽出して検証
+    // 顧客A: 売上合計 = 100000 + 150000 + 80000 = 330000
+    //        件数合計 = 5 + 8 + 3 = 16
+    //        平均利益率 = (0.20 * 5 + 0.25 * 8 + 0.15 * 3) / 16 = (1 + 2 + 0.45) / 16 = 0.21562...
+    const customerASummary = result.customerSummaries.find((c) => c.customerId === 'CUST_A');
+    expect(customerASummary).toBeDefined();
+    expect(customerASummary.totalRevenue).toBe(330000);
+    expect(customerASummary.totalCount).toBe(16);
+    expect(parseFloat(customerASummary.avgProfitRate.toFixed(5))).toBe(0.21563);
 
-    expect(result.isApplicable).toBe(true);
-    expect(result.contractConditionMatch).toBe(true);
-    expect(result.performanceDataMatch).toBe(true);
-    expect(result.totalDiscountRate).toBeCloseTo(expectedTotalDiscountRate, 5);
-    expect(result.baseDiscountRate).toBeCloseTo(0.1, 5);
-    expect(result.campaignDiscountRate).toBeCloseTo(0.05, 5);
-    expect(result.achievementBonusRate).toBeCloseTo(0.004, 5);
-    expect(result.appliedDiscountAmount).toBe(154000); // 1,000,000 × 0.154
-    expect(result.finalBillingAmount).toBe(846000); // 1,000,000 - 154,000
+    // 顧客B: 売上合計 = 120000 + 200000 + 90000 = 410000
+    //        件数合計 = 6 + 10 + 4 = 20
+    //        平均利益率 = (0.18 * 6 + 0.22 * 10 + 0.17 * 4) / 20 = (1.08 + 2.2 + 0.68) / 20 = 0.198
+    const customerBSummary = result.customerSummaries.find((c) => c.customerId === 'CUST_B');
+    expect(customerBSummary).toBeDefined();
+    expect(customerBSummary.totalRevenue).toBe(410000);
+    expect(customerBSummary.totalCount).toBe(20);
+    expect(parseFloat(customerBSummary.avgProfitRate.toFixed(3))).toBe(0.198);
 
-    // 【複数割引ルール組み合わせパターン検証】
-    // パターン2: 達成率が高く、複数割引ルールが最大値に近づくケース
-    const contractCondition2 = {
-      contractId: "CONTRACT-20240115-002",
-      contractPeriodStart: new Date("2024-01-01"),
-      contractPeriodEnd: new Date("2024-12-31"),
-      contractAmount: 500000,
-      customerCategory: "enterprise",
-      baseDiscountRate: 0.15, // 基本割引率：15%
-      campaignCode: "CAMPAIGN-2024-Q1",
-    };
+    // 顧客C: 売上合計 = 110000 + 160000 + 85000 = 355000
+    //        件数合計 = 5 + 9 + 4 = 18
+    //        平均利益率 = (0.19 * 5 + 0.24 * 9 + 0.16 * 4) / 18 = (0.95 + 2.16 + 0.64) / 18 = 0.19833...
+    const customerCSummary = result.customerSummaries.find((c) => c.customerId === 'CUST_C');
+    expect(customerCSummary).toBeDefined();
+    expect(customerCSummary.totalRevenue).toBe(355000);
+    expect(customerCSummary.totalCount).toBe(18);
+    expect(parseFloat(customerCSummary.avgProfitRate.toFixed(5))).toBe(0.19833);
 
-    const performanceData2 = {
-      contractId: "CONTRACT-20240115-002",
-      reportedSalesAmount: 700000,
-      targetAchievementRate: 1.4, // 達成率：140%
-      campaignParticipationStatus: "active",
-      reportPeriod: "2024-Q1",
-    };
+    // 生成されたレポートからサービスごとの集計データを抽出して検証
+    // サービス1: 売上合計 = 100000 + 120000 + 110000 = 330000
+    //            件数合計 = 5 + 6 + 5 = 16
+    //            平均利益率 = (0.20 * 5 + 0.18 * 6 + 0.19 * 5) / 16 = (1 + 1.08 + 0.95) / 16 = 0.19031...
+    const service1Summary = result.serviceSummaries.find((s) => s.serviceId === 'SVC_1');
+    expect(service1Summary).toBeDefined();
+    expect(service1Summary.totalRevenue).toBe(330000);
+    expect(service1Summary.totalCount).toBe(16);
+    expect(parseFloat(service1Summary.avgProfitRate.toFixed(5))).toBe(0.19031);
 
-    const result2 = applyDiscountAndCampaignRules({
-      contractCondition: contractCondition2,
-      performanceData: performanceData2,
-      campaignRuleSet,
-    });
+    // サービス2: 売上合計 = 150000 + 200000 + 160000 = 510000
+    //            件数合計 = 8 + 10 + 9 = 27
+    //            平均利益率 = (0.25 * 8 + 0.22 * 10 + 0.24 * 9) / 27 = (2 + 2.2 + 2.16) / 27 = 0.23407...
+    const service2Summary = result.serviceSummaries.find((s) => s.serviceId === 'SVC_2');
+    expect(service2Summary).toBeDefined();
+    expect(service2Summary.totalRevenue).toBe(510000);
+    expect(service2Summary.totalCount).toBe(27);
+    expect(parseFloat(service2Summary.avgProfitRate.toFixed(5))).toBe(0.23407);
 
-    // 期待される計算結果
-    // 基本割引率: 15%
-    // + キャンペーン割引率: 5%
-    // + 達成率ボーナス（140% - 100% = 40% → 40% × 2% = 0.8%）: 0.8%
-    // = 小計: 20.8%
-    // 最大累積割引率 20% で制限: 20.0% が適用
-    const expectedTotalDiscountRate2 = 0.2; // 20% (最大値に制限)
+    // サービス3: 売上合計 = 80000 + 90000 + 85000 = 255000
+    //            件数合計 = 3 + 4 + 4 = 11
+    //            平均利益率 = (0.15 * 3 + 0.17 * 4 + 0.16 * 4) / 11 = (0.45 + 0.68 + 0.64) / 11 = 0.16090...
+    const service3Summary = result.serviceSummaries.find((s) => s.serviceId === 'SVC_3');
+    expect(service3Summary).toBeDefined();
+    expect(service3Summary.totalRevenue).toBe(255000);
+    expect(service3Summary.totalCount).toBe(11);
+    expect(parseFloat(service3Summary.avgProfitRate.toFixed(5))).toBe(0.16091);
 
-    expect(result2.isApplicable).toBe(true);
-    expect(result2.contractConditionMatch).toBe(true);
-    expect(result2.performanceDataMatch).toBe(true);
-    expect(result2.totalDiscountRate).toBeCloseTo(expectedTotalDiscountRate2, 5);
-    expect(result2.appliedDiscountAmount).toBe(100000); // 500,000 × 0.2
-    expect(result2.finalBillingAmount).toBe(400000); // 500,000 - 100,000
+    // 顧客×サービス組み合わせごとの成果指標が正しく集計されていることを検証
+    const custAServ1 = result.customerServiceCombinations.find(
+      (cs) => cs.customerId === 'CUST_A' && cs.serviceId === 'SVC_1'
+    );
+    expect(custAServ1).toBeDefined();
+    expect(custAServ1.revenue).toBe(100000);
+    expect(custAServ1.count).toBe(5);
+    expect(custAServ1.profitRate).toBe(0.20);
 
-    // 【パターン3: 達成率が閾値未満の場合、ボーナス不適用】
-    const performanceData3 = {
-      contractId: "CONTRACT-20240115-001",
-      reportedSalesAmount: 800000,
-      targetAchievementRate: 0.8, // 達成率：80% (閾値 100% 未満)
-      campaignParticipationStatus: "active",
-      reportPeriod: "2024-Q1",
-    };
+    const custBServ2 = result.customerServiceCombinations.find(
+      (cs) => cs.customerId === 'CUST_B' && cs.serviceId === 'SVC_2'
+    );
+    expect(custBServ2).toBeDefined();
+    expect(custBServ2.revenue).toBe(200000);
+    expect(custBServ2.count).toBe(10);
+    expect(custBServ2.profitRate).toBe(0.22);
 
-    const result3 = applyDiscountAndCampaignRules({
-      contractCondition,
-      performanceData: performanceData3,
-      campaignRuleSet,
-    });
+    const custCServ3 = result.customerServiceCombinations.find(
+      (cs) => cs.customerId === 'CUST_C' && cs.serviceId === 'SVC_3'
+    );
+    expect(custCServ3).toBeDefined();
+    expect(custCServ3.revenue).toBe(85000);
+    expect(custCServ3.count).toBe(4);
+    expect(custCServ3.profitRate).toBe(0.16);
 
-    // 期待される計算結果
-    // 基本割引率: 10%
-    // + キャンペーン割引率: 5%
-    // + 達成率ボーナス: 0% (閾値未満)
-    // = 小計: 15%
-    const expectedTotalDiscountRate3 = 0.15; // 15%
+    // レポートに表示される日付が当月の月末日となっていることを確認
+    expect(result.reportDate).toEqual(new Date('2024-01-31'));
 
-    expect(result3.isApplicable).toBe(true);
-    expect(result3.totalDiscountRate).toBeCloseTo(expectedTotalDiscountRate3, 5);
-    expect(result3.achievementBonusRate).toBeCloseTo(0.0, 5);
-    expect(result3.appliedDiscountAmount).toBe(150000); // 1,000,000 × 0.15
-    expect(result3.finalBillingAmount).toBe(850000); // 1,000,000 - 150,000
+    // 全体売上合計の検証: 330000 + 410000 + 355000 = 1095000
+    expect(result.totalRevenue).toBe(1095000);
 
-    // 【パターン4: キャンペーン非参加の場合】
-    const performanceData4 = {
-      contractId: "CONTRACT-20240115-001",
-      reportedSalesAmount: 1200000,
-      targetAchievementRate: 1.2,
-      campaignParticipationStatus: "inactive", // キャンペーン非参加
-      reportPeriod: "2024-Q1",
-    };
+    // 全体件数合計の検証: 16 + 20 + 18 = 54
+    expect(result.totalCount).toBe(54);
 
-    const result4 = applyDiscountAndCampaignRules({
-      contractCondition,
-      performanceData: performanceData4,
-      campaignRuleSet,
-    });
+    // 顧客サマリー数が正しいことを検証 (3顧客)
+    expect(result.customerSummaries.length).toBe(3);
 
-    // 期待される計算結果
-    // 基本割引率: 10%
-    // + キャンペーン割引率: 0% (非参加)
-    // + 達成率ボーナス: 0% (キャンペーン非参加のため不適用)
-    // = 小計: 10%
-    const expectedTotalDiscountRate4 = 0.1; // 10%
+    // サービスサマリー数が正しいことを検証 (3サービス)
+    expect(result.serviceSummaries.length).toBe(3);
 
-    expect(result4.isApplicable).toBe(true);
-    expect(result4.totalDiscountRate).toBeCloseTo(expectedTotalDiscountRate4, 5);
-    expect(result4.campaignDiscountRate).toBeCloseTo(0.0, 5);
-    expect(result4.achievementBonusRate).toBeCloseTo(0.0, 5);
-    expect(result4.appliedDiscountAmount).toBe(100000); // 1,000,000 × 0.1
-    expect(result4.finalBillingAmount).toBe(900000); // 1,000,000 - 100,000
+    // 顧客×サービス組み合わせ数が正しいことを検証 (3 * 3 = 9)
+    expect(result.customerServiceCombinations.length).toBe(9);
   });
 });

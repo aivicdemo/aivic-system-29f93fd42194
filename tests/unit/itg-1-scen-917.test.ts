@@ -1,44 +1,157 @@
-import { generateMonthlySummary } from "../../src/logic/it-1-br-1781935279444-1-2-1";
+import { describe, test, expect, beforeEach, afterEach } from '@jest/globals';
+import { validateAndCreateMonthlySummaryTemplateVersion } from '../../src/logic/it-1-br-1781935279444-1-2-1';
 
-describe("月次サマリーテンプレートの定義・管理機能", () => {
-  // SCEN-917: [edge] 営業報告書月次サマリー自動集計機能 - 営業活動データが存在しない月で、ゼロ集計のサマリーが生成される
-  test("営業活動データが存在しない月でゼロ集計のサマリーが生成される", () => {
-    const targetYear = 2024;
-    const targetMonth = 3;
-    const targetDate = new Date("2024-03-01T00:00:00Z");
-    const generatedAt = new Date("2024-03-31T23:59:59Z");
+const fetchMock = require('jest-fetch-mock');
 
-    const result = generateMonthlySummary({
-      year: targetYear,
-      month: targetMonth,
-      salesActivitiesData: [],
-      generatedAt: generatedAt,
-    });
+describe('Monthly Summary Template Version Management', () => {
+  beforeEach(() => {
+    fetchMock.resetMocks();
+  });
 
-    // (1) 全集計項目がゼロまたはNULL
-    expect(result.totalRevenue).toBe(0);
-    expect(result.totalAppoCount).toBe(0);
-    expect(result.totalContractCount).toBe(0);
-    expect(result.totalAmount).toBe(0);
-    expect(result.averageContractValue).toBeNull();
+  afterEach(() => {
+    fetchMock.resetMocks();
+  });
 
-    // (2) エラーメッセージが表示されない
-    expect(result.hasError).toBe(false);
-    expect(result.errorMessage).toBeNull();
+  // SCEN-917: [error] 標準手順書バージョン管理機能 - 新バージョン作成時に前バージョンとの差分情報が不完全である場合、エラーを返す
+  test('should return 400 error when creating new version with incomplete difference information', () => {
+    // Arrange: 前バージョン（v1.0）の情報を設定
+    const previousVersion = {
+      version_id: 'tmpl_v_001',
+      version_number: '1.0',
+      template_name: '月次営業成果レポート',
+      created_at: '2024-01-01T09:00:00Z',
+      created_by: 'user_001',
+    };
 
-    // (3) サマリーレコードが正常に作成されている
-    expect(result.recordId).toBeDefined();
-    expect(typeof result.recordId).toBe("string");
-    expect(result.recordId.length).toBeGreaterThan(0);
+    // 新バージョン作成フォーム入力: 差分情報が不完全（変更内容と変更理由は入力、変更箇所は空白）
+    const newVersionInput = {
+      previous_version_id: previousVersion.version_id,
+      change_description: '請求対象項目の集計ロジック修正', // ✅ 入力あり
+      change_reason: 'システム要件の変更対応', // ✅ 入力あり
+      change_items: '', // ❌ 変更箇所が空白
+      modified_by: 'user_002',
+    };
 
-    // (4) サマリーヘッダーには正しい対象月と生成日時が記録される
-    expect(result.targetYear).toBe(2024);
-    expect(result.targetMonth).toBe(3);
-    expect(result.generatedAt).toEqual(generatedAt);
-    expect(result.generatedAtISO).toBe("2024-03-31T23:59:59Z");
+    // Act & Assert: エラーをスロー
+    expect(() =>
+      validateAndCreateMonthlySummaryTemplateVersion(previousVersion, newVersionInput)
+    ).toThrow(/変更箇所/);
+  });
 
-    // (5) ステータスがsuccess
-    expect(result.status).toBe("success");
-    expect(result.systemLog).toBeNull();
+  // 境界値テスト: 変更内容が空白の場合
+  test('should return error when change description is empty', () => {
+    const previousVersion = {
+      version_id: 'tmpl_v_001',
+      version_number: '1.0',
+      template_name: '月次営業成果レポート',
+      created_at: '2024-01-01T09:00:00Z',
+      created_by: 'user_001',
+    };
+
+    const newVersionInput = {
+      previous_version_id: previousVersion.version_id,
+      change_description: '', // ❌ 空白
+      change_reason: 'システム要件の変更対応',
+      change_items: '集計ロジック,レポート形式',
+      modified_by: 'user_002',
+    };
+
+    expect(() =>
+      validateAndCreateMonthlySummaryTemplateVersion(previousVersion, newVersionInput)
+    ).toThrow(/変更内容/);
+  });
+
+  // 境界値テスト: 変更理由が空白の場合
+  test('should return error when change reason is empty', () => {
+    const previousVersion = {
+      version_id: 'tmpl_v_001',
+      version_number: '1.0',
+      template_name: '月次営業成果レポート',
+      created_at: '2024-01-01T09:00:00Z',
+      created_by: 'user_001',
+    };
+
+    const newVersionInput = {
+      previous_version_id: previousVersion.version_id,
+      change_description: '請求対象項目の集計ロジック修正',
+      change_reason: '', // ❌ 空白
+      change_items: '集計ロジック,レポート形式',
+      modified_by: 'user_002',
+    };
+
+    expect(() =>
+      validateAndCreateMonthlySummaryTemplateVersion(previousVersion, newVersionInput)
+    ).toThrow(/変更理由/);
+  });
+
+  // 成功テスト: すべての差分情報が完全に入力された場合
+  test('should successfully create new version when all difference information is complete', () => {
+    fetchMock.mockResponseOnce(
+      JSON.stringify({
+        version_id: 'tmpl_v_002',
+        version_number: '1.1',
+        template_name: '月次営業成果レポート',
+        previous_version_id: 'tmpl_v_001',
+        change_description: '請求対象項目の集計ロジック修正',
+        change_reason: 'システム要件の変更対応',
+        change_items: '集計ロジック,レポート形式',
+        created_at: '2024-02-01T10:00:00Z',
+        created_by: 'user_002',
+        status: 'active',
+      }),
+      { status: 200 }
+    );
+
+    const previousVersion = {
+      version_id: 'tmpl_v_001',
+      version_number: '1.0',
+      template_name: '月次営業成果レポート',
+      created_at: '2024-01-01T09:00:00Z',
+      created_by: 'user_001',
+    };
+
+    const newVersionInput = {
+      previous_version_id: previousVersion.version_id,
+      change_description: '請求対象項目の集計ロジック修正',
+      change_reason: 'システム要件の変更対応',
+      change_items: '集計ロジック,レポート形式',
+      modified_by: 'user_002',
+    };
+
+    const result = validateAndCreateMonthlySummaryTemplateVersion(
+      previousVersion,
+      newVersionInput
+    );
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        version_id: 'tmpl_v_002',
+        version_number: '1.1',
+        status: 'active',
+      })
+    );
+  });
+
+  // 複合エラーテスト: 変更内容と変更箇所が両方空白
+  test('should return error when multiple difference fields are empty', () => {
+    const previousVersion = {
+      version_id: 'tmpl_v_001',
+      version_number: '1.0',
+      template_name: '月次営業成果レポート',
+      created_at: '2024-01-01T09:00:00Z',
+      created_by: 'user_001',
+    };
+
+    const newVersionInput = {
+      previous_version_id: previousVersion.version_id,
+      change_description: '', // ❌ 空白
+      change_reason: 'システム要件の変更対応',
+      change_items: '', // ❌ 空白
+      modified_by: 'user_002',
+    };
+
+    expect(() =>
+      validateAndCreateMonthlySummaryTemplateVersion(previousVersion, newVersionInput)
+    ).toThrow(/変更内容|変更箇所/);
   });
 });

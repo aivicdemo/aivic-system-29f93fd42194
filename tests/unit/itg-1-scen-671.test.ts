@@ -1,69 +1,128 @@
-import { validateSalesDataQuality } from '../../src/logic/it-1781935279444-2-2-1';
+import { describe, test, expect, beforeEach, afterEach } from '@jest/globals';
+import fetchMock from 'jest-fetch-mock';
+import { filterReportsByAssignedContracts } from '../../src/logic/it-1-1-1';
 
-describe('営業データ品質自動検証機能 - データ型・単位不整合検出', () => {
-  // SCEN-671: [normal] 営業データ品質自動検証機能 - データ型不整合（単位の不一致含む）が検出される
-  test('単価の文字列型エラーと消費税の単位不一致エラーが検出される', () => {
-    const testData = [
+fetchMock.enableMocks();
+
+describe('顧客別ポータル表示制御機能', () => {
+  beforeEach(() => {
+    fetchMock.resetMocks();
+  });
+
+  afterEach(() => {
+    fetchMock.resetMocks();
+  });
+
+  // SCEN-671
+  test('ログイン済み営業責任者に割り当てられた契約IDのレポートのみがポータルに表示される', async () => {
+    // 営業責任者Aのユーザー情報
+    const userA = {
+      user_id: 'user_001',
+      user_name: '営業責任者A',
+      assigned_contract_ids: ['contract_101', 'contract_102', 'contract_103'],
+    };
+
+    // 営業責任者Bのユーザー情報
+    const userB = {
+      user_id: 'user_002',
+      user_name: '営業責任者B',
+      assigned_contract_ids: ['contract_201', 'contract_202'],
+    };
+
+    // ポータルに存在するすべてのレポート（複数の営業責任者に関連）
+    const all_reports = [
       {
-        row_number: 1,
-        unit_price: '1000円',
-        quantity: 5,
-        unit: '個',
+        report_id: 'report_001',
+        report_name: '月次成果レポート 2024年1月',
+        contract_id: 'contract_101',
+        generated_date: '2024-01-31T23:59:59Z',
       },
       {
-        row_number: 2,
-        sales_amount: 50000,
-        sales_amount_unit: '円',
-        consumption_tax: '5000',
-        consumption_tax_unit: '%',
+        report_id: 'report_002',
+        report_name: '月次成果レポート 2024年1月',
+        contract_id: 'contract_102',
+        generated_date: '2024-01-31T23:59:59Z',
+      },
+      {
+        report_id: 'report_003',
+        report_name: '月次成果レポート 2024年1月',
+        contract_id: 'contract_103',
+        generated_date: '2024-01-31T23:59:59Z',
+      },
+      {
+        report_id: 'report_004',
+        report_name: '月次成果レポート 2024年1月',
+        contract_id: 'contract_201',
+        generated_date: '2024-01-31T23:59:59Z',
+      },
+      {
+        report_id: 'report_005',
+        report_name: '月次成果レポート 2024年1月',
+        contract_id: 'contract_202',
+        generated_date: '2024-01-31T23:59:59Z',
+      },
+      {
+        report_id: 'report_006',
+        report_name: '月次成果レポート 2024年1月',
+        contract_id: 'contract_301',
+        generated_date: '2024-01-31T23:59:59Z',
       },
     ];
 
-    const result = validateSalesDataQuality(testData);
+    // 営業責任者A: ポータルから表示対象レポートを取得
+    fetchMock.mockResponseOnce(JSON.stringify(all_reports), { status: 200 });
 
-    // 検証結果が失敗であることを確認
-    expect(result.is_valid).toBe(false);
-
-    // エラー件数が2件であることを確認
-    expect(result.errors).toHaveLength(2);
-
-    // エラー1: 単価のデータ型不整合
-    const error_1 = result.errors.find(
-      (e: any) => e.field_name === 'unit_price'
+    const filtered_reports_a = await filterReportsByAssignedContracts(
+      userA.user_id,
+      userA.assigned_contract_ids,
+      all_reports
     );
-    expect(error_1).toBeDefined();
-    expect(error_1.error_type).toBe('data_type_mismatch');
-    expect(error_1.row_number).toBe(1);
-    expect(error_1.detected_value).toBe('1000円');
-    expect(error_1.expected_type).toBe('number');
-    expect(error_1.recommendation).toMatch(/数値に変換/);
 
-    // エラー2: 消費税の単位不一致
-    const error_2 = result.errors.find(
-      (e: any) => e.field_name === 'consumption_tax'
+    // 営業責任者Aに表示されるべきレポートは3件（contract_101, 102, 103に紐づくもの）
+    expect(filtered_reports_a.length).toBe(3);
+
+    // 営業責任者Aに表示されるレポートの契約IDを抽出
+    const displayed_contract_ids_a = filtered_reports_a.map((r: any) => r.contract_id);
+
+    // 表示されている契約IDがすべてユーザーAに割り当てられたものであることを確認
+    expect(displayed_contract_ids_a).toEqual(['contract_101', 'contract_102', 'contract_103']);
+
+    // 割り当てられていない契約IDのレポートが表示されていないことを確認
+    const unauthorized_contract_ids = ['contract_201', 'contract_202', 'contract_301'];
+    const has_unauthorized = filtered_reports_a.some((r: any) =>
+      unauthorized_contract_ids.includes(r.contract_id)
     );
-    expect(error_2).toBeDefined();
-    expect(error_2.error_type).toBe('unit_mismatch');
-    expect(error_2.row_number).toBe(2);
-    expect(error_2.detected_unit).toBe('%');
-    expect(error_2.expected_unit).toBe('円');
-    expect(error_2.referenced_field).toBe('sales_amount_unit');
-    expect(error_2.recommendation).toMatch(/単位が矛盾/);
+    expect(has_unauthorized).toBe(false);
 
-    // 詳細情報が各エラーに含まれていることを確認
-    expect(error_1).toHaveProperty('field_name');
-    expect(error_1).toHaveProperty('error_type');
-    expect(error_1).toHaveProperty('row_number');
-    expect(error_1).toHaveProperty('recommendation');
-    expect(error_2).toHaveProperty('field_name');
-    expect(error_2).toHaveProperty('error_type');
-    expect(error_2).toHaveProperty('row_number');
-    expect(error_2).toHaveProperty('recommendation');
+    // 営業責任者B: ポータルから表示対象レポートを取得
+    fetchMock.mockResponseOnce(JSON.stringify(all_reports), { status: 200 });
 
-    // サマリー情報を確認
-    expect(result.summary).toBeDefined();
-    expect(result.summary.total_errors).toBe(2);
-    expect(result.summary.data_type_errors).toBe(1);
-    expect(result.summary.unit_mismatch_errors).toBe(1);
+    const filtered_reports_b = await filterReportsByAssignedContracts(
+      userB.user_id,
+      userB.assigned_contract_ids,
+      all_reports
+    );
+
+    // 営業責任者Bに表示されるべきレポートは2件（contract_201, 202に紐づくもの）
+    expect(filtered_reports_b.length).toBe(2);
+
+    // 営業責任者Bに表示されるレポートの契約IDを抽出
+    const displayed_contract_ids_b = filtered_reports_b.map((r: any) => r.contract_id);
+
+    // 表示されている契約IDがすべてユーザーBに割り当てられたものであることを確認
+    expect(displayed_contract_ids_b).toEqual(['contract_201', 'contract_202']);
+
+    // ユーザーAに割り当てられたレポートがユーザーBに表示されていないことを確認
+    const user_a_contract_ids = ['contract_101', 'contract_102', 'contract_103'];
+    const has_user_a_reports = filtered_reports_b.some((r: any) =>
+      user_a_contract_ids.includes(r.contract_id)
+    );
+    expect(has_user_a_reports).toBe(false);
+
+    // 他のいかなる営業責任者にも割り当てられていないレポート（contract_301）がどちらにも表示されていないことを確認
+    const other_contract_reports = all_reports.filter((r) => r.contract_id === 'contract_301');
+    expect(other_contract_reports.length).toBe(1);
+    expect(filtered_reports_a.find((r: any) => r.contract_id === 'contract_301')).toBeUndefined();
+    expect(filtered_reports_b.find((r: any) => r.contract_id === 'contract_301')).toBeUndefined();
   });
 });

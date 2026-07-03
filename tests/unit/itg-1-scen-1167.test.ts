@@ -1,28 +1,61 @@
-import {
-  validateSalesData,
-} from "../../src/logic/it-1781935279444-2-2-1";
+import { describe, test, expect, beforeEach, afterEach } from "@jest/globals";
 
-describe("営業データ品質検証・異常検出", () => {
-  test("SCEN-1167: 必須項目が全て存在し、データ型が正常な営業データは検証合格と判定される", () => {
-    // 準備: テスト対象の営業データを準備（全必須項目を含む）
-    const salesData = {
-      customer_id: 12345,
-      customer_name: "ABC Corporation",
-      sales_amount: 150000,
-      transaction_date: "2024-01-15T10:30:00Z",
-      product_code: "PROD-001",
-      quantity: 5,
-      unit_price: 30000,
-      sales_representative_id: 789,
-    };
+const fetchMock = require("jest-fetch-mock");
+fetchMock.enableMocks();
 
-    // 実行: データ品質検証モジュールに入力
-    const result = validateSalesData(salesData);
+import { searchSalesActivities } from "../../src/logic/it-1-2-1";
 
-    // 検証: 検証結果が『合格』と判定されることを確認
-    expect(result.status).toBe("pass");
-    expect(result.errors).toEqual([]);
-    expect(result.error_message).toBeUndefined();
-    expect(result.status_code).toBe(200);
+describe("営業活動データの検索・抽出機能", () => {
+  beforeEach(() => {
+    fetchMock.resetMocks();
+  });
+
+  afterEach(() => {
+    fetchMock.resetMocks();
+  });
+
+  // SCEN-1167
+  test("検索条件の顧客IDが無効な形式の場合、バリデーションエラーを返す", async () => {
+    const invalid_customer_ids = [
+      "@#$",
+      "",
+      null,
+      "abc123XYZ",
+      "!@#$%",
+      "   ",
+      "cust-@invalid",
+    ];
+
+    for (const invalid_id of invalid_customer_ids) {
+      fetchMock.resetMocks();
+
+      fetchMock.mockResponseOnce(
+        JSON.stringify({
+          status_code: 400,
+          error_code: "INVALID_CUSTOMER_ID_FORMAT",
+          message: "顧客IDの形式が不正です",
+          details: {
+            field: "customer_id",
+            reason: "顧客IDは英数字とハイフンのみで構成される必要があります",
+            received_value: invalid_id,
+          },
+        }),
+        { status: 400 }
+      );
+
+      const result = await searchSalesActivities({
+        customer_id: invalid_id,
+        start_date: "2024-01-01",
+        end_date: "2024-01-31",
+      });
+
+      expect(result.status_code).toBe(400);
+      expect(result.error_code).toBe("INVALID_CUSTOMER_ID_FORMAT");
+      expect(result.message).toMatch(/顧客ID/);
+      expect(result.message).toMatch(/形式/);
+      expect(result.details).toBeDefined();
+      expect(result.details.field).toBe("customer_id");
+      expect(result.details.received_value).toBe(invalid_id);
+    }
   });
 });

@@ -1,135 +1,241 @@
-import { validateSalesDataQuality } from '../../src/logic/it-1781935279444-2-2-1';
+import {
+  validateSalesDataItemMetadata,
+  applySalesDataValidationRules,
+  updateSalesDataItemMetadataDefinition,
+} from "../../src/logic/it-1781935279444-1-1-1";
 
-describe('営業データ品質チェック結果表示機能', () => {
-  // SCEN-702: [normal] 複数の品質不備が存在する場合にすべてのエラーを一覧表示する
-  test('複数の品質不備を含む営業データをチェックすると、すべてのエラーが詳細情報付きで一覧表示される', () => {
-    const input_sales_data = [
+describe("営業データ項目のメタデータ管理機能", () => {
+  // SCEN-702: [normal] 営業データ項目のメタデータ管理機能 - メタデータ定義に基づいて営業データ項目の単位・データ型が正しく検証される
+  test("メタデータ定義に基づいて営業データ項目の単位・データ型が正しく検証される", () => {
+    // === メタデータ定義の初期化 ===
+    const metadata_sales_amount = {
+      item_id: "item_001",
+      item_name: "売上金額",
+      unit: "円",
+      data_type: "number",
+      validation_rule: {
+        type: "number",
+        min: 0,
+        max: 999999999,
+      },
+    };
+
+    const metadata_transaction_date = {
+      item_id: "item_002",
+      item_name: "取引日",
+      unit: "日付形式(YYYY-MM-DD)",
+      data_type: "date",
+      validation_rule: {
+        type: "date",
+        format: "YYYY-MM-DD",
+      },
+    };
+
+    const metadata_customer_name = {
+      item_id: "item_003",
+      item_name: "顧客名",
+      unit: "文字列",
+      data_type: "string",
+      validation_rule: {
+        type: "string",
+        maxLength: 100,
+      },
+    };
+
+    // === メタデータ定義に基づく検証ルール設定が正しく機能することを確認 ===
+    const validation_result_metadata = validateSalesDataItemMetadata({
+      items: [metadata_sales_amount, metadata_transaction_date, metadata_customer_name],
+    });
+    expect(validation_result_metadata.is_valid).toBe(true);
+    expect(validation_result_metadata.validated_items_count).toBe(3);
+
+    // === 定義に合致するテストデータでの検証 - ハッピーパス ===
+    const valid_data_001 = {
+      item_id: "item_001",
+      value: 150000,
+      unit: "円",
+      data_type: "number",
+    };
+
+    const result_valid_001 = applySalesDataValidationRules({
+      data: valid_data_001,
+      metadata: metadata_sales_amount,
+    });
+    expect(result_valid_001.is_passed).toBe(true);
+    expect(result_valid_001.error_message).toBe("");
+
+    // === 定義に合致するテストデータでの検証 - 日付 ===
+    const valid_data_002 = {
+      item_id: "item_002",
+      value: "2024-01-15",
+      unit: "日付形式(YYYY-MM-DD)",
+      data_type: "date",
+    };
+
+    const result_valid_002 = applySalesDataValidationRules({
+      data: valid_data_002,
+      metadata: metadata_transaction_date,
+    });
+    expect(result_valid_002.is_passed).toBe(true);
+    expect(result_valid_002.error_message).toBe("");
+
+    // === 定義に合致するテストデータでの検証 - 顧客名 ===
+    const valid_data_003 = {
+      item_id: "item_003",
+      value: "ABC商事株式会社",
+      unit: "文字列",
+      data_type: "string",
+    };
+
+    const result_valid_003 = applySalesDataValidationRules({
+      data: valid_data_003,
+      metadata: metadata_customer_name,
+    });
+    expect(result_valid_003.is_passed).toBe(true);
+    expect(result_valid_003.error_message).toBe("");
+
+    // === 定義に不合致するテストデータでの検証エラー検出 - 負の金額 ===
+    const invalid_data_001 = {
+      item_id: "item_001",
+      value: -50000,
+      unit: "円",
+      data_type: "number",
+    };
+
+    const result_invalid_001 = applySalesDataValidationRules({
+      data: invalid_data_001,
+      metadata: metadata_sales_amount,
+    });
+    expect(result_invalid_001.is_passed).toBe(false);
+    expect(result_invalid_001.error_message).toMatch(/金額/);
+
+    // === 定義に不合致するテストデータでの検証エラー検出 - 不正な日付形式 ===
+    const invalid_data_002 = {
+      item_id: "item_002",
+      value: "2024/01/15",
+      unit: "日付形式(YYYY-MM-DD)",
+      data_type: "date",
+    };
+
+    const result_invalid_002 = applySalesDataValidationRules({
+      data: invalid_data_002,
+      metadata: metadata_transaction_date,
+    });
+    expect(result_invalid_002.is_passed).toBe(false);
+    expect(result_invalid_002.error_message).toMatch(/日付/);
+
+    // === 定義に不合致するテストデータでの検証エラー検出 - 超過長の顧客名 ===
+    const invalid_data_003 = {
+      item_id: "item_003",
+      value: "a".repeat(101),
+      unit: "文字列",
+      data_type: "string",
+    };
+
+    const result_invalid_003 = applySalesDataValidationRules({
+      data: invalid_data_003,
+      metadata: metadata_customer_name,
+    });
+    expect(result_invalid_003.is_passed).toBe(false);
+    expect(result_invalid_003.error_message).toMatch(/文字列/);
+
+    // === 定義に不合致するテストデータでの検証エラー検出 - 不正なデータ型 ===
+    const invalid_data_004 = {
+      item_id: "item_001",
+      value: "150000yen",
+      unit: "円",
+      data_type: "number",
+    };
+
+    const result_invalid_004 = applySalesDataValidationRules({
+      data: invalid_data_004,
+      metadata: metadata_sales_amount,
+    });
+    expect(result_invalid_004.is_passed).toBe(false);
+    expect(result_invalid_004.error_message).toMatch(/型/);
+
+    // === メタデータ定義の更新 ===
+    const updated_metadata_sales_amount = {
+      item_id: "item_001",
+      item_name: "売上金額",
+      unit: "円",
+      data_type: "number",
+      validation_rule: {
+        type: "number",
+        min: 1000,
+        max: 500000000,
+      },
+    };
+
+    const update_result = updateSalesDataItemMetadataDefinition({
+      item_id: "item_001",
+      new_metadata: updated_metadata_sales_amount,
+    });
+    expect(update_result.is_updated).toBe(true);
+    expect(update_result.updated_item_id).toBe("item_001");
+
+    // === メタデータ定義変更後、新規検証ルールが適用されることを確認 ===
+    const data_after_update_001 = {
+      item_id: "item_001",
+      value: 500,
+      unit: "円",
+      data_type: "number",
+    };
+
+    const result_after_update_001 = applySalesDataValidationRules({
+      data: data_after_update_001,
+      metadata: updated_metadata_sales_amount,
+    });
+    expect(result_after_update_001.is_passed).toBe(false);
+    expect(result_after_update_001.error_message).toMatch(/金額/);
+
+    // === メタデータ定義変更後、新規検証ルール適用下での有効データ検証 ===
+    const data_after_update_002 = {
+      item_id: "item_001",
+      value: 50000,
+      unit: "円",
+      data_type: "number",
+    };
+
+    const result_after_update_002 = applySalesDataValidationRules({
+      data: data_after_update_002,
+      metadata: updated_metadata_sales_amount,
+    });
+    expect(result_after_update_002.is_passed).toBe(true);
+    expect(result_after_update_002.error_message).toBe("");
+
+    // === 複数の営業データ項目について検証が正常に機能することを確認 ===
+    const batch_validation_data = [
       {
-        row_number: 1,
-        customer_name: '',
-        contact_date: '2024-13-45',
-        sales_amount: -5000,
-        appointment_status: 'invalid_status',
-        service_type: 'Service_A',
+        item_id: "item_001",
+        value: 250000,
+        unit: "円",
+        data_type: "number",
       },
       {
-        row_number: 2,
-        customer_name: 'Customer B',
-        contact_date: '2024-01-15',
-        sales_amount: 10000,
-        appointment_status: 'confirmed',
-        service_type: '',
+        item_id: "item_002",
+        value: "2024-03-20",
+        unit: "日付形式(YYYY-MM-DD)",
+        data_type: "date",
       },
       {
-        row_number: 3,
-        customer_name: 'Customer C',
-        contact_date: '2024-01-16',
-        sales_amount: null,
-        appointment_status: 'pending',
-        service_type: 'Service_C',
+        item_id: "item_003",
+        value: "XYZ運送株式会社",
+        unit: "文字列",
+        data_type: "string",
       },
     ];
 
-    const result = validateSalesDataQuality(input_sales_data);
-
-    expect(result).toEqual({
-      is_valid: false,
-      total_errors: 6,
-      error_list: [
-        {
-          error_code: 'ERR_CUST_001',
-          error_message: '顧客名が空白です',
-          field_name: 'customer_name',
-          row_number: 1,
-          severity: 'error',
-          data_value: '',
-        },
-        {
-          error_code: 'ERR_DATE_002',
-          error_message: '接触日付の形式が不正です',
-          field_name: 'contact_date',
-          row_number: 1,
-          severity: 'error',
-          data_value: '2024-13-45',
-        },
-        {
-          error_code: 'ERR_AMT_003',
-          error_message: '売上金額が負数です',
-          field_name: 'sales_amount',
-          row_number: 1,
-          severity: 'error',
-          data_value: -5000,
-        },
-        {
-          error_code: 'ERR_STATUS_004',
-          error_message: 'アポ確定状況の値が無効です',
-          field_name: 'appointment_status',
-          row_number: 1,
-          severity: 'error',
-          data_value: 'invalid_status',
-        },
-        {
-          error_code: 'ERR_SVC_005',
-          error_message: 'サービス種別が空白です',
-          field_name: 'service_type',
-          row_number: 2,
-          severity: 'error',
-          data_value: '',
-        },
-        {
-          error_code: 'ERR_AMT_006',
-          error_message: '売上金額が空欄です',
-          field_name: 'sales_amount',
-          row_number: 3,
-          severity: 'error',
-          data_value: null,
-        },
+    const batch_result = applySalesDataValidationRules({
+      data: batch_validation_data,
+      metadata: [
+        updated_metadata_sales_amount,
+        metadata_transaction_date,
+        metadata_customer_name,
       ],
-      summary: {
-        error_count: 6,
-        warning_count: 0,
-        affected_rows: 3,
-        total_rows_checked: 3,
-      },
-      categorized_errors: {
-        required_field_errors: 2,
-        data_type_errors: 2,
-        range_errors: 1,
-        format_errors: 1,
-      },
     });
-
-    expect(result.is_valid).toBe(false);
-    expect(result.total_errors).toBe(6);
-    expect(result.error_list.length).toBe(6);
-    expect(result.summary.error_count).toBe(6);
-    expect(result.summary.affected_rows).toBe(3);
-
-    const error_codes = result.error_list.map((e) => e.error_code);
-    expect(error_codes).toContain('ERR_CUST_001');
-    expect(error_codes).toContain('ERR_DATE_002');
-    expect(error_codes).toContain('ERR_AMT_003');
-    expect(error_codes).toContain('ERR_STATUS_004');
-    expect(error_codes).toContain('ERR_SVC_005');
-    expect(error_codes).toContain('ERR_AMT_006');
-
-    const row_1_errors = result.error_list.filter((e) => e.row_number === 1);
-    expect(row_1_errors.length).toBe(4);
-
-    const all_have_details = result.error_list.every(
-      (e) =>
-        e.error_code &&
-        e.error_message &&
-        e.field_name &&
-        e.row_number &&
-        e.severity &&
-        e.data_value !== undefined
-    );
-    expect(all_have_details).toBe(true);
-
-    expect(result.categorized_errors.required_field_errors).toBe(2);
-    expect(result.categorized_errors.data_type_errors).toBe(2);
-    expect(result.categorized_errors.range_errors).toBe(1);
-    expect(result.categorized_errors.format_errors).toBe(1);
+    expect(batch_result.is_passed).toBe(true);
+    expect(batch_result.validated_count).toBe(3);
+    expect(batch_result.error_message).toBe("");
   });
 });

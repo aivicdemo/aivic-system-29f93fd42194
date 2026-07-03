@@ -1,131 +1,159 @@
-import { describe, test, expect } from "@jest/globals";
-import { generateStandardizedReleaseNotification } from "../../src/logic/it-1-br-1781935279444-1-2-1";
+import { describe, test, expect } from '@jest/globals';
+import { identifyApplicableContractDocument } from '../../src/logic/it-1781935279444-1-1-1';
 
-describe("月次サマリーテンプレートの定義・管理機能", () => {
-  test("SCEN-773: 変更履歴・適用ルール・有効期限が登録済みのとき、対象営業担当者に標準化された通知内容が正確に構成される", () => {
-    // Arrange: 変更履歴、適用ルール、有効期限がすべて登録済みの入力データ
-    const releaseInput = {
-      changeHistory: {
-        version: "v2.1",
-        releaseDate: "2024-02-15",
-        changedItems: [
-          {
-            itemName: "営業データ項目マッピング",
-            changeType: "追加",
-            description: "新規営業指標『顧客反応スコア』を追加",
-          },
-          {
-            itemName: "検証ルール",
-            changeType: "更新",
-            description:
-              "成約金額の異常値判定基準を100万円から150万円に変更",
-          },
-        ],
-      },
-      applicableRules: {
-        targetCustomers: ["顧客A", "顧客B"],
-        targetServices: ["営業代行", "品質管理"],
-        applicableStartDate: "2024-02-20",
-        applicableEndDate: "2024-12-31",
-      },
-      effectiveDate: {
-        startDate: "2024-02-20",
-        endDate: "2024-12-31",
-        timeZone: "Asia/Tokyo",
-      },
-      recipientList: [
-        { staffId: "STAFF001", staffName: "営業担当者A", email: "a@example.com" },
-        { staffId: "STAFF002", staffName: "営業担当者B", email: "b@example.com" },
-      ],
-    };
+describe('営業データ項目のメタデータ管理機能 - 契約書・提案資料の自動特定', () => {
+  // SCEN-773: [normal] 契約書・提案資料の自動特定・適用機能 - 顧客IDと案件IDから適用可能な最新版資料を正常に特定し、資料名・バージョン・有効期限・変更内容を返す
+  test('顧客IDと案件IDから適用可能な最新版資料を正常に特定し、資料名・バージョン・有効期限・変更内容を返す', () => {
+    const customerId = 'CUST-001';
+    const projectId = 'PROJ-001';
+    const today = new Date('2024-06-15');
 
-    // Act: 標準化された通知内容を生成
-    const notification = generateStandardizedReleaseNotification(releaseInput);
+    const result = identifyApplicableContractDocument({
+      customerId,
+      projectId,
+      asOfDate: today,
+    });
 
-    // Assert: 通知のタイトル形式が標準化されている
-    expect(notification.title).toBe(
-      "【最新版リリース】営業データ品質管理システム v2.1"
-    );
+    // 期待値: 複数候補がある場合、最新版（バージョン番号が最高）が優先される
+    // 有効期限が本日以降の資料のみが対象
+    // 資料名、バージョン、有効期限、変更内容を含む
 
-    // Assert: 本文の構成が標準化されている
-    expect(notification.body).toContain("平素よりお世話になっております。");
-    expect(notification.body).toContain("営業データ品質管理システム");
-    expect(notification.body).toContain("最新版をリリースいたしました。");
+    expect(result).toEqual({
+      documentId: 'DOC-CUST001-PROJ001-V003',
+      documentName: '提案資料_CUSTプロジェクト',
+      version: 3,
+      versionString: 'v3.0',
+      expiryDate: new Date('2024-12-31'),
+      effectiveDate: new Date('2024-06-01'),
+      changeLog: '単価見直し（10%割引適用）、納期短縮対応',
+      status: 'active',
+      documentType: 'proposal',
+      applicableCustomerId: 'CUST-001',
+      applicableProjectId: 'PROJ-001',
+    });
 
-    // Assert: 変更履歴情報が標準化された表記方法で記載される
-    expect(notification.body).toContain("■ 変更内容");
-    expect(notification.body).toContain(
-      "【追加】営業データ項目マッピング : 新規営業指標『顧客反応スコア』を追加"
-    );
-    expect(notification.body).toContain(
-      "【更新】検証ルール : 成約金額の異常値判定基準を100万円から150万円に変更"
-    );
+    // 資料名フィールドが正確に返されていることを検証
+    expect(result.documentName).toBe('提案資料_CUSTプロジェクト');
 
-    // Assert: 適用ルールが記載順序と表現が統一されている
-    expect(notification.body).toContain("■ 適用ルール");
-    expect(notification.body).toContain("対象顧客 : 顧客A、顧客B");
-    expect(notification.body).toContain("対象サービス : 営業代行、品質管理");
+    // バージョン番号が最高版であることを検証
+    expect(result.version).toBe(3);
+    expect(result.versionString).toBe('v3.0');
 
-    // Assert: 有効期限が標準フォーマット（ISO 8601）で表示される
-    expect(notification.body).toContain("■ 有効期限");
-    expect(notification.body).toContain("開始日時 : 2024-02-20 00:00:00 (Asia/Tokyo)");
-    expect(notification.body).toContain("終了日時 : 2024-12-31 23:59:59 (Asia/Tokyo)");
+    // 有効期限が本日以降であることを検証
+    expect(result.expiryDate.getTime()).toBeGreaterThanOrEqual(today.getTime());
 
-    // Assert: 署名とフッター情報が含まれている
-    expect(notification.body).toContain("営業データ品質管理・請求自動化システム");
-    expect(notification.body).toContain("システム管理者");
+    // 変更内容フィールドに前バージョンからの更新履歴が記載されていることを検証
+    expect(result.changeLog).toContain('単価見直し');
+    expect(result.changeLog).toContain('割引');
 
-    // Assert: 配信対象者の数が正確に反映されている
-    expect(notification.recipients.length).toBe(2);
+    // ステータスが有効であることを検証
+    expect(result.status).toBe('active');
 
-    // Assert: 複数受信者に対して同一の通知内容が構成されている
-    expect(notification.recipients[0].staffId).toBe("STAFF001");
-    expect(notification.recipients[0].staffName).toBe("営業担当者A");
-    expect(notification.recipients[0].email).toBe("a@example.com");
-    expect(notification.recipients[0].notificationContent).toBe(
-      notification.recipients[1].notificationContent
-    );
+    // 効果開始日が正確に返されていることを検証
+    expect(result.effectiveDate).toEqual(new Date('2024-06-01'));
+  });
 
-    // Assert: テンプレート変数が正しく展開されている
-    expect(notification.recipients[0].notificationContent).toContain(
-      "営業担当者A"
-    );
-    expect(notification.recipients[0].notificationContent).not.toContain(
-      "{{staffName}}"
-    );
+  test('複数の有効な資料候補がある場合、最新版が最優先で返される', () => {
+    const customerId = 'CUST-002';
+    const projectId = 'PROJ-002';
+    const today = new Date('2024-06-15');
 
-    expect(notification.recipients[1].notificationContent).toContain(
-      "営業担当者B"
-    );
-    expect(notification.recipients[1].notificationContent).not.toContain(
-      "{{staffName}}"
-    );
+    const result = identifyApplicableContractDocument({
+      customerId,
+      projectId,
+      asOfDate: today,
+    });
 
-    // Assert: 通知メタデータが正確に記録されている
-    expect(notification.metadata.versionNumber).toBe("v2.1");
-    expect(notification.metadata.releaseDate).toBe("2024-02-15");
-    expect(notification.metadata.notificationType).toBe("release_notification");
-    expect(notification.metadata.templateVersion).toBe("1.0");
+    // 複数の有効な資料の中から最新版（v2.0）が返されることを検証
+    expect(result.version).toBe(2);
+    expect(result.versionString).toBe('v2.0');
+    expect(result.documentName).toBe('基本契約書_CUST002');
+  });
 
-    // Assert: 通知配信タイムスタンプが記録されている
-    expect(notification.metadata.generatedAt).toBeDefined();
-    expect(typeof notification.metadata.generatedAt).toBe("string");
+  test('有効期限切れの資料は除外される', () => {
+    const customerId = 'CUST-003';
+    const projectId = 'PROJ-003';
+    const today = new Date('2024-06-15');
 
-    // Assert: 適用ルール違反チェック（顧客またはサービスがどちらも指定されている）
-    expect(notification.applicableRules.targetCustomers.length).toBeGreaterThan(0);
-    expect(notification.applicableRules.targetServices.length).toBeGreaterThan(0);
+    const result = identifyApplicableContractDocument({
+      customerId,
+      projectId,
+      asOfDate: today,
+    });
 
-    // Assert: 有効期限の整合性検証（開始日が終了日より前）
-    const startDate = new Date(
-      notification.effectiveDate.startDate
-    ).getTime();
-    const endDate = new Date(notification.effectiveDate.endDate).getTime();
-    expect(startDate).toBeLessThan(endDate);
+    // 有効期限が本日以降であることを検証
+    expect(result.expiryDate.getTime()).toBeGreaterThanOrEqual(today.getTime());
 
-    // Assert: タイトルが最大文字数以内
-    expect(notification.title.length).toBeLessThanOrEqual(100);
+    // 無効期限切れ資料は返却されないことを検証（v1.0は期限切れ、v2.0が返される）
+    expect(result.version).toBe(2);
+  });
 
-    // Assert: 本文が最大文字数以内
-    expect(notification.body.length).toBeLessThanOrEqual(10000);
+  test('適用可能な資料が存在しない場合、エラーを発生させる', () => {
+    const customerId = 'CUST-999';
+    const projectId = 'PROJ-999';
+    const today = new Date('2024-06-15');
+
+    expect(() =>
+      identifyApplicableContractDocument({
+        customerId,
+        projectId,
+        asOfDate: today,
+      })
+    ).toThrow(/資料/);
+  });
+
+  test('変更内容フィールドに前バージョンからの更新履歴が正確に記載されている', () => {
+    const customerId = 'CUST-001';
+    const projectId = 'PROJ-001';
+    const today = new Date('2024-06-15');
+
+    const result = identifyApplicableContractDocument({
+      customerId,
+      projectId,
+      asOfDate: today,
+    });
+
+    // 変更内容フィールドが空文字列ではなく、実際の更新内容を含んでいることを検証
+    expect(result.changeLog).toBeTruthy();
+    expect(result.changeLog.length).toBeGreaterThan(0);
+    expect(typeof result.changeLog).toBe('string');
+  });
+
+  test('JSON形式で完全な情報が返却される', () => {
+    const customerId = 'CUST-001';
+    const projectId = 'PROJ-001';
+    const today = new Date('2024-06-15');
+
+    const result = identifyApplicableContractDocument({
+      customerId,
+      projectId,
+      asOfDate: today,
+    });
+
+    // 必須フィールドがすべて存在することを検証
+    expect(result).toHaveProperty('documentId');
+    expect(result).toHaveProperty('documentName');
+    expect(result).toHaveProperty('version');
+    expect(result).toHaveProperty('versionString');
+    expect(result).toHaveProperty('expiryDate');
+    expect(result).toHaveProperty('effectiveDate');
+    expect(result).toHaveProperty('changeLog');
+    expect(result).toHaveProperty('status');
+    expect(result).toHaveProperty('documentType');
+    expect(result).toHaveProperty('applicableCustomerId');
+    expect(result).toHaveProperty('applicableProjectId');
+
+    // 各フィールドの型が正確であることを検証
+    expect(typeof result.documentId).toBe('string');
+    expect(typeof result.documentName).toBe('string');
+    expect(typeof result.version).toBe('number');
+    expect(typeof result.versionString).toBe('string');
+    expect(result.expiryDate instanceof Date).toBe(true);
+    expect(result.effectiveDate instanceof Date).toBe(true);
+    expect(typeof result.changeLog).toBe('string');
+    expect(typeof result.status).toBe('string');
+    expect(typeof result.documentType).toBe('string');
+    expect(typeof result.applicableCustomerId).toBe('string');
+    expect(typeof result.applicableProjectId).toBe('string');
   });
 });

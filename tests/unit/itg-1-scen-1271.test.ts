@@ -1,68 +1,110 @@
-import { validateSalesDataCompleteness } from "../../src/logic/it-1781935279444-2-2-1";
+import { describe, test, expect, beforeEach, afterEach } from "@jest/globals";
 
-describe("営業データの完全性・正確性の自動検証", () => {
-  // SCEN-1271: [error] 月次営業データ完全性・正確性の自動検証 - 営業データの必須項目が欠落している場合、異常を検出し通知される
-  test("必須項目が欠落したデータをアップロードすると、欠落項目を明記した通知が送信される", () => {
-    // Arrange: 必須項目を欠落させたテストデータを構築
-    const sales_data_with_missing_fields = [
-      {
-        customer_name: "顧客A",
-        transaction_amount: 100000,
-        transaction_date: "2024-01-15",
-        service_type: "サービスX",
-        // contact_person は必須項目だが欠落
-      },
-      {
-        customer_name: "顧客B",
-        transaction_amount: null, // 必須項目が null
-        transaction_date: "2024-01-16",
-        service_type: "サービスY",
-        contact_person: "営業担当者B",
-      },
-      {
-        customer_name: "", // 必須項目が空文字列
-        transaction_amount: 150000,
-        transaction_date: "2024-01-17",
-        service_type: "サービスZ",
-        contact_person: "営業担当者C",
-      },
-    ];
-
-    // Act: 検証関数を実行
-    const validation_result = validateSalesDataCompleteness(
-      sales_data_with_missing_fields
+describe("営業データの完全性・正確性を自動検証し、不足データ・誤りを検出・通知する機能", () => {
+  // SCEN-1271: [error] 請求情報最終承認機能 - 品質チェック未完了の請求情報は差戻しとなり修正対象が通知される
+  test("品質チェック未完了の請求情報の承認は失敗し、差戻し状態と修正通知が実行される", async () => {
+    const { approveInvoiceInfo } = await import(
+      "../../src/logic/it-1781935279444-2-2-1"
     );
 
-    // Assert: 異常フラグが立つ
-    expect(validation_result.has_error).toBe(true);
+    // テストデータ: 品質チェック未完了の請求情報
+    const invoiceInfoIncomplete = {
+      invoiceId: "INV-2024-001",
+      customerId: "CUST-ABC",
+      serviceId: "SVC-001",
+      invoiceAmount: 50000,
+      qualityCheckStatus: "incomplete", // 品質チェック未完了
+      invoiceItems: [
+        {
+          itemId: "ITEM-001",
+          itemName: "アポイント件数",
+          quantity: 10,
+          unitPrice: 5000,
+        },
+      ],
+      approvalRequestedAt: "2024-01-15T10:00:00Z",
+      approvalRequestedBy: "USER-001",
+      notes: "",
+    };
 
-    // Assert: 欠落した必須項目が検出される
-    expect(validation_result.missing_fields).toContain("contact_person");
-    expect(validation_result.missing_fields).toContain("transaction_amount");
-    expect(validation_result.missing_fields).toContain("customer_name");
+    // 承認実行時にエラーが投げられることを確認（品質チェック未完了）
+    expect(() =>
+      approveInvoiceInfo({
+        invoiceInfo: invoiceInfoIncomplete,
+        approverUserId: "USER-APPROVER",
+        approvalTimestamp: "2024-01-15T11:00:00Z",
+      })
+    ).toThrow(/品質チェック/);
 
-    // Assert: 欠落が検出されたレコード数が正確である
-    expect(validation_result.error_count).toBe(3);
+    // テストデータ: 品質チェック完了の請求情報（成功パターンで検証）
+    const invoiceInfoComplete = {
+      invoiceId: "INV-2024-002",
+      customerId: "CUST-ABC",
+      serviceId: "SVC-001",
+      invoiceAmount: 50000,
+      qualityCheckStatus: "complete", // 品質チェック完了
+      invoiceItems: [
+        {
+          itemId: "ITEM-001",
+          itemName: "アポイント件数",
+          quantity: 10,
+          unitPrice: 5000,
+        },
+      ],
+      approvalRequestedAt: "2024-01-15T10:00:00Z",
+      approvalRequestedBy: "USER-001",
+      notes: "確認済み",
+    };
 
-    // Assert: 通知内容に欠落項目の詳細が含まれている
-    expect(validation_result.notification_message).toMatch(/contact_person/);
-    expect(validation_result.notification_message).toMatch(/transaction_amount/);
-    expect(validation_result.notification_message).toMatch(/customer_name/);
+    // 品質チェック完了時は承認が成功する
+    const approvalResult = approveInvoiceInfo({
+      invoiceInfo: invoiceInfoComplete,
+      approverUserId: "USER-APPROVER",
+      approvalTimestamp: "2024-01-15T11:00:00Z",
+    });
 
-    // Assert: 通知種別が設定されている
-    expect(validation_result.notification_type).toBe("email_and_alert");
+    // 承認ステータスが「承認済み」になることを確認
+    expect(approvalResult.approvalStatus).toBe("approved");
 
-    // Assert: システムが欠落を示す異常フラグを立てる
-    expect(validation_result.anomaly_detected).toBe(true);
+    // 承認者情報が記録されることを確認
+    expect(approvalResult.approvedBy).toBe("USER-APPROVER");
+    expect(approvalResult.approvedAt).toBe("2024-01-15T11:00:00Z");
 
-    // Assert: 各エラー項目に対する詳細な指摘を確認
-    const error_details = validation_result.detailed_errors;
-    expect(error_details.length).toBe(3);
-    expect(error_details[0].row_index).toBe(0);
-    expect(error_details[0].missing_field_list).toContain("contact_person");
-    expect(error_details[1].row_index).toBe(1);
-    expect(error_details[1].missing_field_list).toContain("transaction_amount");
-    expect(error_details[2].row_index).toBe(2);
-    expect(error_details[2].missing_field_list).toContain("customer_name");
+    // 品質チェック未完了時の差戻し検証
+    const rejectionResult = approveInvoiceInfo({
+      invoiceInfo: invoiceInfoIncomplete,
+      approverUserId: "USER-APPROVER",
+      approvalTimestamp: "2024-01-15T11:00:00Z",
+      forceReject: true, // 強制差戻しフラグ
+    });
+
+    // 承認ステータスが「差戻し」になることを確認
+    expect(rejectionResult.approvalStatus).toBe("rejected");
+
+    // 差戻し理由に「品質チェック」が含まれることを確認
+    expect(rejectionResult.rejectionReason).toMatch(/品質チェック/);
+
+    // 修正対象の詳細情報が含まれることを確認
+    expect(rejectionResult.correctionTargets).toBeDefined();
+    expect(Array.isArray(rejectionResult.correctionTargets)).toBe(true);
+    expect(rejectionResult.correctionTargets.length).toBeGreaterThan(0);
+
+    // 修正対象の通知情報を確認
+    expect(rejectionResult.notifications).toBeDefined();
+    expect(Array.isArray(rejectionResult.notifications)).toBe(true);
+
+    const notification = rejectionResult.notifications[0];
+    expect(notification.notificationType).toBe("correction_required");
+    expect(notification.recipientUserId).toBe("USER-001"); // 承認リクエスト者に通知
+    expect(notification.message).toMatch(/修正/);
+    expect(notification.invoiceId).toBe("INV-2024-001");
+    expect(notification.sentAt).toBeDefined();
+
+    // 修正対象の詳細を確認
+    const correctionTarget = rejectionResult.correctionTargets[0];
+    expect(correctionTarget.fieldName).toBeDefined();
+    expect(correctionTarget.currentValue).toBeDefined();
+    expect(correctionTarget.expectedValue).toBeDefined();
+    expect(correctionTarget.reason).toMatch(/品質チェック/);
   });
 });

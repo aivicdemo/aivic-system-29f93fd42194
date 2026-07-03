@@ -1,73 +1,194 @@
-import { evaluateNewStaffCompetency } from '../../src/logic/it-1-2-1';
+import { describe, test, expect } from '@jest/globals';
+import { updateDocumentWithMultipleImprovements } from '../../src/logic/it-1781935279444-2-1-1';
 
-describe('営業成果データから請求対象項目を自動抽出し、顧客ごと・サービスごとの請求額を集計する機能', () => {
-  // SCEN-1093: [edge] 新入スタッフ到達度評価判定 - 1業務でも評価対象外の場合、判定保留となること
-  test('1業務でも評価対象外が存在する場合、到達度評価判定が判定保留状態となること', () => {
-    // 手順: 新入スタッフ到達度評価判定機能にアクセスする
-    // → 評価対象となる複数の業務を設定する（例：5業務）
-    // → そのうち1業務を評価対象外として明示的にマーク、または評価データを欠落させる
-    // → 残りの4業務については正常な評価データを入力する
-    // → 到達度評価の判定処理を実行する
-    // → 判定結果の状態を確認する
+describe('営業データ入力時の品質検証ルール定義・実行機能', () => {
+  // SCEN-1093: [edge] ドキュメント反映・更新機能 - 複数の改善点が同時に反映された場合、すべての更新が正確に適用される
+  test('複数の改善点を同時に更新した場合、すべてが正確に反映される', () => {
+    const documentId = 'DOC-20240115-001';
+    const userId = 'USER-REP-001';
+    const timestamp = new Date('2024-01-15T11:00:00Z');
 
-    const evaluationTasks = [
+    const multipleImprovements = [
       {
-        task_id: 'task_001',
-        task_name: '請求書作成業務',
-        is_evaluated: true,
-        score: 90,
-        pass_threshold: 80,
+        fieldName: 'salesAmount',
+        previousValue: 1000000,
+        newValue: 1050000,
+        reason: '営業金額修正',
+        improvementType: 'correction'
       },
       {
-        task_id: 'task_002',
-        task_name: '営業報告書集計業務',
-        is_evaluated: true,
-        score: 85,
-        pass_threshold: 80,
+        fieldName: 'billingDate',
+        previousValue: '2024-01-31',
+        newValue: '2024-02-15',
+        reason: '請求日変更',
+        improvementType: 'dateChange'
       },
       {
-        task_id: 'task_003',
-        task_name: '契約書管理業務',
-        is_evaluated: false, // 評価対象外として明示的にマーク
-        score: null,
-        pass_threshold: 80,
-      },
-      {
-        task_id: 'task_004',
-        task_name: '営業データ品質チェック業務',
-        is_evaluated: true,
-        score: 88,
-        pass_threshold: 80,
-      },
-      {
-        task_id: 'task_005',
-        task_name: '顧客成果指標集計業務',
-        is_evaluated: true,
-        score: 92,
-        pass_threshold: 80,
-      },
+        fieldName: 'customerInfo',
+        previousValue: 'CUST-2023-001',
+        newValue: 'CUST-2024-001',
+        reason: '顧客情報更新',
+        improvementType: 'customerUpdate'
+      }
     ];
 
-    const staffId = 'staff_new_001';
-    const evaluationPeriod = {
-      start_date: '2024-01-01',
-      end_date: '2024-01-31',
-    };
+    const result = updateDocumentWithMultipleImprovements(
+      documentId,
+      userId,
+      multipleImprovements,
+      timestamp
+    );
 
-    const result = evaluateNewStaffCompetency({
-      staff_id: staffId,
-      evaluation_tasks: evaluationTasks,
-      evaluation_period: evaluationPeriod,
+    expect(result.success).toBe(true);
+    expect(result.documentId).toBe('DOC-20240115-001');
+    expect(result.updateCount).toBe(3);
+    expect(result.appliedImprovements).toEqual([
+      {
+        fieldName: 'salesAmount',
+        previousValue: 1000000,
+        newValue: 1050000,
+        status: 'applied'
+      },
+      {
+        fieldName: 'billingDate',
+        previousValue: '2024-01-31',
+        newValue: '2024-02-15',
+        status: 'applied'
+      },
+      {
+        fieldName: 'customerInfo',
+        previousValue: 'CUST-2023-001',
+        newValue: 'CUST-2024-001',
+        status: 'applied'
+      }
+    ]);
+
+    expect(result.integrityVerified).toBe(true);
+    expect(result.historyLogRecorded).toBe(true);
+    expect(result.relatedDataSynchronized).toBe(true);
+
+    expect(result.auditLog).toHaveLength(3);
+    expect(result.auditLog[0]).toEqual({
+      timestamp: '2024-01-15T11:00:00Z',
+      userId: 'USER-REP-001',
+      fieldName: 'salesAmount',
+      oldValue: 1000000,
+      newValue: 1050000,
+      reason: '営業金額修正'
+    });
+    expect(result.auditLog[1]).toEqual({
+      timestamp: '2024-01-15T11:00:00Z',
+      userId: 'USER-REP-001',
+      fieldName: 'billingDate',
+      oldValue: '2024-01-31',
+      newValue: '2024-02-15',
+      reason: '請求日変更'
+    });
+    expect(result.auditLog[2]).toEqual({
+      timestamp: '2024-01-15T11:00:00Z',
+      userId: 'USER-REP-001',
+      fieldName: 'customerInfo',
+      oldValue: 'CUST-2023-001',
+      newValue: 'CUST-2024-001',
+      reason: '顧客情報更新'
     });
 
-    // 期待結果: 1業務でも評価対象外が存在する場合、最終的な到達度評価判定が「判定保留」状態となり、確定判定に至らないこと
-    expect(result.judgment_status).toBe('pending');
-    expect(result.is_finalized).toBe(false);
-    expect(result.unevaluated_tasks).toContain('task_003');
-    expect(result.unevaluated_count).toBe(1);
-    expect(result.evaluated_count).toBe(4);
-    expect(result.total_tasks).toBe(5);
-    expect(result.can_proceed_to_production).toBe(false);
-    expect(result.reason_for_pending).toMatch(/評価対象外/);
+    expect(result.finalDocumentState).toEqual({
+      salesAmount: 1050000,
+      billingDate: '2024-02-15',
+      customerInfo: 'CUST-2024-001'
+    });
+
+    expect(result.performanceMetrics.totalExecutionTimeMs).toBeLessThan(5000);
+    expect(result.performanceMetrics.errorCount).toBe(0);
+    expect(result.performanceMetrics.synchronizationDelay).toBeLessThan(1000);
+
+    expect(result.relatedDataUpdates).toEqual({
+      invoiceGenerated: {
+        invoiceId: 'INV-20240215-001',
+        updatedAmount: 1050000,
+        status: 'updated'
+      },
+      customerMasterUpdated: {
+        customerId: 'CUST-2024-001',
+        syncStatus: 'synchronized'
+      },
+      billingRecordUpdated: {
+        recordId: 'BILL-20240215-001',
+        newBillingDate: '2024-02-15',
+        status: 'updated'
+      }
+    });
+  });
+
+  test('複数の改善点に含まれるフィールドが無効な場合、エラーが発生する', () => {
+    const documentId = 'DOC-20240115-002';
+    const userId = 'USER-REP-001';
+    const timestamp = new Date('2024-01-15T11:00:00Z');
+
+    const invalidImprovements = [
+      {
+        fieldName: 'salesAmount',
+        previousValue: 1000000,
+        newValue: 1050000,
+        reason: '営業金額修正',
+        improvementType: 'correction'
+      },
+      {
+        fieldName: 'invalidField',
+        previousValue: 'old',
+        newValue: 'new',
+        reason: '無効フィールド修正',
+        improvementType: 'correction'
+      }
+    ];
+
+    expect(() =>
+      updateDocumentWithMultipleImprovements(
+        documentId,
+        userId,
+        invalidImprovements,
+        timestamp
+      )
+    ).toThrow(/無効フィールド/);
+  });
+
+  test('空の改善点配列を送信した場合、エラーが発生する', () => {
+    const documentId = 'DOC-20240115-003';
+    const userId = 'USER-REP-001';
+    const timestamp = new Date('2024-01-15T11:00:00Z');
+    const emptyImprovements: any[] = [];
+
+    expect(() =>
+      updateDocumentWithMultipleImprovements(
+        documentId,
+        userId,
+        emptyImprovements,
+        timestamp
+      )
+    ).toThrow(/改善点/);
+  });
+
+  test('改善点の数が最大制限を超えた場合、エラーが発生する', () => {
+    const documentId = 'DOC-20240115-004';
+    const userId = 'USER-REP-001';
+    const timestamp = new Date('2024-01-15T11:00:00Z');
+
+    const excessiveImprovements = Array.from({ length: 51 }, (_, i) => ({
+      fieldName: `field${i}`,
+      previousValue: `old${i}`,
+      newValue: `new${i}`,
+      reason: `修正理由${i}`,
+      improvementType: 'correction'
+    }));
+
+    expect(() =>
+      updateDocumentWithMultipleImprovements(
+        documentId,
+        userId,
+        excessiveImprovements,
+        timestamp
+      )
+    ).toThrow(/制限/);
   });
 });

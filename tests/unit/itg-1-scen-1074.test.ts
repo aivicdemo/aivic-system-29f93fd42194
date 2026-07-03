@@ -1,113 +1,46 @@
-import { detectContractChangeAndValidateNotificationContact } from "../../src/logic/it-1-1-1";
+import { describe, test, expect, beforeEach } from "@jest/globals";
+import {
+  validateSalesReportCompleteness,
+  type SalesReportValidationInput,
+  type SalesReportValidationResult,
+} from "../../src/logic/it-1781935279444-2-2-1";
 
-describe("営業成果データの自動検証ルール定義と異常検出機能", () => {
-  // SCEN-1074
-  test("契約・成果物変更通知機能 - 変更検知は行われたが連絡先情報が不完全の場合、バリデーションエラーが返される", () => {
-    // 変更前の契約情報
-    const previousContract = {
-      contractId: "CT-20240115-001",
-      customerId: "CUST-A001",
-      contractAmount: 500000,
-      deliverableContent: "営業代行サービス基本パッケージ",
-      startDate: "2024-01-01",
-      endDate: "2024-12-31",
-      contactEmail: "contact@example.com",
+describe("営業報告書集計自動検証機能", () => {
+  // SCEN-1074: [normal] 営業報告書集計自動検証機能 - 営業データの必須項目がすべて揃い計算式が正確に適用されている場合に検証完了と判定される
+  test("必須項目がすべて揃い計算式が正確に適用されている場合に検証完了と判定される", () => {
+    const testInput: SalesReportValidationInput = {
+      sales_rep_name: "田中太郎",
+      sales_date: "2024-01-15",
+      product_name: "営業代行サービス",
+      quantity: 10,
+      unit_price: 50000,
+      customer_name: "顧客A企業",
+      tax_rate: 0.1,
     };
 
-    // 変更後の契約情報（金額と成果物内容を変更）
-    const changedContract = {
-      contractId: "CT-20240115-001",
-      customerId: "CUST-A001",
-      contractAmount: 600000,
-      deliverableContent: "営業代行サービス拡張パッケージ",
-      startDate: "2024-01-01",
-      endDate: "2024-12-31",
-      contactEmail: "invalid-email",
-    };
+    const result: SalesReportValidationResult =
+      validateSalesReportCompleteness(testInput);
 
-    // 無効なメールアドレスを含む連絡先情報
-    const invalidContactInfo = {
-      recipientName: "山田太郎",
-      recipientEmail: "invalid-email",
-      recipientPhone: "09012345678",
-      recipientDepartment: "営業部",
-    };
+    // 検証ステータスが「検証完了」
+    expect(result.validation_status).toBe("検証完了");
 
-    // 関数を実行
-    const result = detectContractChangeAndValidateNotificationContact(
-      previousContract,
-      changedContract,
-      invalidContactInfo
-    );
+    // すべての必須項目が揃っていることが確認される
+    expect(result.required_fields_complete).toBe(true);
 
-    // 変更が検知されていることを確認
-    expect(result.changeDetected).toBe(true);
+    // 計算項目の検証
+    // 小計: 10 * 50000 = 500000
+    expect(result.subtotal).toBe(500000);
 
-    // バリデーションエラーが発生していることを確認
-    expect(result.validationSuccess).toBe(false);
+    // 税金: 500000 * 0.1 = 50000
+    expect(result.tax_amount).toBe(50000);
 
-    // エラーコードがメールアドレス形式に関するものであることを確認
-    expect(result.errorCode).toBe("INVALID_EMAIL_FORMAT");
+    // 合計金額: 500000 + 50000 = 550000
+    expect(result.total_amount).toBe(550000);
 
-    // エラーメッセージに不正な連絡先情報の詳細が含まれていることを確認
-    expect(result.errorMessage).toContain("メールアドレス");
-    expect(result.errorMessage).toContain("invalid-email");
+    // 計算式が正確に適用されていることが確認される
+    expect(result.calculation_accurate).toBe(true);
 
-    // 通知が送信されていないことを確認
-    expect(result.notificationSent).toBe(false);
-
-    // 変更検知結果にはコントラクト変更内容が含まれていることを確認
-    expect(result.detectedChanges).toEqual({
-      contractAmountChanged: true,
-      deliverableContentChanged: true,
-      previousAmount: 500000,
-      newAmount: 600000,
-      previousContent: "営業代行サービス基本パッケージ",
-      newContent: "営業代行サービス拡張パッケージ",
-    });
-
-    // 複数の無効なメールアドレスパターンを検証
-    const invalidEmailPatterns = ["test@", "@example.com", "", "test@@example.com"];
-
-    invalidEmailPatterns.forEach((invalidEmail) => {
-      const contactWithInvalidEmail = {
-        recipientName: "佐藤花子",
-        recipientEmail: invalidEmail,
-        recipientPhone: "09087654321",
-        recipientDepartment: "経理部",
-      };
-
-      const resultWithPattern =
-        detectContractChangeAndValidateNotificationContact(
-          previousContract,
-          changedContract,
-          contactWithInvalidEmail
-        );
-
-      expect(resultWithPattern.changeDetected).toBe(true);
-      expect(resultWithPattern.validationSuccess).toBe(false);
-      expect(resultWithPattern.errorCode).toBe("INVALID_EMAIL_FORMAT");
-      expect(resultWithPattern.notificationSent).toBe(false);
-    });
-
-    // 有効なメールアドレスの場合は成功することを確認
-    const validContactInfo = {
-      recipientName: "山田太郎",
-      recipientEmail: "contact@example.com",
-      recipientPhone: "09012345678",
-      recipientDepartment: "営業部",
-    };
-
-    const resultValid =
-      detectContractChangeAndValidateNotificationContact(
-        previousContract,
-        changedContract,
-        validContactInfo
-      );
-
-    expect(resultValid.changeDetected).toBe(true);
-    expect(resultValid.validationSuccess).toBe(true);
-    expect(resultValid.notificationSent).toBe(true);
-    expect(resultValid.errorCode).toBeNull();
+    // エラーが存在しないことを確認
+    expect(result.validation_errors).toEqual([]);
   });
 });

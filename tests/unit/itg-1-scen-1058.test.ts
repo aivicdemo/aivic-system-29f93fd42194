@@ -1,183 +1,261 @@
-import { describe, test, expect } from '@jest/globals';
-import { calculateBillingAmountByCustomerAndService } from '../../src/logic/it-1781935279444-1-1-1';
+import { determineActiveContractVersion } from "../../src/logic/it-1781935279444-1-1-1";
 
-describe('営業データ項目のメタデータ管理機能 - 請求対象項目自動抽出・集計', () => {
-  test('SCEN-1058: 営業活動データから請求ルールに基づいて顧客別・サービス別の請求額が正確に集計される', () => {
-    // テスト用の営業活動データ
-    const salesActivities = [
+describe("営業データ項目のメタデータ管理機能 - 契約書バージョン自動判定", () => {
+  test("SCEN-1058: 契約書バージョン自動判定機能 - 顧客ごとの現在有効な契約書バージョンが正しく判定される", () => {
+    const now = new Date("2024-06-15T10:00:00Z");
+    const yesterday = new Date("2024-06-14T10:00:00Z");
+    const tomorrow = new Date("2024-06-16T10:00:00Z");
+    const sixMonthsAgo = new Date("2023-12-15T10:00:00Z");
+    const sixMonthsFuture = new Date("2024-12-15T10:00:00Z");
+
+    // テストケース1: 単一顧客の複数バージョン管理 - 有効な最新版を判定
+    const contractsCustomer1 = [
       {
-        id: 'activity_001',
-        customerId: 'cust_A',
-        serviceType: 'service_basic',
-        amount: 100000,
-        appointmentCount: 5,
-        contractCount: 2,
-        date: '2024-01-15'
+        contractId: "contract_001_v1",
+        customerId: "cust_001",
+        version: "1.0",
+        effectiveFrom: new Date("2024-01-01T00:00:00Z"),
+        effectiveTo: new Date("2024-03-31T23:59:59Z"),
+        lastUpdatedAt: new Date("2024-01-15T09:30:00Z"),
       },
       {
-        id: 'activity_002',
-        customerId: 'cust_A',
-        serviceType: 'service_premium',
-        amount: 150000,
-        appointmentCount: 8,
-        contractCount: 3,
-        date: '2024-01-16'
+        contractId: "contract_001_v2",
+        customerId: "cust_001",
+        version: "2.0",
+        effectiveFrom: new Date("2024-04-01T00:00:00Z"),
+        effectiveTo: new Date("2024-08-31T23:59:59Z"),
+        lastUpdatedAt: new Date("2024-03-25T14:20:00Z"),
       },
       {
-        id: 'activity_003',
-        customerId: 'cust_B',
-        serviceType: 'service_basic',
-        amount: 80000,
-        appointmentCount: 4,
-        contractCount: 1,
-        date: '2024-01-17'
+        contractId: "contract_001_v3",
+        customerId: "cust_001",
+        version: "3.0",
+        effectiveFrom: new Date("2024-09-01T00:00:00Z"),
+        effectiveTo: new Date("2024-12-31T23:59:59Z"),
+        lastUpdatedAt: new Date("2024-08-30T11:15:00Z"),
       },
-      {
-        id: 'activity_004',
-        customerId: 'cust_B',
-        serviceType: 'service_premium',
-        amount: 200000,
-        appointmentCount: 10,
-        contractCount: 4,
-        date: '2024-01-18'
-      }
     ];
 
-    // 請求ルール設定
-    // 顧客別割引率: cust_A=10%, cust_B=5%
-    // サービス別料金: service_basic=1000円/アポ, service_premium=1500円/アポ
-    // 成約数による追加料金: 1成約あたり5000円
-    const billingRules = {
-      customerDiscounts: {
-        cust_A: 0.10,
-        cust_B: 0.05
-      },
-      servicePricingPerAppointment: {
-        service_basic: 1000,
-        service_premium: 1500
-      },
-      contractBonusPerContract: 5000,
-      minimumBillingAmount: 50000,
-      maximumBillingAmount: 500000
-    };
-
-    // 期待される計算ロジック:
-    // cust_A × service_basic:
-    //   = (5 appts × 1000) + (2 contracts × 5000) = 5000 + 10000 = 15000
-    //   割引前小計: 15000
-    //   割引率10%適用: 15000 × (1 - 0.10) = 13500
-    //   最小請求額50000 >= 13500なので -> 50000
-    //
-    // cust_A × service_premium:
-    //   = (8 appts × 1500) + (3 contracts × 5000) = 12000 + 15000 = 27000
-    //   割引前小計: 27000
-    //   割引率10%適用: 27000 × (1 - 0.10) = 24300
-    //   最小請求額50000 >= 24300なので -> 50000
-    //
-    // cust_A合計: 50000 + 50000 = 100000
-    //
-    // cust_B × service_basic:
-    //   = (4 appts × 1000) + (1 contract × 5000) = 4000 + 5000 = 9000
-    //   割引前小計: 9000
-    //   割引率5%適用: 9000 × (1 - 0.05) = 8550
-    //   最小請求額50000 >= 8550なので -> 50000
-    //
-    // cust_B × service_premium:
-    //   = (10 appts × 1500) + (4 contracts × 5000) = 15000 + 20000 = 35000
-    //   割引前小計: 35000
-    //   割引率5%適用: 35000 × (1 - 0.05) = 33250
-    //   最小請求額50000 >= 33250なので -> 50000
-    //
-    // cust_B合計: 50000 + 50000 = 100000
-    //
-    // 全体合計: 100000 + 100000 = 200000
-
-    const result = calculateBillingAmountByCustomerAndService(
-      salesActivities,
-      billingRules
+    const result1 = determineActiveContractVersion(
+      contractsCustomer1,
+      "cust_001",
+      now
     );
 
-    // 顧客別請求額の検証
-    expect(result.byCustomer).toEqual({
-      cust_A: 100000,
-      cust_B: 100000
+    expect(result1).toEqual({
+      version: "2.0",
+      contractId: "contract_001_v2",
+      lastUpdatedAt: new Date("2024-03-25T14:20:00Z"),
+      effectiveFrom: new Date("2024-04-01T00:00:00Z"),
+      effectiveTo: new Date("2024-08-31T23:59:59Z"),
     });
 
-    // サービス別請求額の検証
-    expect(result.byService).toEqual({
-      service_basic: 100000,
-      service_premium: 100000
+    // テストケース2: 有効期限切れの契約書は除外される
+    const contractsWithExpired = [
+      {
+        contractId: "contract_002_old",
+        customerId: "cust_002",
+        version: "1.0",
+        effectiveFrom: new Date("2024-01-01T00:00:00Z"),
+        effectiveTo: new Date("2024-06-14T23:59:59Z"),
+        lastUpdatedAt: new Date("2024-01-10T10:00:00Z"),
+      },
+      {
+        contractId: "contract_002_current",
+        customerId: "cust_002",
+        version: "2.0",
+        effectiveFrom: new Date("2024-06-15T00:00:00Z"),
+        effectiveTo: new Date("2024-12-31T23:59:59Z"),
+        lastUpdatedAt: new Date("2024-06-10T15:45:00Z"),
+      },
+    ];
+
+    const result2 = determineActiveContractVersion(
+      contractsWithExpired,
+      "cust_002",
+      now
+    );
+
+    expect(result2).toEqual({
+      version: "2.0",
+      contractId: "contract_002_current",
+      lastUpdatedAt: new Date("2024-06-10T15:45:00Z"),
+      effectiveFrom: new Date("2024-06-15T00:00:00Z"),
+      effectiveTo: new Date("2024-12-31T23:59:59Z"),
     });
 
-    // 顧客別・サービス別組み合わせの検証
-    expect(result.byCustomerAndService).toEqual({
-      'cust_A|service_basic': 50000,
-      'cust_A|service_premium': 50000,
-      'cust_B|service_basic': 50000,
-      'cust_B|service_premium': 50000
+    // テストケース3: 複数顧客のシナリオ - 顧客ごとに異なるバージョンが返される
+    const contractsMultipleCustomers = [
+      {
+        contractId: "contract_003_v1",
+        customerId: "cust_003",
+        version: "1.5",
+        effectiveFrom: new Date("2024-02-01T00:00:00Z"),
+        effectiveTo: new Date("2024-07-31T23:59:59Z"),
+        lastUpdatedAt: new Date("2024-02-05T08:20:00Z"),
+      },
+      {
+        contractId: "contract_004_v2",
+        customerId: "cust_004",
+        version: "2.1",
+        effectiveFrom: new Date("2024-05-01T00:00:00Z"),
+        effectiveTo: new Date("2024-10-31T23:59:59Z"),
+        lastUpdatedAt: new Date("2024-04-28T16:30:00Z"),
+      },
+    ];
+
+    const result3a = determineActiveContractVersion(
+      contractsMultipleCustomers,
+      "cust_003",
+      now
+    );
+
+    expect(result3a).toEqual({
+      version: "1.5",
+      contractId: "contract_003_v1",
+      lastUpdatedAt: new Date("2024-02-05T08:20:00Z"),
+      effectiveFrom: new Date("2024-02-01T00:00:00Z"),
+      effectiveTo: new Date("2024-07-31T23:59:59Z"),
     });
 
-    // 全体合計の検証
-    expect(result.totalBillingAmount).toBe(200000);
+    const result3b = determineActiveContractVersion(
+      contractsMultipleCustomers,
+      "cust_004",
+      now
+    );
 
-    // 抽出された請求対象項目の検証
-    expect(result.extractedItems).toHaveLength(4);
-    expect(result.extractedItems[0]).toEqual({
-      customerId: 'cust_A',
-      serviceType: 'service_basic',
-      appointmentCount: 5,
-      contractCount: 2,
-      baseAmount: 15000,
-      discountRate: 0.10,
-      discountedAmount: 13500,
-      finalBillingAmount: 50000
+    expect(result3b).toEqual({
+      version: "2.1",
+      contractId: "contract_004_v2",
+      lastUpdatedAt: new Date("2024-04-28T16:30:00Z"),
+      effectiveFrom: new Date("2024-05-01T00:00:00Z"),
+      effectiveTo: new Date("2024-10-31T23:59:59Z"),
     });
 
-    expect(result.extractedItems[1]).toEqual({
-      customerId: 'cust_A',
-      serviceType: 'service_premium',
-      appointmentCount: 8,
-      contractCount: 3,
-      baseAmount: 27000,
-      discountRate: 0.10,
-      discountedAmount: 24300,
-      finalBillingAmount: 50000
+    // テストケース4: 複数の有効な契約書が存在する場合、最新版が優先される
+    const contractsMultipleActive = [
+      {
+        contractId: "contract_005_v1",
+        customerId: "cust_005",
+        version: "1.0",
+        effectiveFrom: new Date("2024-01-01T00:00:00Z"),
+        effectiveTo: new Date("2024-12-31T23:59:59Z"),
+        lastUpdatedAt: new Date("2024-01-05T10:00:00Z"),
+      },
+      {
+        contractId: "contract_005_v2",
+        customerId: "cust_005",
+        version: "2.0",
+        effectiveFrom: new Date("2024-06-01T00:00:00Z"),
+        effectiveTo: new Date("2024-12-31T23:59:59Z"),
+        lastUpdatedAt: new Date("2024-05-28T13:00:00Z"),
+      },
+    ];
+
+    const result4 = determineActiveContractVersion(
+      contractsMultipleActive,
+      "cust_005",
+      now
+    );
+
+    expect(result4).toEqual({
+      version: "2.0",
+      contractId: "contract_005_v2",
+      lastUpdatedAt: new Date("2024-05-28T13:00:00Z"),
+      effectiveFrom: new Date("2024-06-01T00:00:00Z"),
+      effectiveTo: new Date("2024-12-31T23:59:59Z"),
     });
 
-    expect(result.extractedItems[2]).toEqual({
-      customerId: 'cust_B',
-      serviceType: 'service_basic',
-      appointmentCount: 4,
-      contractCount: 1,
-      baseAmount: 9000,
-      discountRate: 0.05,
-      discountedAmount: 8550,
-      finalBillingAmount: 50000
+    // テストケース5: 有効な契約書がない顧客 - エラー
+    const contractsWithoutValid = [
+      {
+        contractId: "contract_006_old",
+        customerId: "cust_006",
+        version: "1.0",
+        effectiveFrom: new Date("2024-01-01T00:00:00Z"),
+        effectiveTo: new Date("2024-06-14T23:59:59Z"),
+        lastUpdatedAt: new Date("2024-01-10T10:00:00Z"),
+      },
+    ];
+
+    expect(() => {
+      determineActiveContractVersion(
+        contractsWithoutValid,
+        "cust_006",
+        now
+      );
+    }).toThrow(/有効な契約書/);
+
+    // テストケース6: 指定顧客IDが存在しない - エラー
+    const contractsOtherCustomer = [
+      {
+        contractId: "contract_007_v1",
+        customerId: "cust_007",
+        version: "1.0",
+        effectiveFrom: new Date("2024-01-01T00:00:00Z"),
+        effectiveTo: new Date("2024-12-31T23:59:59Z"),
+        lastUpdatedAt: new Date("2024-01-15T09:00:00Z"),
+      },
+    ];
+
+    expect(() => {
+      determineActiveContractVersion(
+        contractsOtherCustomer,
+        "cust_999",
+        now
+      );
+    }).toThrow(/顧客/);
+
+    // テストケース7: 有効期限が今から始まる契約書（境界値）
+    const contractsBoundaryStart = [
+      {
+        contractId: "contract_008_v1",
+        customerId: "cust_008",
+        version: "1.0",
+        effectiveFrom: new Date("2024-06-15T00:00:00Z"),
+        effectiveTo: new Date("2024-12-31T23:59:59Z"),
+        lastUpdatedAt: new Date("2024-06-10T11:00:00Z"),
+      },
+    ];
+
+    const result7 = determineActiveContractVersion(
+      contractsBoundaryStart,
+      "cust_008",
+      now
+    );
+
+    expect(result7).toEqual({
+      version: "1.0",
+      contractId: "contract_008_v1",
+      lastUpdatedAt: new Date("2024-06-10T11:00:00Z"),
+      effectiveFrom: new Date("2024-06-15T00:00:00Z"),
+      effectiveTo: new Date("2024-12-31T23:59:59Z"),
     });
 
-    expect(result.extractedItems[3]).toEqual({
-      customerId: 'cust_B',
-      serviceType: 'service_premium',
-      appointmentCount: 10,
-      contractCount: 4,
-      baseAmount: 35000,
-      discountRate: 0.05,
-      discountedAmount: 33250,
-      finalBillingAmount: 50000
-    });
+    // テストケース8: 有効期限が今で終わる契約書（境界値 - 有効）
+    const contractsBoundaryEnd = [
+      {
+        contractId: "contract_009_v1",
+        customerId: "cust_009",
+        version: "1.0",
+        effectiveFrom: new Date("2024-01-01T00:00:00Z"),
+        effectiveTo: new Date("2024-06-15T23:59:59Z"),
+        lastUpdatedAt: new Date("2024-01-10T10:00:00Z"),
+      },
+    ];
 
-    // 請求ルール適用の検証
-    expect(result.appliedRules).toEqual({
-      customerDiscountApplied: true,
-      servicePricingApplied: true,
-      contractBonusApplied: true,
-      minimumBillingEnforced: true,
-      maximumBillingEnforced: false
-    });
+    const result8 = determineActiveContractVersion(
+      contractsBoundaryEnd,
+      "cust_009",
+      now
+    );
 
-    // ステータスの検証
-    expect(result.status).toBe('success');
-    expect(result.processedRecordCount).toBe(4);
-    expect(result.errorCount).toBe(0);
+    expect(result8).toEqual({
+      version: "1.0",
+      contractId: "contract_009_v1",
+      lastUpdatedAt: new Date("2024-01-10T10:00:00Z"),
+      effectiveFrom: new Date("2024-01-01T00:00:00Z"),
+      effectiveTo: new Date("2024-06-15T23:59:59Z"),
+    });
   });
 });

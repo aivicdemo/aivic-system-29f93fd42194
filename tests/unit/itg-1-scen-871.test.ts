@@ -1,52 +1,30 @@
-import { describe, test, expect } from '@jest/globals';
-import { validateContractChangeApproval } from '../../src/logic/it-1-2-1';
+import { notifyValidationError } from '../../src/logic/it-1-1-1';
 
-describe('契約変更妥当性判定機能', () => {
-  // SCEN-871
-  test('契約変更内容が過去データと整合し、請求額計算に誤りがない場合に承認判定が出力される', () => {
-    const contractChangeInput = {
-      contract_id: 'CT-2024-001',
-      customer_id: 'CUST-A001',
-      service_id: 'SVC-BASIC',
-      change_type: 'monthly_fee_adjustment',
-      previous_monthly_fee: 100000,
-      new_monthly_fee: 110000,
-      change_effective_date: '2024-02-01',
-      contract_start_date: '2024-01-01',
-      contract_end_date: '2024-12-31',
-      discount_rate: 0.1,
-      historical_monthly_average: 95000,
-      previous_month_billed_amount: 100000,
-      tax_rate: 0.1,
-    };
+describe('営業成果データの自動検証ルール定義と異常検出機能', () => {
+  // SCEN-871: [error] 検証エラー自動通知機能 - 上位管理者の連絡先が存在しない場合にエラーが発生する
+  test('上位管理者の連絡先が存在しない場合、エラーメッセージが表示されエラーログが記録される', () => {
+    const validation_error_id = 'ERR_VAL_001';
+    const error_message = '営業データの必須項目が欠落しています';
+    const error_severity = 'HIGH';
+    const detection_timestamp = new Date('2024-01-15T11:00:00Z');
+    const sales_data_id = 'SD_20240115_001';
+    const field_name = 'customer_name';
+    const operator_id = 'OP_001';
+    const supervisor_id = null;
+    const supervisor_email = null;
 
-    const expected_new_monthly_with_discount = 110000 * (1 - 0.1);
-    const expected_tax = expected_new_monthly_with_discount * 0.1;
-    const expected_total_billing_amount = expected_new_monthly_with_discount + expected_tax;
-    const expected_month_over_month_variance =
-      ((expected_total_billing_amount - 100000) / 100000) * 100;
-
-    const result = validateContractChangeApproval(contractChangeInput);
-
-    expect(result).toBeDefined();
-    expect(result.approval_status).toBe('APPROVED');
-    expect(result.calculated_monthly_fee).toBe(expected_new_monthly_with_discount);
-    expect(result.calculated_tax).toBe(expected_tax);
-    expect(result.total_billing_amount).toBe(expected_total_billing_amount);
-    expect(result.month_over_month_variance_percent).toBeCloseTo(
-      expected_month_over_month_variance,
-      2
-    );
-    expect(result.is_within_tolerance).toBe(true);
-    expect(result.variance_within_allowed_range).toBe(true);
-    expect(result.approval_reason).toMatch(/過去データ/);
-    expect(result.approval_reason).toMatch(/整合/);
-    expect(result.historical_data_consistency).toBe(true);
-    expect(result.billing_calculation_accuracy).toBe(true);
-    expect(result.contains_errors).toBe(false);
-    expect(typeof result.approval_timestamp).toBe('string');
-    expect(result.validation_details).toBeDefined();
-    expect(result.validation_details.contract_change_valid).toBe(true);
-    expect(result.validation_details.financial_calculation_valid).toBe(true);
+    expect(() =>
+      notifyValidationError({
+        validation_error_id,
+        error_message,
+        error_severity,
+        detection_timestamp,
+        sales_data_id,
+        field_name,
+        operator_id,
+        supervisor_id,
+        supervisor_email,
+      })
+    ).toThrow(/上位管理者の連絡先/);
   });
 });

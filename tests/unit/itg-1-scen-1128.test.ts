@@ -1,67 +1,151 @@
-import { validateSalesDataCompleteness } from '../../src/logic/it-1781935279444-2-2-1';
+import { describe, test, expect, beforeEach } from "@jest/globals";
+import {
+  validateReportAnomalies,
+} from "../../src/logic/it-1781935279444-2-2-1";
 
-describe('月次営業データ集計検証機能 - 金額の妥当性境界値判定', () => {
-  test('SCEN-1128: 金額の妥当性が境界値ちょうどの金額でも正しく判定される', () => {
-    // 下限境界値（0円）のテストデータ
-    const lower_boundary_data = {
-      sales_data_id: 'SD-2024-001',
-      customer_id: 'CUST-A001',
-      service_id: 'SVC-001',
-      amount: 0,
-      appointment_count: 5,
-      contract_count: 2,
-      customer_feedback: 'positive',
-      month: '2024-01',
-      validation_status: 'pending'
+describe("Report Anomaly Detection and Distribution Block", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  // SCEN-1128
+  test("should detect threshold excess and logical contradictions in report data, block distribution, and notify stakeholders", () => {
+    // Prepare test report data with intentional anomalies
+    const report_data = {
+      report_id: "RPT-2024-01-001",
+      customer_id: "CUST-A001",
+      service_id: "SVC-BASIC",
+      period: "2024-01",
+      items: [
+        {
+          item_id: "LINE-001",
+          unit_price: 100,
+          quantity: 5,
+          total_amount: 500, // Correct: 100 * 5 = 500
+        },
+        {
+          item_id: "LINE-002",
+          unit_price: -50, // Anomaly: negative unit price
+          quantity: 3,
+          total_amount: -150,
+        },
+        {
+          item_id: "LINE-003",
+          unit_price: 200,
+          quantity: 10,
+          total_amount: 1500, // Anomaly: logical contradiction (200 * 10 = 2000, not 1500)
+        },
+        {
+          item_id: "LINE-004",
+          unit_price: 5000,
+          quantity: 50,
+          total_amount: 250000, // Anomaly: threshold excess (exceeds max allowed amount)
+        },
+      ],
+      summary_total: 251850,
     };
 
-    // 下限境界値の検証実行
-    const lower_result = validateSalesDataCompleteness(lower_boundary_data);
-    
-    expect(lower_result.is_valid).toBe(true);
-    expect(lower_result.amount_validation_status).toBe('acceptable');
-    expect(lower_result.boundary_check_result).toBe('lower_boundary_accepted');
-    expect(lower_result.can_proceed_to_billing).toBe(true);
-
-    // 上限境界値（999,999,999円）のテストデータ
-    const upper_boundary_data = {
-      sales_data_id: 'SD-2024-002',
-      customer_id: 'CUST-A002',
-      service_id: 'SVC-002',
-      amount: 999999999,
-      appointment_count: 100,
-      contract_count: 50,
-      customer_feedback: 'positive',
-      month: '2024-01',
-      validation_status: 'pending'
+    const threshold_config = {
+      max_unit_price: 1000,
+      max_total_amount: 100000,
+      max_line_quantity: 20,
+      allowed_negative_prices: false,
     };
 
-    // 上限境界値の検証実行
-    const upper_result = validateSalesDataCompleteness(upper_boundary_data);
-    
-    expect(upper_result.is_valid).toBe(true);
-    expect(upper_result.amount_validation_status).toBe('acceptable');
-    expect(upper_result.boundary_check_result).toBe('upper_boundary_accepted');
-    expect(upper_result.can_proceed_to_billing).toBe(true);
+    // Execute validation
+    const validation_result = validateReportAnomalies(
+      report_data,
+      threshold_config
+    );
 
-    // 集計結果レポートの検証
-    const aggregation_report = {
-      total_records_processed: 2,
-      valid_records: 2,
-      invalid_records: 0,
-      lower_boundary_amount: 0,
-      upper_boundary_amount: 999999999,
-      total_aggregated_amount: 999999999,
-      aggregation_status: 'completed',
-      ready_for_billing_automation: true
-    };
+    // Verify anomaly detection: threshold excess
+    expect(validation_result.has_threshold_excess).toBe(true);
+    expect(validation_result.threshold_excess_items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          item_id: "LINE-004",
+          violation_type: "total_amount_exceeds_max",
+          detected_value: 250000,
+          threshold_value: 100000,
+        }),
+      ])
+    );
 
-    expect(aggregation_report.valid_records).toBe(2);
-    expect(aggregation_report.invalid_records).toBe(0);
-    expect(aggregation_report.lower_boundary_amount).toBe(0);
-    expect(aggregation_report.upper_boundary_amount).toBe(999999999);
-    expect(aggregation_report.total_aggregated_amount).toBe(999999999);
-    expect(aggregation_report.aggregation_status).toBe('completed');
-    expect(aggregation_report.ready_for_billing_automation).toBe(true);
+    // Verify anomaly detection: negative values
+    expect(validation_result.has_negative_values).toBe(true);
+    expect(validation_result.negative_value_items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          item_id: "LINE-002",
+          field_name: "unit_price",
+          detected_value: -50,
+        }),
+      ])
+    );
+
+    // Verify logical contradiction detection: calculation mismatch
+    expect(validation_result.has_calculation_contradiction).toBe(true);
+    expect(validation_result.contradiction_items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          item_id: "LINE-003",
+          expected_total: 2000,
+          recorded_total: 1500,
+          difference: 500,
+        }),
+      ])
+    );
+
+    // Verify distribution block flag is set
+    expect(validation_result.can_distribute).toBe(false);
+    expect(validation_result.distribution_block_reason).toEqual(
+      expect.stringMatching(/anomaly|contradiction|threshold/)
+    );
+
+    // Verify detailed anomaly log is recorded
+    expect(validation_result.anomaly_log).toBeDefined();
+    expect(validation_result.anomaly_log.length).toBeGreaterThan(0);
+    expect(validation_result.anomaly_log).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          log_id: expect.any(String),
+          timestamp: expect.any(String),
+          anomaly_type: expect.stringMatching(/threshold|negative|contradiction/),
+          item_id: expect.any(String),
+          severity: expect.stringMatching(/critical|warning/),
+          details: expect.any(String),
+        }),
+      ])
+    );
+
+    // Verify error notification is generated
+    expect(validation_result.error_notification).toBeDefined();
+    expect(validation_result.error_notification.notification_id).toBeDefined();
+    expect(validation_result.error_notification.recipients).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          recipient_type: expect.stringMatching(/representative|admin/),
+          recipient_id: expect.any(String),
+          notification_method: expect.stringMatching(/email|system/),
+        }),
+      ])
+    );
+    expect(validation_result.error_notification.message).toEqual(
+      expect.stringMatching(/anomaly|distribution|blocked/)
+    );
+
+    // Verify report metadata reflects blocked status
+    expect(validation_result.report_metadata.status).toBe("blocked_from_distribution");
+    expect(validation_result.report_metadata.blocked_at).toBeDefined();
+    expect(validation_result.report_metadata.block_reason_summary).toEqual(
+      expect.stringMatching(/異常値|矛盾|閾値/) ||
+        expect.stringMatching(/anomaly|contradiction|threshold/)
+    );
+
+    // Verify audit trail records validation execution
+    expect(validation_result.audit_trail).toBeDefined();
+    expect(validation_result.audit_trail.validation_executed_at).toBeDefined();
+    expect(validation_result.audit_trail.anomaly_count).toBe(4);
+    expect(validation_result.audit_trail.contradiction_count).toBe(1);
   });
 });

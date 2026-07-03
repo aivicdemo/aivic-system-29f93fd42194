@@ -1,61 +1,48 @@
-import { validateBillingData } from "../../src/logic/it-1781935279444-2-2-1";
+import { calculateProportionalBillingAmount } from "../../src/logic/it-1-2-1";
 
-describe("請求データ自動検証 - 請求額が契約上限を超えている場合", () => {
-  // SCEN-1315
-  test("請求額が契約上限を超えている場合、検証エラーが検出され異常通知が発行される", () => {
-    const contractId = "CONTRACT_001";
-    const contractMaxAmount = 100000; // 契約上限額: 100,000円
-    const billingAmount = 120000; // 請求額: 120,000円 (上限を超過)
+describe("営業成果データから請求対象項目を自動抽出し、顧客ごと・サービスごとの請求額を集計する機能", () => {
+  // SCEN-1315: [edge] 契約変更に基づく請求遡及調整 - 契約変更日が請求期間の月途中の場合、按分計算が実行される
+  test("契約変更日が月途中の場合、按分計算ロジックにより正確な請求額が計算される", () => {
+    const contractStartDate = new Date("2024-01-01T00:00:00Z");
+    const contractChangeDate = new Date("2024-01-15T00:00:00Z");
+    const initialMonthlyRate = 30000;
+    const changedMonthlyRate = 45000;
+    const billingStartDate = new Date("2024-01-01T00:00:00Z");
+    const billingEndDate = new Date("2024-01-31T23:59:59Z");
 
-    const billingData = {
-      contractId,
-      customerId: "CUSTOMER_001",
-      serviceId: "SERVICE_001",
-      billingAmount,
-      billingDate: "2024-01-15",
-      period: "2024-01",
-    };
+    const result = calculateProportionalBillingAmount({
+      contractStartDate,
+      contractChangeDate,
+      initialMonthlyRate,
+      changedMonthlyRate,
+      billingStartDate,
+      billingEndDate,
+    });
 
-    const contractInfo = {
-      contractId,
-      maxAmount: contractMaxAmount,
-      status: "active",
-    };
+    // 2024年1月は31日間
+    // 1月1日～1月14日：14日間 × 30,000円 ÷ 31日 = 14,516.13円
+    const expectedAmountBeforeChange = Math.round(
+      (30000 * 14) / 31 * 100
+    ) / 100;
+    // 1月15日～1月31日：17日間 × 45,000円 ÷ 31日 = 22,096.77円
+    const expectedAmountAfterChange = Math.round(
+      (45000 * 17) / 31 * 100
+    ) / 100;
+    // 合計請求額: 14,516.13円 + 22,096.77円 = 36,612.90円 (四捨五入で36,613円)
+    const expectedTotalBillingAmount = Math.round(
+      (expectedAmountBeforeChange + expectedAmountAfterChange) * 100
+    ) / 100;
 
-    // 検証実行
-    const result = validateBillingData(billingData, contractInfo);
+    expect(result).toEqual({
+      amountBeforeChange: expectedAmountBeforeChange,
+      amountAfterChange: expectedAmountAfterChange,
+      totalBillingAmount: expectedTotalBillingAmount,
+      daysBeforeChange: 14,
+      daysAfterChange: 17,
+    });
 
-    // 検証エラーが発生することを確認
-    expect(result.isValid).toBe(false);
-    expect(result.errors).toBeDefined();
-    expect(result.errors.length).toBeGreaterThan(0);
-
-    // エラーメッセージに上限超過に関する内容が含まれることを確認
-    const exceedsMaxError = result.errors.find((error: string) =>
-      /上限|超過|超え/.test(error)
-    );
-    expect(exceedsMaxError).toBeDefined();
-
-    // 異常通知（アラート）が生成されたことを確認
-    expect(result.alertGenerated).toBe(true);
-
-    // 異常通知の内容確認
-    expect(result.alert).toBeDefined();
-    expect(result.alert.type).toBe("BILLING_LIMIT_EXCEEDED");
-    expect(result.alert.severity).toBe("HIGH");
-    expect(result.alert.message).toMatch(/請求額が契約上限を超過/);
-
-    // 超過額の計算確認
-    const exceedAmount = billingAmount - contractMaxAmount;
-    expect(result.alert.exceedAmount).toBe(exceedAmount); // 20,000円
-
-    // 処理ステータスが中断されていることを確認
-    expect(result.processingStatus).toBe("STOPPED");
-
-    // 詳細情報の確認
-    expect(result.details).toBeDefined();
-    expect(result.details.contractMaxAmount).toBe(contractMaxAmount);
-    expect(result.details.requestedAmount).toBe(billingAmount);
-    expect(result.details.exceededPercentage).toBe(20); // 20% 超過
+    expect(result.totalBillingAmount).toBe(36613);
+    expect(result.amountBeforeChange).toBe(14516);
+    expect(result.amountAfterChange).toBe(22097);
   });
 });

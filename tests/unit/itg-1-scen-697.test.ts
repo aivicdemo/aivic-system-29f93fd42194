@@ -1,95 +1,115 @@
-import { validateSalesDataAccuracy } from "../../src/logic/it-1781935279444-2-2-1";
+import { validateSalesDataCompleteness } from "../../src/logic/it-1781935279444-2-2-1";
 
-describe("営業データ正確性検証 - 接触日時とアポ確定日時の矛盾検出", () => {
-  test("SCEN-697: 接触日時がアポ確定日時より前になっている矛盾を検出する", () => {
-    // 入力データ: 接触日時09:30、アポ確定日時10:00 → 矛盾あり
-    const salesRecord = {
-      recordId: "SLR-2024-0001",
-      customerId: "CUST-A001",
-      contactDateTime: new Date("2024-01-15T09:30:00Z"),
-      appointmentConfirmedDateTime: new Date("2024-01-15T10:00:00Z"),
-      appointmentQuantity: 1,
-      contractedQuantity: 1,
-      serviceType: "営業代行",
-    };
+describe("営業データの完全性・正確性自動検証機能", () => {
+  // SCEN-697: [edge] アポ確定状況が定義済みの選択肢のいずれかの場合に検証が合格する
+  test("アポ確定状況が定義済み選択肢（確定・検討中・未定）のいずれかの場合に検証結果を返す", () => {
+    // テストデータ準備：アポ確定状況が「確定」「検討中」「未定」のいずれかを含むレコードを複数件作成
+    const salesDataRecords = [
+      {
+        recordId: "REC001",
+        customerName: "顧客A",
+        contactDate: "2024-01-15",
+        appointmentStatus: "確定",
+        contactContent: "商談内容1",
+      },
+      {
+        recordId: "REC002",
+        customerName: "顧客B",
+        contactDate: "2024-01-16",
+        appointmentStatus: "検討中",
+        contactContent: "商談内容2",
+      },
+      {
+        recordId: "REC003",
+        customerName: "顧客C",
+        contactDate: "2024-01-17",
+        appointmentStatus: "未定",
+        contactContent: "商談内容3",
+      },
+      {
+        recordId: "REC004",
+        customerName: "顧客D",
+        contactDate: "2024-01-18",
+        appointmentStatus: "",
+        contactContent: "商談内容4",
+      },
+      {
+        recordId: "REC005",
+        customerName: "顧客E",
+        contactDate: "2024-01-19",
+        appointmentStatus: null,
+        contactContent: "商談内容5",
+      },
+      {
+        recordId: "REC006",
+        customerName: "顧客F",
+        contactDate: "2024-01-20",
+        appointmentStatus: "無効な選択肢",
+        contactContent: "商談内容6",
+      },
+    ];
 
-    // validateSalesDataAccuracy を呼び出し
-    const result = validateSalesDataAccuracy(salesRecord);
+    // 営業データの完全性・正確性自動検証機能を実行
+    const validationResult = validateSalesDataCompleteness(salesDataRecords);
 
-    // 期待結果: エラーが検出される
-    expect(result.isValid).toBe(false);
-    expect(result.errorCount).toBe(1);
-    expect(result.errors).toHaveLength(1);
-    expect(result.errors[0]).toMatchObject({
-      recordId: "SLR-2024-0001",
-      fieldName: "接触日時",
-      severity: "error",
-      message: expect.stringMatching(/接触日時|アポ確定日時/),
-    });
-    expect(result.errors[0].message).toMatch(
-      /接触日時.*アポ確定日時|矛盾|後ろ|前/
+    // アポ確定状況が「確定」のレコードに対して検証を実行し、結果を確認
+    expect(validationResult).toEqual(
+      expect.objectContaining({
+        totalRecords: 6,
+        passedRecords: 3,
+        failedRecords: 3,
+        validRecords: [
+          expect.objectContaining({
+            recordId: "REC001",
+            appointmentStatus: "確定",
+            validationStatus: "合格",
+          }),
+          expect.objectContaining({
+            recordId: "REC002",
+            appointmentStatus: "検討中",
+            validationStatus: "合格",
+          }),
+          expect.objectContaining({
+            recordId: "REC003",
+            appointmentStatus: "未定",
+            validationStatus: "合格",
+          }),
+        ],
+        invalidRecords: [
+          expect.objectContaining({
+            recordId: "REC004",
+            appointmentStatus: "",
+            validationStatus: "不合格",
+            errorReason: expect.stringMatching(/アポ確定状況/),
+          }),
+          expect.objectContaining({
+            recordId: "REC005",
+            appointmentStatus: null,
+            validationStatus: "不合格",
+            errorReason: expect.stringMatching(/アポ確定状況/),
+          }),
+          expect.objectContaining({
+            recordId: "REC006",
+            appointmentStatus: "無効な選択肢",
+            validationStatus: "不合格",
+            errorReason: expect.stringMatching(/アポ確定状況/),
+          }),
+        ],
+      })
     );
 
-    // 矛盾内容の詳細確認
-    expect(result.errors[0]).toHaveProperty("expectedConstraint");
-    expect(result.errors[0].expectedConstraint).toContain("アポ確定日時");
-  });
+    // 全てのテストケースの検証結果を集計
+    expect(validationResult.passedRecords).toBe(3);
+    expect(validationResult.failedRecords).toBe(3);
+    expect(validationResult.totalRecords).toBe(6);
+    expect(validationResult.passRate).toBe(0.5);
 
-  test("SCEN-697-HAPPY: 接触日時がアポ確定日時より後ろになっている正常系を許可する", () => {
-    // 入力データ: 接触日時10:00、アポ確定日時09:30 → 正常
-    const salesRecord = {
-      recordId: "SLR-2024-0002",
-      customerId: "CUST-A001",
-      contactDateTime: new Date("2024-01-15T10:00:00Z"),
-      appointmentConfirmedDateTime: new Date("2024-01-15T09:30:00Z"),
-      appointmentQuantity: 1,
-      contractedQuantity: 1,
-      serviceType: "営業代行",
-    };
+    // アポ確定状況が「確定」「検討中」「未定」のいずれかである全てのレコードについて検証が合格
+    expect(validationResult.validRecords).toHaveLength(3);
+    expect(validationResult.validRecords.every((r) => r.validationStatus === "合格")).toBe(true);
 
-    const result = validateSalesDataAccuracy(salesRecord);
-
-    // 期待結果: エラーなし
-    expect(result.isValid).toBe(true);
-    expect(result.errorCount).toBe(0);
-    expect(result.errors).toHaveLength(0);
-  });
-
-  test("SCEN-697-BOUNDARY: 接触日時とアポ確定日時が同じ時刻の場合は正常", () => {
-    const salesRecord = {
-      recordId: "SLR-2024-0003",
-      customerId: "CUST-A001",
-      contactDateTime: new Date("2024-01-15T10:00:00Z"),
-      appointmentConfirmedDateTime: new Date("2024-01-15T10:00:00Z"),
-      appointmentQuantity: 1,
-      contractedQuantity: 1,
-      serviceType: "営業代行",
-    };
-
-    const result = validateSalesDataAccuracy(salesRecord);
-
-    // 期待結果: エラーなし（同一時刻は矛盾ではない）
-    expect(result.isValid).toBe(true);
-    expect(result.errorCount).toBe(0);
-  });
-
-  test("SCEN-697-MULTI: 複数の矛盾が存在する場合、すべて検出する", () => {
-    // 複数の矛盾を含むデータ
-    const salesRecord = {
-      recordId: "SLR-2024-0004",
-      customerId: "CUST-A001",
-      contactDateTime: new Date("2024-01-15T09:30:00Z"), // 矛盾1: アポ確定日時より前
-      appointmentConfirmedDateTime: new Date("2024-01-15T10:00:00Z"),
-      appointmentQuantity: 0, // 矛盾2: アポ数が0
-      contractedQuantity: 1,
-      serviceType: "営業代行",
-    };
-
-    const result = validateSalesDataAccuracy(salesRecord);
-
-    // 期待結果: 複数エラー検出
-    expect(result.isValid).toBe(false);
-    expect(result.errorCount).toBeGreaterThanOrEqual(1);
-    expect(result.errors.some((e) => e.fieldName === "接触日時")).toBe(true);
+    // 定義済みの選択肢以外の値を含むレコードについては検証が不合格
+    expect(validationResult.invalidRecords).toHaveLength(3);
+    expect(validationResult.invalidRecords.every((r) => r.validationStatus === "不合格")).toBe(true);
   });
 });

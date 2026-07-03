@@ -1,37 +1,53 @@
-import { validateContractChecklist } from '../../src/logic/it-1-1-1';
+import {
+  detectAnomaliesAndMissingData,
+} from "../../src/logic/it-1781935279444-2-2-1";
 
-describe('営業成果データの自動検証ルール定義と異常検出機能', () => {
-  // SCEN-1107
-  test('チェックリスト項目数が最小値の場合でも、すべての項目が合格条件を満たせば合格となること', () => {
-    const checklistItems = [
-      {
-        itemId: 'contract_001',
-        itemName: '契約書ファイル確認',
-        passCondition: 'ファイルが存在し、ファイルサイズが1KB以上',
-        actualValue: 'file_size_5000_bytes',
-        isPass: true,
-      },
-    ];
-
-    const validationInput = {
-      contractId: 'CONTRACT_2024_001',
-      checklistItemCount: 1,
-      items: checklistItems,
-      executionTimestamp: new Date('2024-01-15T09:00:00Z'),
-      executorId: 'USER_ADMIN_001',
+describe("異常値・欠落データ自動検出", () => {
+  test("SCEN-1107: [normal] データが完全で異常がない場合に通知が生成されない", () => {
+    // GIVEN: テスト用の完全で正常なデータセット
+    const validSalesData = {
+      salesDataId: "SD-20240115-001",
+      customerId: "CUST-001",
+      serviceId: "SVC-APPOINTMENT",
+      appointmentCount: 5,
+      contractCount: 2,
+      customerFeedback: "positive",
+      transactionDate: "2024-01-15",
+      amount: 50000,
+      status: "completed",
+      createdBy: "sales-rep-001",
+      createdAt: "2024-01-15T10:30:00Z",
+      updatedAt: "2024-01-15T10:30:00Z",
     };
 
-    const result = validateContractChecklist(validationInput);
+    // WHEN: 異常値・欠落データ自動検出機能を実行
+    const result = detectAnomaliesAndMissingData(validSalesData);
 
-    expect(result.overallStatus).toBe('合格');
-    expect(result.itemCount).toBe(1);
-    expect(result.passCount).toBe(1);
-    expect(result.failCount).toBe(0);
-    expect(result.passRate).toBe(100);
-    expect(result.validationLog).toContain('すべての項目が合格条件を満たしている');
-    expect(result.savedToDb).toBe(true);
-    expect(result.dbRecordId).toBeDefined();
-    expect(typeof result.dbRecordId).toBe('string');
-    expect(result.dbRecordId.length).toBeGreaterThan(0);
+    // THEN: 検出結果を確認
+    expect(result).toEqual({
+      status: "success",
+      hasAnomalies: false,
+      hasMissingData: false,
+      notifications: [],
+      detailedResults: {
+        missingFields: [],
+        invalidFormats: [],
+        anomalousValues: [],
+        valueRangeViolations: [],
+      },
+      processedAt: expect.any(String),
+    });
+
+    // AND: 通知が生成されていないことを検証
+    expect(result.notifications.length).toBe(0);
+
+    // AND: 処理ステータスが成功（success）であることを確認
+    expect(result.status).toBe("success");
+
+    // AND: 詳細検出結果がすべて空であることを確認
+    expect(result.detailedResults.missingFields.length).toBe(0);
+    expect(result.detailedResults.invalidFormats.length).toBe(0);
+    expect(result.detailedResults.anomalousValues.length).toBe(0);
+    expect(result.detailedResults.valueRangeViolations.length).toBe(0);
   });
 });

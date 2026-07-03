@@ -1,182 +1,153 @@
-import { describe, test, expect } from '@jest/globals';
-import { extractBillableItemsByCustomerAndService } from '../../src/logic/it-1-2-1';
+import { extractCustomerQuestionSourceData } from '../../src/logic/it-1781935279444-1-1-1';
 
-describe('営業成果データから請求対象項目を自動抽出し顧客ごと・サービスごとに集計', () => {
-  // SCEN-1019
-  test('複数顧客の営業データから請求対象項目が正確に抽出される', () => {
-    const salesData = [
-      {
-        id: 'sales_001',
-        customer_id: 'cust_A',
-        service_id: 'svc_1',
-        transaction_type: 'appointment',
-        amount: 5000,
-        status: 'completed',
-      },
-      {
-        id: 'sales_002',
-        customer_id: 'cust_A',
-        service_id: 'svc_1',
-        transaction_type: 'appointment',
-        amount: 3000,
-        status: 'completed',
-      },
-      {
-        id: 'sales_003',
-        customer_id: 'cust_A',
-        service_id: 'svc_2',
-        transaction_type: 'contract',
-        amount: 10000,
-        status: 'completed',
-      },
-      {
-        id: 'sales_004',
-        customer_id: 'cust_A',
-        service_id: 'svc_2',
-        transaction_type: 'cancellation',
-        amount: -2000,
-        status: 'completed',
-      },
-      {
-        id: 'sales_005',
-        customer_id: 'cust_B',
-        service_id: 'svc_1',
-        transaction_type: 'appointment',
-        amount: 7000,
-        status: 'completed',
-      },
-      {
-        id: 'sales_006',
-        customer_id: 'cust_B',
-        service_id: 'svc_3',
-        transaction_type: 'contract',
-        amount: 15000,
-        status: 'completed',
-      },
-      {
-        id: 'sales_007',
-        customer_id: 'cust_B',
-        service_id: 'svc_3',
-        transaction_type: 'return',
-        amount: -5000,
-        status: 'completed',
-      },
-      {
-        id: 'sales_008',
-        customer_id: 'cust_C',
-        service_id: 'svc_2',
-        transaction_type: 'contract',
-        amount: 20000,
-        status: 'completed',
-      },
-      {
-        id: 'sales_009',
-        customer_id: 'cust_C',
-        service_id: 'svc_2',
-        transaction_type: 'appointment',
-        amount: 4000,
-        status: 'completed',
-      },
-      {
-        id: 'sales_010',
-        customer_id: 'cust_A',
-        service_id: 'svc_1',
-        transaction_type: 'appointment',
-        amount: null,
-        status: 'completed',
-      },
-      {
-        id: 'sales_011',
-        customer_id: 'cust_B',
-        service_id: 'svc_2',
-        transaction_type: 'appointment',
-        amount: 0,
-        status: 'completed',
-      },
-    ];
+describe('営業データ項目のメタデータ管理機能', () => {
+  // SCEN-1019: [error] 顧客質問対応根拠データ自動抽出機能 - 質問内容に対応するデータが営業システムに存在しない場合、空結果またはエラーが返される
+  test('営業システムに存在しない顧客IDで質問対応根拠データ抽出を実行した場合、空結果またはエラーメッセージを返す', () => {
+    // 前提: 営業システムから月次営業データが抽出され、品質検証を通過した状態
+    // 発生条件: 顧客からの質問に対して営業活動データを遡及検索する際、営業システムに存在しない顧客IDを指定した場合
+    // 期待結果: 空結果を返すか、「該当するデータが見つかりません」というエラーメッセージを返し、システムがクラッシュしないこと
 
-    const result = extractBillableItemsByCustomerAndService(salesData);
+    const nonExistentCustomerId = 'CUST-99999999';
+    const period_start = '2024-01-01';
+    const period_end = '2024-01-31';
+    const query_type = 'customer_activity';
 
-    expect(result).toEqual({
-      cust_A: {
-        svc_1: {
-          items: [
-            { id: 'sales_001', amount: 5000 },
-            { id: 'sales_002', amount: 3000 },
-          ],
-          total: 8000,
-          count: 2,
-        },
-        svc_2: {
-          items: [
-            { id: 'sales_003', amount: 10000 },
-          ],
-          total: 10000,
-          count: 1,
-        },
-      },
-      cust_B: {
-        svc_1: {
-          items: [
-            { id: 'sales_005', amount: 7000 },
-          ],
-          total: 7000,
-          count: 1,
-        },
-        svc_3: {
-          items: [
-            { id: 'sales_006', amount: 15000 },
-          ],
-          total: 15000,
-          count: 1,
-        },
-      },
-      cust_C: {
-        svc_2: {
-          items: [
-            { id: 'sales_008', amount: 20000 },
-            { id: 'sales_009', amount: 4000 },
-          ],
-          total: 24000,
-          count: 2,
-        },
-      },
+    const result = extractCustomerQuestionSourceData({
+      customer_id: nonExistentCustomerId,
+      period_start,
+      period_end,
+      query_type,
     });
 
-    const cust_A_svc_1_total = result.cust_A.svc_1.total;
-    expect(cust_A_svc_1_total).toBe(8000);
+    // 空結果の場合: 配列が空であること
+    expect(Array.isArray(result.data)).toBe(true);
+    expect(result.data.length).toBe(0);
 
-    const cust_A_svc_2_total = result.cust_A.svc_2.total;
-    expect(cust_A_svc_2_total).toBe(10000);
+    // エラーメッセージが返される場合: 業務キーワード「該当」を含むメッセージが返されること
+    if (result.error) {
+      expect(result.error).toMatch(/該当/);
+    }
 
-    const cust_B_svc_1_total = result.cust_B.svc_1.total;
-    expect(cust_B_svc_1_total).toBe(7000);
+    // システムがクラッシュせずに status を返していること
+    expect(result.status).toBe('no_match');
+  });
 
-    const cust_B_svc_3_total = result.cust_B.svc_3.total;
-    expect(cust_B_svc_3_total).toBe(15000);
+  test('営業システムに存在しない取引記録IDで質問対応根拠データ抽出を実行した場合、エラーメッセージを返す', () => {
+    // 前提: 営業データ品質管理・請求自動化システムにログイン済みで、顧客質問対応根拠データ自動抽出機能にアクセス可能な状態
+    // 発生条件: 営業システムに存在しない取引記録IDを指定して抽出処理を実行した場合
+    // 期待結果: 空結果またはエラーメッセージを返し、正常に処理を完了すること
 
-    const cust_C_svc_2_total = result.cust_C.svc_2.total;
-    expect(cust_C_svc_2_total).toBe(24000);
+    const customer_id = 'CUST-001';
+    const transaction_id = 'TRX-NOTFOUND-99999';
+    const period_start = '2024-01-01';
+    const period_end = '2024-01-31';
+    const query_type = 'transaction_detail';
 
-    expect(result.cust_A.svc_1.items.length).toBe(2);
-    expect(result.cust_A.svc_2.items.length).toBe(1);
-    expect(result.cust_B.svc_1.items.length).toBe(1);
-    expect(result.cust_B.svc_3.items.length).toBe(1);
-    expect(result.cust_C.svc_2.items.length).toBe(2);
+    const result = extractCustomerQuestionSourceData({
+      customer_id,
+      period_start,
+      period_end,
+      query_type,
+      transaction_id,
+    });
 
-    const all_items = [
-      ...result.cust_A.svc_1.items,
-      ...result.cust_A.svc_2.items,
-      ...result.cust_B.svc_1.items,
-      ...result.cust_B.svc_3.items,
-      ...result.cust_C.svc_2.items,
-    ];
-    const item_ids = all_items.map((item) => item.id);
-    const unique_ids = new Set(item_ids);
-    expect(unique_ids.size).toBe(item_ids.length);
+    // 空結果の場合
+    if (result.status === 'no_match') {
+      expect(result.data.length).toBe(0);
+      expect(result.error).toMatch(/該当/);
+    }
+    // または適切なエラーメッセージ
+    else if (result.status === 'error') {
+      expect(result.error).toMatch(/見つかりません/);
+    }
 
-    expect(result).not.toHaveProperty('cust_A.svc_1.items[2]');
-    expect(result).not.toHaveProperty('cust_A.svc_2.items[1]');
-    expect(result).not.toHaveProperty('cust_B.svc_1.items[1]');
+    // どちらの場合もシステムはクラッシュせず、status フィールドを返していること
+    expect(['no_match', 'error']).toContain(result.status);
+  });
+
+  test('営業システムに存在しないサービスタイプで質問対応根拠データ抽出を実行した場合、空結果を返す', () => {
+    // 前提: 営業データ品質管理・請求自動化システムにログイン済みで、顧客質問対応根拠データ自動抽出機能にアクセス可能な状態
+    // 発生条件: 営業システムに存在しないサービスタイプを指定して抽出処理を実行した場合
+    // 期待結果: 空結果を返し、正常に処理を完了すること
+
+    const customer_id = 'CUST-001';
+    const period_start = '2024-01-01';
+    const period_end = '2024-01-31';
+    const query_type = 'service_type';
+    const service_type = 'SERVICE-UNKNOWN-99999';
+
+    const result = extractCustomerQuestionSourceData({
+      customer_id,
+      period_start,
+      period_end,
+      query_type,
+      service_type,
+    });
+
+    // 空結果が返されること
+    expect(result.status).toBe('no_match');
+    expect(result.data).toEqual([]);
+    
+    // エラーメッセージに「該当」が含まれること
+    if (result.error) {
+      expect(result.error).toMatch(/該当/);
+    }
+  });
+
+  test('複数の条件で営業システムにデータが存在しない場合、エラーメッセージを返す', () => {
+    // 前提: 営業データ品質管理・請求自動化システムにログイン済み
+    // 発生条件: 営業システムに存在しない複合条件（顧客ID + 期間 + サービスタイプ）を指定して抽出処理を実行
+    // 期待結果: 空結果またはエラーメッセージを返し、正常に処理を完了すること
+
+    const customer_id = 'CUST-NOT-EXISTS';
+    const period_start = '2025-12-01';
+    const period_end = '2025-12-31';
+    const query_type = 'combined_query';
+    const service_type = 'SERVICE-NONEXISTENT';
+
+    const result = extractCustomerQuestionSourceData({
+      customer_id,
+      period_start,
+      period_end,
+      query_type,
+      service_type,
+    });
+
+    // 空結果またはエラー状態であること
+    expect(['no_match', 'error']).toContain(result.status);
+
+    // データが空であること
+    expect(result.data.length).toBe(0);
+
+    // システムが正常に応答していること（クラッシュしていない）
+    expect(result).toHaveProperty('status');
+    expect(result).toHaveProperty('data');
+  });
+
+  test('営業システムからデータ取得時にタイムアウトした場合、タイムアウトエラーを返す', () => {
+    // 前提: 営業データベースへのアクセスが遅延している状態
+    // 発生条件: 営業システムからのデータ取得処理がタイムアウトに達した場合
+    // 期待結果: タイムアウトエラーメッセージを返し、正常に処理を完了すること
+
+    const customer_id = 'CUST-001';
+    const period_start = '2024-01-01';
+    const period_end = '2024-01-31';
+    const query_type = 'timeout_test';
+
+    const result = extractCustomerQuestionSourceData({
+      customer_id,
+      period_start,
+      period_end,
+      query_type,
+    });
+
+    // タイムアウトエラーが返される場合、status が 'error' であること
+    if (result.status === 'error') {
+      expect(result.error).toMatch(/タイムアウト|時間|超過/);
+    }
+    
+    // システムがクラッシュせずに応答していること
+    expect(result).toHaveProperty('status');
+    expect(['no_match', 'error', 'timeout']).toContain(result.status);
   });
 });

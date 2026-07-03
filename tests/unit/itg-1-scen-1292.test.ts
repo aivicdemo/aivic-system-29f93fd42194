@@ -1,81 +1,89 @@
-import { calculateBillingAmount } from "../../src/logic/it-1-2-1";
+import { executePaymentWithValidation } from "../../src/logic/it-1781935279444-2-2-1";
 
-describe("顧客ごと・サービスごとの請求額計算", () => {
-  test("SCEN-1292: 必須データが不足している場合に計算が失敗し、エラーが通知される", () => {
-    // 顧客ID欠落パターン
-    expect(() =>
-      calculateBillingAmount({
-        customerId: undefined,
-        serviceId: "SVC001",
-        unitPrice: 10000,
-        quantity: 5,
+describe("支払い処理実行・保留判定 - 支払い承認基準を満たさない請求情報", () => {
+  // SCEN-1292
+  test("支払い承認基準を満たさない請求情報について処理が保留され異常通知が発行される", () => {
+    // テストデータ: 支払い承認基準を満たさない請求情報
+    const invoiceData = {
+      invoiceId: "INV-20240115-001",
+      customerId: "CUST-0001",
+      amount: 150000,
+      currency: "JPY",
+      description: "営業成果報酬",
+      invoiceDate: "2024-01-15",
+      dueDate: "2024-02-15",
+      approverConfirmed: false,
+      approverName: null,
+      approvalTimestamp: null,
+      requiredFieldsComplete: false,
+      missingFields: ["approverConfirmed", "approverName"],
+      amountValid: true,
+      hasDataIntegrity: false,
+    };
+
+    const result = executePaymentWithValidation(invoiceData);
+
+    // 支払い処理ステータスが「保留（PENDING）」に更新されていることを確認
+    expect(result.paymentStatus).toBe("PENDING");
+
+    // 検証結果として「承認基準不満たし」の判定が返されることを確認
+    expect(result.approvalCheckPassed).toBe(false);
+
+    // 異常通知が正常に発行されたか確認
+    expect(result.anomalyNotificationIssued).toBe(true);
+
+    // 異常通知の内容に不承認の理由が含まれていることを検証
+    expect(result.notificationContent).toEqual(
+      expect.objectContaining({
+        invoiceId: "INV-20240115-001",
+        rejectionReasons: expect.arrayContaining([
+          expect.stringMatching(/approverConfirmed/),
+          expect.stringMatching(/requiredFields/),
+        ]),
       })
-    ).toThrow(/顧客ID/);
+    );
 
-    // サービスID欠落パターン
-    expect(() =>
-      calculateBillingAmount({
-        customerId: "CUST001",
-        serviceId: undefined,
-        unitPrice: 10000,
-        quantity: 5,
+    // 異常通知に請求IDが含まれていることを検証
+    expect(result.notificationContent.invoiceId).toBe("INV-20240115-001");
+
+    // 異常通知にタイムスタンプが含まれていることを検証
+    expect(result.notificationContent.issuedAt).toBeDefined();
+    expect(typeof result.notificationContent.issuedAt).toBe("string");
+
+    // 請求情報のステータスが適切に更新されていることを確認
+    expect(result.updatedInvoiceStatus).toBe("PENDING");
+
+    // ログに処理内容が記録されていることを確認
+    expect(result.processLog).toBeDefined();
+    expect(result.processLog.length).toBeGreaterThan(0);
+    expect(result.processLog[0]).toEqual(
+      expect.objectContaining({
+        action: "VALIDATION_FAILED",
+        timestamp: expect.any(String),
+        invoiceId: "INV-20240115-001",
       })
-    ).toThrow(/サービスID/);
+    );
 
-    // 単価欠落パターン
-    expect(() =>
-      calculateBillingAmount({
-        customerId: "CUST001",
-        serviceId: "SVC001",
-        unitPrice: undefined,
-        quantity: 5,
-      })
-    ).toThrow(/単価/);
+    // ステータス遷移ログが記録されていることを確認
+    expect(result.processLog).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "STATUS_UPDATE_TO_PENDING",
+        }),
+      ])
+    );
 
-    // 数量欠落パターン
-    expect(() =>
-      calculateBillingAmount({
-        customerId: "CUST001",
-        serviceId: "SVC001",
-        unitPrice: 10000,
-        quantity: undefined,
-      })
-    ).toThrow(/数量/);
+    // 異常通知発行ログが記録されていることを確認
+    expect(result.processLog).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "ANOMALY_NOTIFICATION_ISSUED",
+        }),
+      ])
+    );
 
-    // 複数必須項目欠落パターン
-    expect(() =>
-      calculateBillingAmount({
-        customerId: undefined,
-        serviceId: undefined,
-        unitPrice: 10000,
-        quantity: 5,
-      })
-    ).toThrow(/顧客ID|サービスID/);
-
-    // すべての必須項目がnullの場合
-    expect(() =>
-      calculateBillingAmount({
-        customerId: null,
-        serviceId: null,
-        unitPrice: null,
-        quantity: null,
-      })
-    ).toThrow(/必須/);
-
-    // 正常なデータでの計算成功確認（顧客ごと・サービスごとの請求額 = 10000 * 5 = 50000）
-    const result = calculateBillingAmount({
-      customerId: "CUST001",
-      serviceId: "SVC001",
-      unitPrice: 10000,
-      quantity: 5,
-    });
-
-    expect(result).toEqual({
-      customerId: "CUST001",
-      serviceId: "SVC001",
-      billingAmount: 50000,
-      unitPrice: 10000,
-      quantity: 5,
-    });
+    // 全体の処理結果が支払い保留を示していることを確認
+    expect(result.paymentExecuted).toBe(false);
+    expect(result.paymentPending).toBe(true);
   });
 });

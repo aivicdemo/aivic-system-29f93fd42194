@@ -1,168 +1,75 @@
-import { generateInvoiceCreationManual } from '../../src/logic/it-1-2-1';
+import { validateSalesReportAggregation } from "../../src/logic/it-1781935279444-2-2-1";
 
-describe('請求書作成標準手順書生成機能 - 複数契約タイプ対応', () => {
-  // SCEN-1077
-  test('複数の契約タイプ（基本契約・個別契約・変更契約）に対応した手順が生成される', () => {
-    const testContracts = [
-      {
-        contract_id: 'BASE-001',
-        contract_type: 'base_contract',
-        customer_id: 'CUST-A',
-        service_id: 'SVC-01',
-        contract_name: '基本契約',
-        billing_rule: 'fixed_monthly',
-        billing_amount: 100000,
-        effective_date: '2024-01-01',
-        termination_date: '2024-12-31',
-        discount_rate: 0,
+describe("営業報告書集計自動検証機能", () => {
+  test("SCEN-1077: 営業データの集計値がゼロ件の境界値である場合に正確に検証される", () => {
+    // Arrange: ゼロ件の営業データを準備
+    const aggregationData = {
+      period_start: "2024-01-01",
+      period_end: "2024-01-31",
+      customer_id: "CUST_001",
+      service_type: "SERVICE_A",
+      total_appointments: 0,
+      total_contracts: 0,
+      customer_responses: 0,
+      total_amount: 0,
+      data_count: 0,
+    };
+
+    // Act: 自動検証機能を実行
+    const validationResult = validateSalesReportAggregation(aggregationData);
+
+    // Assert: 検証結果の正確性を確認
+    expect(validationResult).toEqual({
+      is_valid: true,
+      has_errors: false,
+      error_messages: [],
+      warnings: [],
+      aggregation_summary: {
+        total_appointments: 0,
+        total_contracts: 0,
+        customer_responses: 0,
+        total_amount: 0,
+        average_appointment_value: 0,
+        average_contract_value: 0,
+        record_count: 0,
       },
-      {
-        contract_id: 'IND-001',
-        contract_type: 'individual_contract',
-        customer_id: 'CUST-A',
-        service_id: 'SVC-02',
-        contract_name: '個別契約',
-        billing_rule: 'performance_based',
-        billing_amount: 50000,
-        effective_date: '2024-02-15',
-        termination_date: '2024-12-31',
-        discount_rate: 5,
+      statistics: {
+        sum_appointments: 0,
+        sum_contracts: 0,
+        sum_responses: 0,
+        sum_amount: 0,
+        avg_appointments: 0,
+        avg_contracts: 0,
+        avg_responses: 0,
+        avg_amount: 0,
+        is_zero_boundary: true,
       },
-      {
-        contract_id: 'CHG-001',
-        contract_type: 'change_contract',
-        customer_id: 'CUST-A',
-        service_id: 'SVC-01',
-        contract_name: '変更契約',
-        billing_rule: 'fixed_monthly',
-        billing_amount: 120000,
-        effective_date: '2024-06-01',
-        termination_date: '2024-12-31',
-        discount_rate: 10,
-        original_contract_id: 'BASE-001',
-        change_reason: 'price_adjustment',
-      },
-    ];
-
-    const result = generateInvoiceCreationManual(testContracts);
-
-    // 基本契約セクションの存在確認
-    expect(result.sections).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          contract_type: 'base_contract',
-          section_title: expect.stringContaining('基本契約'),
-          section_order: 1,
-          steps: expect.any(Array),
-        }),
-      ])
-    );
-
-    // 個別契約セクションの存在確認
-    expect(result.sections).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          contract_type: 'individual_contract',
-          section_title: expect.stringContaining('個別契約'),
-          section_order: 2,
-          steps: expect.any(Array),
-        }),
-      ])
-    );
-
-    // 変更契約セクションの存在確認
-    expect(result.sections).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          contract_type: 'change_contract',
-          section_title: expect.stringContaining('変更契約'),
-          section_order: 3,
-          steps: expect.any(Array),
-        }),
-      ])
-    );
-
-    // 各契約タイプセクションの正しい順序を検証
-    const baseContractSection = result.sections.find(
-      (s) => s.contract_type === 'base_contract'
-    );
-    const individualContractSection = result.sections.find(
-      (s) => s.contract_type === 'individual_contract'
-    );
-    const changeContractSection = result.sections.find(
-      (s) => s.contract_type === 'change_contract'
-    );
-
-    expect(baseContractSection?.section_order).toBe(1);
-    expect(individualContractSection?.section_order).toBe(2);
-    expect(changeContractSection?.section_order).toBe(3);
-
-    // 標準フォーマットへの準拠確認
-    expect(result).toHaveProperty('manual_id');
-    expect(result).toHaveProperty('manual_title');
-    expect(result).toHaveProperty('version');
-    expect(result).toHaveProperty('created_date');
-    expect(result).toHaveProperty('sections');
-    expect(result).toHaveProperty('contract_type_count');
-    expect(result.contract_type_count).toBe(3);
-
-    // 各セクション内のステップ構造確認
-    result.sections.forEach((section) => {
-      expect(section).toHaveProperty('contract_type');
-      expect(section).toHaveProperty('section_title');
-      expect(section).toHaveProperty('section_order');
-      expect(section).toHaveProperty('steps');
-      expect(Array.isArray(section.steps)).toBe(true);
-
-      section.steps.forEach((step) => {
-        expect(step).toHaveProperty('step_number');
-        expect(step).toHaveProperty('step_title');
-        expect(step).toHaveProperty('description');
-        expect(step).toHaveProperty('checklist_items');
-        expect(Array.isArray(step.checklist_items)).toBe(true);
-      });
+      subsequent_process_status: "SKIP",
+      system_errors: [],
+      validation_timestamp: expect.any(String),
     });
 
-    // 基本契約セクションの具体的な検証
-    const baseSection = result.sections.find(
-      (s) => s.contract_type === 'base_contract'
-    );
-    expect(baseSection?.steps.length).toBeGreaterThan(0);
-    expect(baseSection?.steps[0]).toEqual(
-      expect.objectContaining({
-        step_number: 1,
-        step_title: expect.any(String),
-      })
-    );
+    // Assert: ゼロ件の境界値が正確に認識されていることを確認
+    expect(validationResult.statistics.is_zero_boundary).toBe(true);
+    expect(validationResult.statistics.record_count).toBe(0);
 
-    // 個別契約セクションの具体的な検証
-    const indSection = result.sections.find(
-      (s) => s.contract_type === 'individual_contract'
-    );
-    expect(indSection?.steps.length).toBeGreaterThan(0);
+    // Assert: すべての統計値がゼロであることを確認
+    expect(validationResult.aggregation_summary.total_appointments).toBe(0);
+    expect(validationResult.aggregation_summary.total_contracts).toBe(0);
+    expect(validationResult.aggregation_summary.customer_responses).toBe(0);
+    expect(validationResult.aggregation_summary.total_amount).toBe(0);
 
-    // 変更契約セクションの具体的な検証
-    const chgSection = result.sections.find(
-      (s) => s.contract_type === 'change_contract'
-    );
-    expect(chgSection?.steps.length).toBeGreaterThan(0);
-    expect(chgSection?.original_contract_reference).toEqual('BASE-001');
+    // Assert: エラーログやアラートが不適切に発生していないことを確認
+    expect(validationResult.has_errors).toBe(false);
+    expect(validationResult.error_messages.length).toBe(0);
+    expect(validationResult.system_errors.length).toBe(0);
 
-    // 複数契約タイプ間の相互参照を検証
-    expect(result.contract_dependencies).toBeDefined();
-    expect(result.contract_dependencies).toEqual(
-      expect.objectContaining({
-        'CHG-001': 'BASE-001',
-      })
-    );
+    // Assert: ゼロ件の状態が後続処理に正しく反映されていることを確認
+    expect(validationResult.subsequent_process_status).toBe("SKIP");
+    expect(validationResult.is_valid).toBe(true);
 
-    // 競合がないことを確認
-    expect(result.conflict_check_result).toBe('no_conflicts');
-    expect(result.integration_status).toBe('fully_integrated');
-
-    // 生成手順書の完全性確認
-    expect(result.sections.length).toBe(3);
-    expect(result.manual_id).toMatch(/^MANUAL-/);
-    expect(result.version).toMatch(/^\d+\.\d+\.\d+$/);
+    // Assert: 集計結果レポートが正常に完了したことを確認
+    expect(validationResult.validation_timestamp).toBeDefined();
+    expect(typeof validationResult.validation_timestamp).toBe("string");
   });
 });

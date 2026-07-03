@@ -1,160 +1,142 @@
-import { describe, test, expect, beforeEach } from "@jest/globals";
-import {
-  validateDeliveryFailureAndIssueAlert,
-} from "../../src/logic/it-1-1-1";
+import { describe, test, expect } from "@jest/globals";
+import { structureVerificationResultsAndEvidence } from "../../src/logic/it-1781935279444-2-2-1";
 
-describe("営業成果データの自動検証ルール定義と異常検出機能", () => {
-  // SCEN-1181: [error] 配信成功・失敗判定・アラート管理 - 配信失敗時にアラートが正確に発行される
-  test("配信失敗時にアラートが正確に発行される", () => {
-    const now = new Date("2024-01-15T10:30:00Z");
-    const deliveryAttemptId = "DEL-20240115-001";
-    const targetDataId = "DATA-REP-2024-01-15-USR-12345";
-    const targetCustomerId = "CUST-98765";
+describe("検証結果と根拠資料の構造化整理機能", () => {
+  test("SCEN-1181: 複数の根拠資料が存在する場合、全て漏れなく構造化される", () => {
+    // テストデータ: 5件以上の異なるタイプの根拠資料を含む検証結果
+    const verification_result_id = "VR-001";
+    const verification_completed_at = new Date("2024-01-15T11:00:00Z");
+    const verification_status = "completed";
+    const total_issues = 3;
 
-    // ケース 1: ネットワークエラーによる配信失敗
-    const networkErrorResult = validateDeliveryFailureAndIssueAlert({
-      deliveryAttemptId,
-      targetDataId,
-      targetCustomerId,
-      failureReason: "NETWORK_ERROR",
-      failureDetails: "Connection timeout after 30 seconds",
-      attemptTimestamp: now,
-      failureDetectedTimestamp: new Date("2024-01-15T10:30:45Z"),
-      recipientEmail: "contact@customer-abc.jp",
-      deliveryContent: {
-        reportType: "MONTHLY_SUMMARY",
-        month: "2024-01",
-        dataRecordCount: 150,
+    const evidence_materials = [
+      {
+        evidence_id: "EV-001",
+        evidence_type: "contract",
+        file_name: "contract_20240101.pdf",
+        reference_id: "CTR-2024-001",
+        created_at: new Date("2024-01-01T09:00:00Z"),
+        mime_type: "application/pdf",
+        file_size: 512000,
       },
-    });
-
-    expect(networkErrorResult.alertGenerated).toBe(true);
-    expect(networkErrorResult.alertId).toMatch(/^ALERT-\d{8}-\d{6}/);
-    expect(networkErrorResult.failureCauseRecorded).toBe("NETWORK_ERROR");
-    expect(networkErrorResult.targetDataIdentified).toBe(targetDataId);
-    expect(networkErrorResult.targetCustomerIdentified).toBe(targetCustomerId);
-    expect(networkErrorResult.alertIssuedAt).toEqual(
-      new Date("2024-01-15T10:30:45Z")
-    );
-    expect(networkErrorResult.alertDetails).toMatchObject({
-      failureReason: "NETWORK_ERROR",
-      recipientEmail: "contact@customer-abc.jp",
-      attemptCount: 1,
-    });
-    expect(networkErrorResult.logEntryCreated).toBe(true);
-
-    // ケース 2: タイムアウトエラーによる配信失敗
-    const timeoutErrorResult = validateDeliveryFailureAndIssueAlert({
-      deliveryAttemptId: "DEL-20240115-002",
-      targetDataId: "DATA-REP-2024-01-15-USR-54321",
-      targetCustomerId: "CUST-11111",
-      failureReason: "TIMEOUT",
-      failureDetails: "HTTP request exceeded 120 second limit",
-      attemptTimestamp: new Date("2024-01-15T10:45:00Z"),
-      failureDetectedTimestamp: new Date("2024-01-15T10:47:00Z"),
-      recipientEmail: "admin@customer-xyz.jp",
-      deliveryContent: {
-        reportType: "MONTHLY_SUMMARY",
-        month: "2024-01",
-        dataRecordCount: 200,
+      {
+        evidence_id: "EV-002",
+        evidence_type: "invoice",
+        file_name: "invoice_20240110.xlsx",
+        reference_id: "INV-2024-001",
+        created_at: new Date("2024-01-10T10:30:00Z"),
+        mime_type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        file_size: 256000,
       },
-    });
-
-    expect(timeoutErrorResult.alertGenerated).toBe(true);
-    expect(timeoutErrorResult.failureCauseRecorded).toBe("TIMEOUT");
-    expect(timeoutErrorResult.alertIssuedAt).toEqual(
-      new Date("2024-01-15T10:47:00Z")
-    );
-    expect(timeoutErrorResult.alertDetails).toMatchObject({
-      failureReason: "TIMEOUT",
-      recipientEmail: "admin@customer-xyz.jp",
-    });
-    expect(timeoutErrorResult.logEntryCreated).toBe(true);
-
-    // ケース 3: 複数の失敗に対して個別アラートが発行される
-    const thirdFailureResult = validateDeliveryFailureAndIssueAlert({
-      deliveryAttemptId: "DEL-20240115-003",
-      targetDataId: "DATA-REP-2024-01-15-USR-99999",
-      targetCustomerId: "CUST-22222",
-      failureReason: "INVALID_RECIPIENT",
-      failureDetails: "Recipient email address is invalid or unreachable",
-      attemptTimestamp: new Date("2024-01-15T11:00:00Z"),
-      failureDetectedTimestamp: new Date("2024-01-15T11:00:15Z"),
-      recipientEmail: "invalid@example.invalid",
-      deliveryContent: {
-        reportType: "MONTHLY_SUMMARY",
-        month: "2024-01",
-        dataRecordCount: 175,
+      {
+        evidence_id: "EV-003",
+        evidence_type: "delivery_note",
+        file_name: "delivery_20240112.pdf",
+        reference_id: "DEL-2024-001",
+        created_at: new Date("2024-01-12T14:15:00Z"),
+        mime_type: "application/pdf",
+        file_size: 384000,
       },
+      {
+        evidence_id: "EV-004",
+        evidence_type: "receipt",
+        file_name: "receipt_20240113.pdf",
+        reference_id: "RCP-2024-001",
+        created_at: new Date("2024-01-13T16:45:00Z"),
+        mime_type: "application/pdf",
+        file_size: 204800,
+      },
+      {
+        evidence_id: "EV-005",
+        evidence_type: "email",
+        file_name: "email_exchange_20240114.eml",
+        reference_id: "EMAIL-2024-001",
+        created_at: new Date("2024-01-14T08:20:00Z"),
+        mime_type: "message/rfc822",
+        file_size: 102400,
+      },
+      {
+        evidence_id: "EV-006",
+        evidence_type: "contract",
+        file_name: "amendment_20240115.pdf",
+        reference_id: "CTR-2024-002",
+        created_at: new Date("2024-01-15T09:30:00Z"),
+        mime_type: "application/pdf",
+        file_size: 307200,
+      },
+    ];
+
+    // 構造化整理機能を実行
+    const structured_result = structureVerificationResultsAndEvidence({
+      verification_result_id: verification_result_id,
+      verification_completed_at: verification_completed_at,
+      verification_status: verification_status,
+      total_issues: total_issues,
+      evidence_materials: evidence_materials,
     });
 
-    expect(thirdFailureResult.alertGenerated).toBe(true);
-    expect(thirdFailureResult.failureCauseRecorded).toBe("INVALID_RECIPIENT");
-    expect(thirdFailureResult.alertId).not.toEqual(networkErrorResult.alertId);
-    expect(thirdFailureResult.alertId).not.toEqual(timeoutErrorResult.alertId);
-    expect(thirdFailureResult.alertIssuedAt).toEqual(
-      new Date("2024-01-15T11:00:15Z")
+    // 期待値: 入力件数と出力件数の一致確認
+    expect(structured_result.evidence_materials.length).toBe(6);
+
+    // 入力データの件数と戻り値の件数が完全に一致
+    expect(structured_result.evidence_materials.length).toBe(
+      evidence_materials.length
     );
-    expect(thirdFailureResult.logEntryCreated).toBe(true);
 
-    // ケース 4: 失敗データレコード情報が正確に特定されている
-    expect(networkErrorResult.affectedDataRecordCount).toBe(150);
-    expect(timeoutErrorResult.affectedDataRecordCount).toBe(200);
-    expect(thirdFailureResult.affectedDataRecordCount).toBe(175);
+    // 各根拠資料のメタデータが正確に構造化されていることを確認
+    for (let i = 0; i < structured_result.evidence_materials.length; i++) {
+      const original = evidence_materials[i];
+      const structured = structured_result.evidence_materials[i];
 
-    // ケース 5: ログエントリに詳細情報が含まれている
-    expect(networkErrorResult.logDetails).toMatchObject({
-      deliveryAttemptId,
-      targetDataId,
-      targetCustomerId,
-      failureReason: "NETWORK_ERROR",
-      failureDetails: "Connection timeout after 30 seconds",
-      recipientEmail: "contact@customer-abc.jp",
-      alertIssuedAt: expect.any(Date),
-    });
+      expect(structured.evidence_id).toBe(original.evidence_id);
+      expect(structured.evidence_type).toBe(original.evidence_type);
+      expect(structured.file_name).toBe(original.file_name);
+      expect(structured.reference_id).toBe(original.reference_id);
+      expect(structured.created_at).toBe(original.created_at.toISOString());
+      expect(structured.mime_type).toBe(original.mime_type);
+      expect(structured.file_size).toBe(original.file_size);
+    }
 
-    expect(timeoutErrorResult.logDetails).toMatchObject({
-      deliveryAttemptId: "DEL-20240115-002",
-      failureReason: "TIMEOUT",
-      failureDetails: "HTTP request exceeded 120 second limit",
-    });
+    // 配列順序が入力順序と一致していることを確認
+    for (let i = 0; i < structured_result.evidence_materials.length; i++) {
+      expect(structured_result.evidence_materials[i].evidence_id).toBe(
+        evidence_materials[i].evidence_id
+      );
+    }
 
-    // ケース 6: 業務ルールエラーケース：失敗原因が不正な形式
-    expect(() =>
-      validateDeliveryFailureAndIssueAlert({
-        deliveryAttemptId: "DEL-20240115-004",
-        targetDataId: "DATA-REP-2024-01-15-USR-88888",
-        targetCustomerId: "CUST-33333",
-        failureReason: "INVALID_REASON_FORMAT",
-        failureDetails: "Unknown failure reason code",
-        attemptTimestamp: new Date("2024-01-15T11:15:00Z"),
-        failureDetectedTimestamp: new Date("2024-01-15T11:15:10Z"),
-        recipientEmail: "test@example.com",
-        deliveryContent: {
-          reportType: "MONTHLY_SUMMARY",
-          month: "2024-01",
-          dataRecordCount: 100,
-        },
-      })
-    ).toThrow(/失敗原因/);
+    // 重複する根拠資料がないことを確認
+    const evidence_ids = structured_result.evidence_materials.map(
+      (item: any) => item.evidence_id
+    );
+    const unique_evidence_ids = new Set(evidence_ids);
+    expect(unique_evidence_ids.size).toBe(evidence_ids.length);
 
-    // ケース 7: 業務ルールエラーケース：タイムスタンプが不正
-    expect(() =>
-      validateDeliveryFailureAndIssueAlert({
-        deliveryAttemptId: "DEL-20240115-005",
-        targetDataId: "DATA-REP-2024-01-15-USR-77777",
-        targetCustomerId: "CUST-44444",
-        failureReason: "NETWORK_ERROR",
-        failureDetails: "Connection timeout",
-        attemptTimestamp: new Date("2024-01-15T11:30:00Z"),
-        failureDetectedTimestamp: new Date("2024-01-15T11:25:00Z"),
-        recipientEmail: "test@example.com",
-        deliveryContent: {
-          reportType: "MONTHLY_SUMMARY",
-          month: "2024-01",
-          dataRecordCount: 120,
-        },
-      })
-    ).toThrow(/タイムスタンプ/);
+    // null値やundefinedが含まれていないことを確認
+    for (const item of structured_result.evidence_materials) {
+      expect(item.evidence_id).not.toBeNull();
+      expect(item.evidence_id).not.toBeUndefined();
+      expect(item.evidence_type).not.toBeNull();
+      expect(item.evidence_type).not.toBeUndefined();
+      expect(item.file_name).not.toBeNull();
+      expect(item.file_name).not.toBeUndefined();
+      expect(item.reference_id).not.toBeNull();
+      expect(item.reference_id).not.toBeUndefined();
+      expect(item.created_at).not.toBeNull();
+      expect(item.created_at).not.toBeUndefined();
+      expect(item.mime_type).not.toBeNull();
+      expect(item.mime_type).not.toBeUndefined();
+      expect(item.file_size).not.toBeNull();
+      expect(item.file_size).not.toBeUndefined();
+    }
+
+    // 検証結果の親要素も正しく構造化されていることを確認
+    expect(structured_result.verification_result_id).toBe(
+      verification_result_id
+    );
+    expect(structured_result.verification_completed_at).toBe(
+      verification_completed_at.toISOString()
+    );
+    expect(structured_result.verification_status).toBe(verification_status);
+    expect(structured_result.total_issues).toBe(total_issues);
   });
 });

@@ -1,54 +1,94 @@
-import { detectAnomalousValueInSalesData } from "../../src/logic/it-1781935279444-2-2-1";
+import { validateInvoiceChecklist } from '../../src/logic/it-1-br-1781935279444-1-2-1';
 
-describe("営業データの完全性・正確性を自動検証し、不足データ・誤りを検出・通知する機能", () => {
-  // SCEN-889: [error] 営業データ異常値の自動検出 - 営業データの値が許容範囲を超える場合、チェック結果『警告』と超過値の詳細が返される
-  test("should return warning status with overage details when sales data exceeds acceptable range", () => {
-    const salesDataInput = {
-      customerId: "C001",
-      serviceId: "S001",
-      appointmentCount: 15,
-      contractAmount: 1500000,
-      discountRate: 35,
-      targetAmountMin: 100000,
-      targetAmountMax: 1000000,
-      discountRateMax: 30,
+describe('Monthly Summary Template Definition and Management - Invoice Checklist Validation', () => {
+  test('SCEN-889: [normal] Invoice creation checklist validation - all items meet criteria and marked complete', () => {
+    // Test data: Invoice with all required fields properly populated
+    const invoiceData = {
+      invoiceNumber: 'INV-2024-001',
+      customerId: 'CUST-12345',
+      customerName: 'テスト顧客株式会社',
+      customerAddress: '東京都渋谷区1-2-3',
+      customerContactPhone: '03-1234-5678',
+      customerContactEmail: 'contact@test-customer.co.jp',
+      invoiceDate: new Date('2024-01-15T00:00:00Z'),
+      dueDate: new Date('2024-02-15T00:00:00Z'),
+      paymentTerms: '末日払い',
+      lineItems: [
+        {
+          itemId: 'ITEM-001',
+          description: 'サービスA',
+          quantity: 10,
+          unitPrice: 5000,
+          amount: 50000,
+        },
+        {
+          itemId: 'ITEM-002',
+          description: 'サービスB',
+          quantity: 5,
+          unitPrice: 8000,
+          amount: 40000,
+        },
+      ],
+      subtotal: 90000,
+      taxRate: 0.1,
+      taxAmount: 9000,
+      handlingFee: 1000,
+      totalAmount: 100000,
+      attachments: ['estimate_ref_001.pdf', 'contract_ref_001.pdf'],
+      notes: 'Standard invoice for monthly service delivery',
+      status: 'pending',
     };
 
-    const result = detectAnomalousValueInSalesData(salesDataInput);
+    const checklistValidationResult = validateInvoiceChecklist(invoiceData);
 
-    expect(result.status).toBe("warning");
-    expect(result.warnings).toBeDefined();
-    expect(Array.isArray(result.warnings)).toBe(true);
-    expect(result.warnings.length).toBeGreaterThan(0);
+    // Verify customer information validation passed
+    expect(checklistValidationResult.checks.customerValidation.passed).toBe(true);
+    expect(checklistValidationResult.checks.customerValidation.details.nameExists).toBe(true);
+    expect(checklistValidationResult.checks.customerValidation.details.addressExists).toBe(true);
+    expect(checklistValidationResult.checks.customerValidation.details.contactInfoExists).toBe(true);
 
-    const contractAmountWarning = result.warnings.find(
-      (w: any) => w.fieldName === "contractAmount"
-    );
-    expect(contractAmountWarning).toBeDefined();
-    expect(contractAmountWarning.fieldName).toBe("contractAmount");
-    expect(contractAmountWarning.allowableRange).toEqual({
-      min: 100000,
-      max: 1000000,
-    });
-    expect(contractAmountWarning.actualValue).toBe(1500000);
-    expect(contractAmountWarning.overageAmount).toBe(500000);
-    expect(contractAmountWarning.severity).toBe("高");
+    // Verify invoice content validation passed
+    expect(checklistValidationResult.checks.invoiceContentValidation.passed).toBe(true);
+    expect(checklistValidationResult.checks.invoiceContentValidation.details.lineItemsCount).toBe(2);
+    expect(checklistValidationResult.checks.invoiceContentValidation.details.allAmountsCalculated).toBe(true);
 
-    const discountRateWarning = result.warnings.find(
-      (w: any) => w.fieldName === "discountRate"
-    );
-    expect(discountRateWarning).toBeDefined();
-    expect(discountRateWarning.fieldName).toBe("discountRate");
-    expect(discountRateWarning.allowableRange).toEqual({
-      min: 0,
-      max: 30,
-    });
-    expect(discountRateWarning.actualValue).toBe(35);
-    expect(discountRateWarning.overageAmount).toBe(5);
-    expect(discountRateWarning.severity).toBe("中");
+    // Verify tax and fee calculation validation passed
+    expect(checklistValidationResult.checks.taxFeeValidation.passed).toBe(true);
+    expect(checklistValidationResult.checks.taxFeeValidation.details.calculatedTax).toBe(9000);
+    expect(checklistValidationResult.checks.taxFeeValidation.details.taxCalculationCorrect).toBe(true);
+    expect(checklistValidationResult.checks.taxFeeValidation.details.totalAmountCorrect).toBe(true);
+    expect(checklistValidationResult.checks.taxFeeValidation.details.verifiedTotal).toBe(100000);
 
-    expect(result.checkTimestamp).toBeDefined();
-    expect(typeof result.checkTimestamp).toBe("string");
-    expect(result.hasErrors).toBe(false);
+    // Verify payment date and terms validation passed
+    expect(checklistValidationResult.checks.paymentTermsValidation.passed).toBe(true);
+    expect(checklistValidationResult.checks.paymentTermsValidation.details.dueDateSet).toBe(true);
+    expect(checklistValidationResult.checks.paymentTermsValidation.details.paymentTermsDefined).toBe(true);
+
+    // Verify invoice numbering rule validation passed
+    expect(checklistValidationResult.checks.invoiceNumberingValidation.passed).toBe(true);
+    expect(checklistValidationResult.checks.invoiceNumberingValidation.details.numberFormatValid).toBe(true);
+    expect(checklistValidationResult.checks.invoiceNumberingValidation.details.numberingRuleApplied).toBe(true);
+    expect(checklistValidationResult.checks.invoiceNumberingValidation.details.invoiceNumber).toBe('INV-2024-001');
+
+    // Verify attachments validation passed
+    expect(checklistValidationResult.checks.attachmentsValidation.passed).toBe(true);
+    expect(checklistValidationResult.checks.attachmentsValidation.details.attachmentsPresent).toBe(true);
+    expect(checklistValidationResult.checks.attachmentsValidation.details.attachmentCount).toBe(2);
+
+    // Verify all checklist items passed
+    expect(checklistValidationResult.allChecksPassed).toBe(true);
+
+    // Verify overall status is complete
+    expect(checklistValidationResult.finalStatus).toBe('complete');
+    expect(checklistValidationResult.approved).toBe(true);
+
+    // Verify validation log entries exist
+    expect(checklistValidationResult.validationLog).toBeDefined();
+    expect(checklistValidationResult.validationLog.length).toBeGreaterThan(0);
+    expect(checklistValidationResult.validationLog[0]).toMatch(/customer information/i);
+
+    // Verify invoice is in approvable state
+    expect(checklistValidationResult.readyForApproval).toBe(true);
+    expect(checklistValidationResult.readyForSubmission).toBe(true);
   });
 });

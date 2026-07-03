@@ -1,94 +1,24 @@
-import { describe, test, expect, beforeEach } from "@jest/globals";
-import {
-  defineMetadata,
-  retrieveMetadata,
-  applyCalculationLogic,
-  mapToReportTemplate,
-} from "../../src/logic/it-1781935279444-2-1-1";
+import { describe, test, expect, beforeEach } from '@jest/globals';
+import { generateInvoiceWithTemplate } from '../../src/logic/it-1-br-1781935279444-1-2-1';
 
-describe("営業データ項目メタデータ管理", () => {
+describe('月次サマリーテンプレート定義管理機能', () => {
   beforeEach(() => {
     jest.clearAllMocks();
   });
 
-  test("SCEN-610: 項目名・単位・データ型・計算ロジック・レポートマッピングが定義通りに適用される", () => {
-    // メタデータ定義の入力
-    const metadataInput = {
-      itemName: "売上金額",
-      unit: "JPY",
-      dataType: "Decimal",
-      calculationLogic: "unitPrice * quantity",
-      reportMapping: "売上レポート",
+  // SCEN-610: [error] 請求書・成果レポート自動生成機能 - テンプレートが未定義の場合にエラーが発生する
+  test('テンプレートが未定義の場合にエラーが発生する', () => {
+    const invoiceData = {
+      customerId: 'CUST-001',
+      customerName: '株式会社テスト',
+      invoiceAmount: 150000,
+      invoiceDate: '2024-01-15',
+      serviceType: 'standard',
+      billingPeriod: '2024-01',
+      templateId: undefined,
+      templateStatus: 'inactive'
     };
 
-    // メタデータ定義を保存
-    const defineResult = defineMetadata(metadataInput);
-    expect(defineResult).toEqual({
-      success: true,
-      metadataId: expect.any(String),
-      message: "メタデータが正常に定義されました",
-    });
-
-    const metadataId = defineResult.metadataId;
-
-    // 保存後、作成した項目の詳細情報を確認
-    const retrieveResult = retrieveMetadata({ metadataId });
-    expect(retrieveResult).toEqual({
-      metadataId,
-      itemName: "売上金額",
-      unit: "JPY",
-      dataType: "Decimal",
-      calculationLogic: "unitPrice * quantity",
-      reportMapping: "売上レポート",
-      createdAt: expect.any(String),
-      status: "active",
-    });
-
-    // 営業データ入力と自動計算の実行
-    const calculationInput = {
-      metadataId,
-      unitPrice: 1000,
-      quantity: 5,
-    };
-
-    const calculationResult = applyCalculationLogic(calculationInput);
-    expect(calculationResult).toEqual({
-      success: true,
-      calculatedValue: 5000,
-      unit: "JPY",
-      dataType: "Decimal",
-      formula: "unitPrice * quantity",
-      inputValues: {
-        unitPrice: 1000,
-        quantity: 5,
-      },
-    });
-
-    // 売上レポートへのマッピング確認
-    const reportMappingInput = {
-      metadataId,
-      itemValue: 5000,
-      itemName: "売上金額",
-      reportTemplateName: "売上レポート",
-    };
-
-    const reportMappingResult = mapToReportTemplate(reportMappingInput);
-    expect(reportMappingResult).toEqual({
-      success: true,
-      reportItemName: "売上金額",
-      reportItemValue: 5000,
-      reportItemUnit: "JPY",
-      reportTemplateName: "売上レポート",
-      dataType: "Decimal",
-      mappingStatus: "mapped",
-      formattedOutput: "5000 JPY",
-    });
-
-    // レポート出力結果の検証
-    expect(reportMappingResult.reportItemName).toBe("売上金額");
-    expect(reportMappingResult.reportItemUnit).toBe("JPY");
-    expect(reportMappingResult.reportItemValue).toBe(5000);
-    expect(reportMappingResult.formattedOutput).toBe("5000 JPY");
-    expect(reportMappingResult.mappingStatus).toBe("mapped");
+    expect(() => generateInvoiceWithTemplate(invoiceData)).toThrow(/テンプレート/);
   });
 });

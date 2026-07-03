@@ -1,131 +1,218 @@
-import { calculateDiscountedBillingAmount } from "../../src/logic/it-1781935279444-1-1-1";
+import { generateMonthlySummary } from "../../src/logic/it-1-br-1781935279444-1-2-1";
 
-describe("営業データ項目のメタデータ管理機能 - 割引・キャンペーン適用判定", () => {
-  test("SCEN-901: 複数の割引ルールが適用対象の場合、最も有利な割引率が選択される", () => {
-    // ===== テストデータ設定 =====
-    // 顧客ID、基本請求額、適用可能な複数の割引ルール
-    const customerId = "CUST-001";
-    const baseBillingAmount = 100000; // 基本請求額: 100,000円
-    
-    // 適用可能な割引ルール: 割引率10%、15%、20%
-    const applicableDiscountRules = [
+describe("月次営業成果サマリー自動生成機能", () => {
+  // SCEN-901: [edge] 月次営業成果サマリー自動生成機能 - 成果指標が 0 件の顧客・サービスでも正確に集計され表示される
+  test("成果指標が0件の顧客・サービスでも正確に集計・表示される", () => {
+    // テストデータ: 成果指標が0件の顧客3件
+    const customers_zero_indicators = [
       {
-        rule_id: "DISC-001",
-        discount_rate: 0.10, // 10%割引
-        apply_condition: "purchase_amount_over_50000",
-        campaign_period_start: "2024-01-01",
-        campaign_period_end: "2024-12-31",
-        is_active: true,
+        customer_id: "CUST_001",
+        customer_name: "顧客A",
+        contract_id: "CONT_001",
+        month: "2024-01",
       },
       {
-        rule_id: "DISC-002",
-        discount_rate: 0.15, // 15%割引
-        apply_condition: "customer_tier_silver",
-        campaign_period_start: "2024-01-01",
-        campaign_period_end: "2024-12-31",
-        is_active: true,
+        customer_id: "CUST_002",
+        customer_name: "顧客B",
+        contract_id: "CONT_002",
+        month: "2024-01",
       },
       {
-        rule_id: "DISC-003",
-        discount_rate: 0.20, // 20%割引
-        apply_condition: "campaign_winter_sale",
-        campaign_period_start: "2024-01-01",
-        campaign_period_end: "2024-12-31",
-        is_active: true,
+        customer_id: "CUST_003",
+        customer_name: "顧客C",
+        contract_id: "CONT_003",
+        month: "2024-01",
       },
     ];
 
-    // 顧客の適用条件を満たすかどうかの確認
-    const customerContext = {
-      customer_id: customerId,
-      purchase_amount: 75000, // 50,000以上を満たす
-      customer_tier: "silver", // customer_tier_silverを満たす
-      campaign_participation: ["campaign_winter_sale"], // campaign_winter_saleに参加
-      evaluation_date: "2024-06-15", // キャンペーン期間内
-    };
+    // テストデータ: 成果指標が0件のサービス3件
+    const services_zero_indicators = [
+      {
+        service_id: "SVC_001",
+        service_name: "サービスX",
+        month: "2024-01",
+      },
+      {
+        service_id: "SVC_002",
+        service_name: "サービスY",
+        month: "2024-01",
+      },
+      {
+        service_id: "SVC_003",
+        service_name: "サービスZ",
+        month: "2024-01",
+      },
+    ];
 
-    // ===== 割引適用判定ロジック実行 =====
-    const result = calculateDiscountedBillingAmount({
-      customerId,
-      baseBillingAmount,
-      applicableDiscountRules,
-      customerContext,
+    // テストデータ: 一部顧客・サービスに成果指標あり（0件との混在を確認）
+    const performance_indicators = [
+      {
+        indicator_id: "IND_001",
+        customer_id: "CUST_001",
+        service_id: "SVC_001",
+        month: "2024-01",
+        appointment_count: 5,
+        contract_count: 2,
+        revenue: 100000,
+      },
+      {
+        indicator_id: "IND_002",
+        customer_id: "CUST_002",
+        service_id: "SVC_002",
+        month: "2024-01",
+        appointment_count: 0,
+        contract_count: 0,
+        revenue: 0,
+      },
+    ];
+
+    // 月次営業成果サマリー自動生成機能を実行
+    const summary_result = generateMonthlySummary({
+      customers: customers_zero_indicators,
+      services: services_zero_indicators,
+      performance_indicators: performance_indicators,
+      month: "2024-01",
     });
 
-    // ===== 期待値計算 =====
-    // 複数の割引ルールのうち、すべての適用条件が満たされるものから最も高い割引率を選択
-    // DISC-001: 10% → purchase_amount_over_50000満たす (75000 > 50000)
-    // DISC-002: 15% → customer_tier_silver満たす
-    // DISC-003: 20% → campaign_winter_sale満たす
-    // 最も有利な割引率は 20%
-    const selectedDiscountRate = 0.20;
-    const expectedBillingAmount = baseBillingAmount * (1 - selectedDiscountRate);
-    // 100,000 * (1 - 0.20) = 100,000 * 0.80 = 80,000
+    // 成功時のレスポンス構造を確認
+    expect(summary_result).toBeDefined();
+    expect(summary_result.status).toBe("success");
 
-    // ===== 割引適用判定結果の検証 =====
-    // 1. 選択された割引率が最も高い割引率であることを検証
-    expect(result.selected_discount_rate).toBe(0.20);
+    // 生成されたサマリーレポートが存在することを確認
+    expect(summary_result.summary_report).toBeDefined();
 
-    // 2. 選択された割引ルールIDが DISC-003 であることを検証
-    expect(result.selected_rule_id).toBe("DISC-003");
-
-    // 3. 割引適用後の請求額が正確であることを検証
-    expect(result.final_billing_amount).toBe(80000);
-
-    // 4. 割引額の計算が正確であることを検証
-    const expectedDiscountAmount = baseBillingAmount * selectedDiscountRate;
-    // 100,000 * 0.20 = 20,000
-    expect(result.discount_amount).toBe(20000);
-
-    // 5. 割引選択プロセスと選定理由がログに記録されていることを検証
-    expect(result.selection_log).toBeDefined();
-    expect(result.selection_log.length).toBeGreaterThan(0);
-    
-    // ログ内容の確認
-    const selectionLog = result.selection_log[0];
-    expect(selectionLog.rule_id).toBe("DISC-003");
-    expect(selectionLog.discount_rate).toBe(0.20);
-    expect(selectionLog.reason).toMatch(/最も有利な割引/);
-    expect(selectionLog.timestamp).toBeDefined();
-
-    // 6. 割引選択の根拠（評価された全ルール）がログに記録されていることを検証
-    expect(result.evaluated_rules).toBeDefined();
-    expect(result.evaluated_rules.length).toBe(3);
-    
-    // 評価結果の詳細確認
-    const evaluatedRuleIds = result.evaluated_rules.map(
-      (rule: { rule_id: string }) => rule.rule_id
+    // サマリーレポートに成果指標0件の顧客が全て含まれていることを確認
+    const customer_ids_in_report = summary_result.summary_report.customers.map(
+      (c: any) => c.customer_id
     );
-    expect(evaluatedRuleIds).toContain("DISC-001");
-    expect(evaluatedRuleIds).toContain("DISC-002");
-    expect(evaluatedRuleIds).toContain("DISC-003");
+    expect(customer_ids_in_report).toContain("CUST_001");
+    expect(customer_ids_in_report).toContain("CUST_002");
+    expect(customer_ids_in_report).toContain("CUST_003");
+    expect(customer_ids_in_report.length).toBe(3);
 
-    // 各ルールの適用条件判定結果
-    const disc001Result = result.evaluated_rules.find(
-      (rule: { rule_id: string }) => rule.rule_id === "DISC-001"
+    // サマリーレポートに成果指標0件のサービスが全て含まれていることを確認
+    const service_ids_in_report = summary_result.summary_report.services.map(
+      (s: any) => s.service_id
     );
-    expect(disc001Result.is_applicable).toBe(true);
-    expect(disc001Result.discount_rate).toBe(0.10);
+    expect(service_ids_in_report).toContain("SVC_001");
+    expect(service_ids_in_report).toContain("SVC_002");
+    expect(service_ids_in_report).toContain("SVC_003");
+    expect(service_ids_in_report.length).toBe(3);
 
-    const disc002Result = result.evaluated_rules.find(
-      (rule: { rule_id: string }) => rule.rule_id === "DISC-002"
+    // 顧客別集計値の検証
+    const cust_001_summary = summary_result.summary_report.customers.find(
+      (c: any) => c.customer_id === "CUST_001"
     );
-    expect(disc002Result.is_applicable).toBe(true);
-    expect(disc002Result.discount_rate).toBe(0.15);
+    expect(cust_001_summary).toBeDefined();
+    expect(cust_001_summary.total_appointment_count).toBe(5);
+    expect(cust_001_summary.total_contract_count).toBe(2);
+    expect(cust_001_summary.total_revenue).toBe(100000);
 
-    const disc003Result = result.evaluated_rules.find(
-      (rule: { rule_id: string }) => rule.rule_id === "DISC-003"
+    // 成果指標0件の顧客CUST_002の集計値が0として表示されることを確認
+    const cust_002_summary = summary_result.summary_report.customers.find(
+      (c: any) => c.customer_id === "CUST_002"
     );
-    expect(disc003Result.is_applicable).toBe(true);
-    expect(disc003Result.discount_rate).toBe(0.20);
+    expect(cust_002_summary).toBeDefined();
+    expect(cust_002_summary.total_appointment_count).toBe(0);
+    expect(cust_002_summary.total_contract_count).toBe(0);
+    expect(cust_002_summary.total_revenue).toBe(0);
 
-    // 7. 最終的な請求記録が完全であることを検証
-    expect(result.billing_record).toBeDefined();
-    expect(result.billing_record.customer_id).toBe(customerId);
-    expect(result.billing_record.base_amount).toBe(100000);
-    expect(result.billing_record.discount_rate).toBe(0.20);
-    expect(result.billing_record.discount_amount).toBe(20000);
-    expect(result.billing_record.final_amount).toBe(80000);
-    expect(result.billing_record.applied_rule_id).toBe("DISC-003");
+    // 成果指標が全くない顧客CUST_003の集計値が0として表示されることを確認
+    const cust_003_summary = summary_result.summary_report.customers.find(
+      (c: any) => c.customer_id === "CUST_003"
+    );
+    expect(cust_003_summary).toBeDefined();
+    expect(cust_003_summary.total_appointment_count).toBe(0);
+    expect(cust_003_summary.total_contract_count).toBe(0);
+    expect(cust_003_summary.total_revenue).toBe(0);
+
+    // サービス別集計値の検証
+    const svc_001_summary = summary_result.summary_report.services.find(
+      (s: any) => s.service_id === "SVC_001"
+    );
+    expect(svc_001_summary).toBeDefined();
+    expect(svc_001_summary.total_appointment_count).toBe(5);
+    expect(svc_001_summary.total_contract_count).toBe(2);
+    expect(svc_001_summary.total_revenue).toBe(100000);
+
+    // 成果指標0件のサービスSVC_002の集計値が0として表示されることを確認
+    const svc_002_summary = summary_result.summary_report.services.find(
+      (s: any) => s.service_id === "SVC_002"
+    );
+    expect(svc_002_summary).toBeDefined();
+    expect(svc_002_summary.total_appointment_count).toBe(0);
+    expect(svc_002_summary.total_contract_count).toBe(0);
+    expect(svc_002_summary.total_revenue).toBe(0);
+
+    // 成果指標が全くないサービスSVC_003の集計値が0として表示されることを確認
+    const svc_003_summary = summary_result.summary_report.services.find(
+      (s: any) => s.service_id === "SVC_003"
+    );
+    expect(svc_003_summary).toBeDefined();
+    expect(svc_003_summary.total_appointment_count).toBe(0);
+    expect(svc_003_summary.total_contract_count).toBe(0);
+    expect(svc_003_summary.total_revenue).toBe(0);
+
+    // 全体集計値の検証
+    expect(summary_result.summary_report.aggregate).toBeDefined();
+    expect(summary_result.summary_report.aggregate.total_appointment_count).toBe(
+      5
+    );
+    expect(summary_result.summary_report.aggregate.total_contract_count).toBe(2);
+    expect(summary_result.summary_report.aggregate.total_revenue).toBe(100000);
+
+    // 平均値計算の検証（0件を含む）
+    expect(
+      summary_result.summary_report.aggregate.average_appointment_count
+    ).toBe(5 / 3); // (5+0+0)/3
+    expect(
+      summary_result.summary_report.aggregate.average_contract_count
+    ).toBe(2 / 3); // (2+0+0)/3
+
+    // 最大値・最小値計算の検証
+    expect(summary_result.summary_report.aggregate.max_appointment_count).toBe(
+      5
+    );
+    expect(summary_result.summary_report.aggregate.min_appointment_count).toBe(
+      0
+    );
+    expect(summary_result.summary_report.aggregate.max_contract_count).toBe(2);
+    expect(summary_result.summary_report.aggregate.min_contract_count).toBe(0);
+
+    // サマリーレポートのフォーマットが正常であることを確認
+    // null値や未定義値がないことを確認
+    summary_result.summary_report.customers.forEach((customer: any) => {
+      expect(customer.customer_id).not.toBeNull();
+      expect(customer.customer_id).not.toBeUndefined();
+      expect(customer.customer_name).not.toBeNull();
+      expect(customer.customer_name).not.toBeUndefined();
+      expect(typeof customer.total_appointment_count).toBe("number");
+      expect(typeof customer.total_contract_count).toBe("number");
+      expect(typeof customer.total_revenue).toBe("number");
+      expect(customer.total_appointment_count).toBeGreaterThanOrEqual(0);
+      expect(customer.total_contract_count).toBeGreaterThanOrEqual(0);
+      expect(customer.total_revenue).toBeGreaterThanOrEqual(0);
+    });
+
+    summary_result.summary_report.services.forEach((service: any) => {
+      expect(service.service_id).not.toBeNull();
+      expect(service.service_id).not.toBeUndefined();
+      expect(service.service_name).not.toBeNull();
+      expect(service.service_name).not.toBeUndefined();
+      expect(typeof service.total_appointment_count).toBe("number");
+      expect(typeof service.total_contract_count).toBe("number");
+      expect(typeof service.total_revenue).toBe("number");
+      expect(service.total_appointment_count).toBeGreaterThanOrEqual(0);
+      expect(service.total_contract_count).toBeGreaterThanOrEqual(0);
+      expect(service.total_revenue).toBeGreaterThanOrEqual(0);
+    });
+
+    // 月情報が正しく記録されていることを確認
+    expect(summary_result.summary_report.month).toBe("2024-01");
+
+    // タイムスタンプが適切に設定されていることを確認（ISO形式）
+    expect(summary_result.summary_report.generated_at).toMatch(
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/
+    );
   });
 });

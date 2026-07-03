@@ -1,80 +1,79 @@
-import { describe, test, expect, beforeEach } from "@jest/globals";
-import { recordContractChangeSignature } from "../../src/logic/it-1781935279444-2-1-1";
+import { validateContractChangeAgreement } from "../../src/logic/it-1-1-1";
 
-describe("営業データ入力時の品質検証ルール定義・実行機能", () => {
-  // SCEN-1243: [normal] 契約変更承認・署名記録機能 - 営業責任者の署名要件が電子署名である場合、電子署名が生成・記録される
-  test("should record electronic signature when sales manager signature requirement is electronic signature", () => {
-    const input = {
-      contractChangeId: "CC-20240115-001",
-      contractId: "CT-2024-0001",
-      customerId: "CUST-0001",
-      salesManagerId: "SM-0001",
-      salesManagerName: "山田太郎",
-      salesManagerEmail: "yamada@example.com",
-      signatureRequirement: "electronic_signature",
-      changeItems: [
-        {
-          fieldName: "serviceType",
-          oldValue: "service_a",
-          newValue: "service_b",
-          changeReason: "顧客要望による変更"
-        }
-      ],
-      signatureImageData: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAUA...",
-      signatureTimestamp: "2024-01-15T10:30:00Z",
-      signatureDeviceId: "SIGN-PAD-001"
+describe("営業成果データの自動検証ルール定義と異常検出機能", () => {
+  // SCEN-1243: [error] 契約変更内容の合意状況検証機能 - 顧客の合意と登録済み変更内容が不一致である場合、例外フラグを立てて対応ルート判定を実行する
+  test("契約変更内容が顧客合意と不一致の場合、例外フラグが立てられ対応ルート判定が実行される", () => {
+    // テストデータ準備
+    const customerId = "CUST-001";
+    const contractNumber = "CTR-2024-001";
+    const registeredChangeContent = {
+      changeType: "pricing_plan",
+      previousValue: "standard_plan",
+      newValue: "premium_plan",
+      effectiveDate: "2024-02-01",
+      discountRate: 0.1,
     };
 
-    const result = recordContractChangeSignature(input);
+    const customerAgreementContent = {
+      changeType: "pricing_plan",
+      previousValue: "standard_plan",
+      newValue: "enterprise_plan", // 登録済み変更内容と不一致
+      effectiveDate: "2024-02-01",
+      discountRate: 0.15, // 登録済み変更内容と不一致
+      agreedAt: "2024-01-20T09:30:00Z",
+      agreedBy: "sales_rep_001",
+    };
 
-    // 署名記録が正常に保存されたことを確認
-    expect(result.success).toBe(true);
-    
-    // 署名レコードIDが生成されていることを確認
-    expect(result.signatureRecordId).toBeDefined();
-    expect(result.signatureRecordId).toMatch(/^SIG-/);
-    
-    // 電子署名が正常に記録されたことを確認
-    expect(result.signatureType).toBe("electronic_signature");
-    
-    // 署名画像データが保存されていることを確認
-    expect(result.signatureImageData).toBe("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAUA...");
-    
-    // タイムスタンプが正確に記録されていることを確認
-    expect(result.signatureTimestamp).toBe("2024-01-15T10:30:00Z");
-    
-    // 署名者情報が正しく記録されていることを確認
-    expect(result.signerInfo).toEqual({
-      managerId: "SM-0001",
-      managerName: "山田太郎",
-      managerEmail: "yamada@example.com"
+    const input = {
+      customerId,
+      contractNumber,
+      registeredChangeContent,
+      customerAgreementContent,
+    };
+
+    const result = validateContractChangeAgreement(input);
+
+    // 例外フラグが立てられたことを検証
+    expect(result.exceptionFlagSet).toBe(true);
+
+    // 不一致内容が記録されていることを検証
+    expect(result.discrepancies).toEqual([
+      {
+        field: "newValue",
+        registeredValue: "premium_plan",
+        agreedValue: "enterprise_plan",
+      },
+      {
+        field: "discountRate",
+        registeredValue: 0.1,
+        agreedValue: 0.15,
+      },
+    ]);
+
+    // 対応ルート判定が実行され、適切なルートが決定されていることを検証
+    expect(result.routeDecision).toEqual({
+      route: "manual_confirmation_required",
+      priority: "high",
+      requiresAdminNotification: true,
+      status: "exception_handling_pending",
     });
-    
-    // 契約変更情報が紐付いていることを確認
-    expect(result.contractChangeId).toBe("CC-20240115-001");
-    expect(result.contractId).toBe("CT-2024-0001");
-    expect(result.customerId).toBe("CUST-0001");
-    
-    // 署名デバイス情報が記録されていることを確認
-    expect(result.signatureDeviceId).toBe("SIGN-PAD-001");
-    
-    // ステータスが「承認済み」に遷移していることを確認
-    expect(result.changeApprovalStatus).toBe("approved");
-    
-    // 承認履歴に記録されていることを確認
-    expect(result.recordedInHistory).toBe(true);
-    expect(result.historyRecordId).toBeDefined();
-    
-    // 署名要件が電子署名であることを確認
-    expect(result.signatureRequirement).toBe("electronic_signature");
-    
-    // 変更項目が紐付いていることを確認
-    expect(result.changeItemsCount).toBe(1);
-    expect(result.changeItemDetails[0]).toEqual({
-      fieldName: "serviceType",
-      oldValue: "service_a",
-      newValue: "service_b",
-      changeReason: "顧客要望による変更"
+
+    // ステータスが『要確認』または『例外処理待ち』に更新されていることを検証
+    expect(result.status).toBe("exception_handling_pending");
+
+    // 例外レコードがログに記録されていることを検証
+    expect(result.exceptionLogEntry).toEqual({
+      timestamp: "2024-01-20T10:00:00Z",
+      customerId,
+      contractNumber,
+      exceptionType: "agreement_mismatch",
+      severity: "high",
+      discrepancyCount: 2,
+      requiresManualIntervention: true,
+      recordedAt: expect.any(String),
     });
+
+    // 対応ルート判定の理由が記録されていることを検証
+    expect(result.exceptionLogEntry.reason).toContain("pricing");
   });
 });

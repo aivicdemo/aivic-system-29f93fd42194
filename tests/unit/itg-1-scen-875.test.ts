@@ -1,120 +1,73 @@
-import { describe, it, expect } from "@jest/globals";
-import { validateContractChangeNotificationEmail } from "../../src/logic/it-1781935279444-2-2-1";
+import { describe, test, expect } from "@jest/globals";
+import { validateSalesDataTypes } from "../../src/logic/it-1781935279444-2-2-1";
 
 describe("営業データの完全性・正確性を自動検証し、不足データ・誤りを検出・通知する機能", () => {
-  it("SCEN-875: 契約変更検証レポート自動生成機能 - 顧客企業の営業責任者メールアドレスが無効または登録されていない場合にエラーが検出される", () => {
-    // ハッピーパス: 有効なメールアドレス
-    const valid_email = "sales@example.com";
-    const valid_result = validateContractChangeNotificationEmail({
-      customer_id: "CUST-001",
-      customer_name: "テスト顧客企業",
-      sales_rep_email: valid_email,
-      contract_change_date: "2024-01-15",
-      change_details: "契約金額変更: 100万円 → 150万円"
-    });
+  // SCEN-875: [error] 営業データ品質チェック機能 - 営業データのデータ型が定義と異なる場合にエラーが検出される
+  test("営業データのデータ型が定義と異なる場合にすべてのエラーが検出される", () => {
+    const schema = {
+      sales_rep_name: { type: "string" },
+      sales_amount: { type: "number" },
+      transaction_date: { type: "date", format: "YYYY-MM-DD" },
+      customer_id: { type: "integer" },
+    };
 
-    expect(valid_result.is_valid).toBe(true);
-    expect(valid_result.error_code).toBeNull();
-    expect(valid_result.error_message).toBeNull();
-    expect(valid_result.notification_sent).toBe(true);
-
-    // エラーケース1: 空白のメールアドレス
-    expect(() =>
-      validateContractChangeNotificationEmail({
-        customer_id: "CUST-001",
-        customer_name: "テスト顧客企業",
-        sales_rep_email: "",
-        contract_change_date: "2024-01-15",
-        change_details: "契約金額変更: 100万円 → 150万円"
-      })
-    ).toThrow(/メールアドレス/);
-
-    // エラーケース2: 無効なメールアドレス形式 (@ の後に空白)
-    expect(() =>
-      validateContractChangeNotificationEmail({
-        customer_id: "CUST-001",
-        customer_name: "テスト顧客企業",
-        sales_rep_email: "test@",
-        contract_change_date: "2024-01-15",
-        change_details: "契約金額変更: 100万円 → 150万円"
-      })
-    ).toThrow(/メールアドレス/);
-
-    // エラーケース3: 無効なメールアドレス形式 (@ が存在しない)
-    expect(() =>
-      validateContractChangeNotificationEmail({
-        customer_id: "CUST-001",
-        customer_name: "テスト顧客企業",
-        sales_rep_email: "invalid-email",
-        contract_change_date: "2024-01-15",
-        change_details: "契約金額変更: 100万円 → 150万円"
-      })
-    ).toThrow(/メールアドレス/);
-
-    // エラーケース4: null メールアドレス
-    expect(() =>
-      validateContractChangeNotificationEmail({
-        customer_id: "CUST-001",
-        customer_name: "テスト顧客企業",
-        sales_rep_email: null as any,
-        contract_change_date: "2024-01-15",
-        change_details: "契約金額変更: 100万円 → 150万円"
-      })
-    ).toThrow(/メールアドレス/);
-
-    // エラーケース5: undefined メールアドレス
-    expect(() =>
-      validateContractChangeNotificationEmail({
-        customer_id: "CUST-001",
-        customer_name: "テスト顧客企業",
-        sales_rep_email: undefined as any,
-        contract_change_date: "2024-01-15",
-        change_details: "契約金額変更: 100万円 → 150万円"
-      })
-    ).toThrow(/メールアドレス/);
-
-    // ハッピーパス: 複数の有効なメールアドレス形式
-    const valid_formats = [
-      "user@domain.com",
-      "first.last@domain.co.jp",
-      "user+tag@example.com",
-      "user123@sub.domain.org"
+    const raw_data = [
+      {
+        row_number: 1,
+        sales_rep_name: "Tanaka Taro",
+        sales_amount: 150000,
+        transaction_date: "2024-01-15",
+        customer_id: 1001,
+      },
+      {
+        row_number: 2,
+        sales_rep_name: "Suzuki Hanako",
+        sales_amount: "ABC",
+        transaction_date: "2024/01/01",
+        customer_id: 12.5,
+      },
     ];
 
-    valid_formats.forEach((email) => {
-      const result = validateContractChangeNotificationEmail({
-        customer_id: "CUST-001",
-        customer_name: "テスト顧客企業",
-        sales_rep_email: email,
-        contract_change_date: "2024-01-15",
-        change_details: "契約金額変更: 100万円 → 150万円"
-      });
+    const result = validateSalesDataTypes({ schema, raw_data });
 
-      expect(result.is_valid).toBe(true);
-      expect(result.error_code).toBeNull();
-      expect(result.notification_sent).toBe(true);
+    expect(result.is_valid).toBe(false);
+    expect(result.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          row_number: 2,
+          column_name: "sales_amount",
+          error_type: "data_type_mismatch",
+          expected_type: "number",
+          actual_value: "ABC",
+          actual_type: "string",
+          message: expect.stringMatching(/sales_amount/),
+        }),
+        expect.objectContaining({
+          row_number: 2,
+          column_name: "transaction_date",
+          error_type: "format_error",
+          expected_format: "YYYY-MM-DD",
+          actual_value: "2024/01/01",
+          message: expect.stringMatching(/transaction_date/),
+        }),
+        expect.objectContaining({
+          row_number: 2,
+          column_name: "customer_id",
+          error_type: "data_type_mismatch",
+          expected_type: "integer",
+          actual_value: 12.5,
+          actual_type: "number",
+          message: expect.stringMatching(/customer_id/),
+        }),
+      ])
+    );
+
+    expect(result.errors.length).toBe(3);
+    expect(result.summary).toEqual({
+      total_rows: 2,
+      valid_rows: 1,
+      invalid_rows: 1,
+      total_errors: 3,
     });
-
-    // エラーケース6: スペースを含むメールアドレス
-    expect(() =>
-      validateContractChangeNotificationEmail({
-        customer_id: "CUST-001",
-        customer_name: "テスト顧客企業",
-        sales_rep_email: "user @domain.com",
-        contract_change_date: "2024-01-15",
-        change_details: "契約金額変更: 100万円 → 150万円"
-      })
-    ).toThrow(/メールアドレス/);
-
-    // エラーケース7: ドメインなしのメールアドレス
-    expect(() =>
-      validateContractChangeNotificationEmail({
-        customer_id: "CUST-001",
-        customer_name: "テスト顧客企業",
-        sales_rep_email: "useronly",
-        contract_change_date: "2024-01-15",
-        change_details: "契約金額変更: 100万円 → 150万円"
-      })
-    ).toThrow(/メールアドレス/);
   });
 });

@@ -1,122 +1,152 @@
-import { filterReportsByCustomer } from "../../src/logic/it-1-2-1";
+import { validateAndAggregateByCustomerService } from '../../src/logic/it-1781935279444-1-1-1';
 
-describe("ポータル配信アクセス制御機能 - 他顧客のレポートデータが除外され非表示になる", () => {
-  test("SCEN-659: ログインユーザーは自身が属する顧客のレポートデータのみが表示される", () => {
-    // テストデータ: 複数顧客のレポートデータ
-    const allReports = [
-      {
-        report_id: "RPT001",
-        customer_id: "CUST_A",
-        customer_name: "顧客A",
-        month: "2024-01",
-        appointment_count: 10,
-        contract_count: 3,
-        service_type: "営業支援",
-        billing_amount: 150000,
-        created_at: "2024-01-31T09:00:00Z",
-      },
-      {
-        report_id: "RPT002",
-        customer_id: "CUST_A",
-        customer_name: "顧客A",
-        month: "2024-01",
-        appointment_count: 8,
-        contract_count: 2,
-        service_type: "分析支援",
-        billing_amount: 100000,
-        created_at: "2024-01-31T09:15:00Z",
-      },
-      {
-        report_id: "RPT003",
-        customer_id: "CUST_B",
-        customer_name: "顧客B",
-        month: "2024-01",
-        appointment_count: 15,
-        contract_count: 5,
-        service_type: "営業支援",
-        billing_amount: 200000,
-        created_at: "2024-01-31T10:00:00Z",
-      },
-      {
-        report_id: "RPT004",
-        customer_id: "CUST_B",
-        customer_name: "顧客B",
-        month: "2024-01",
-        appointment_count: 12,
-        contract_count: 4,
-        service_type: "研修支援",
-        billing_amount: 180000,
-        created_at: "2024-01-31T10:30:00Z",
-      },
+describe('営業データ項目のメタデータ管理機能 - 顧客・サービス別集計ルール検証', () => {
+  // SCEN-659: [normal] 顧客・サービス別集計ルール検証機能 - 顧客ごと・サービスごとの請求対象データが正確に抽出・集計される
+  test('顧客ごと・サービスごとに請求対象データが正確に抽出・集計されること', () => {
+    // テストデータ: 複数の顧客レコード
+    const testCustomers = [
+      { customerId: 'CUST001', customerName: '顧客A' },
+      { customerId: 'CUST002', customerName: '顧客B' },
+      { customerId: 'CUST003', customerName: '顧客C' }
     ];
 
-    // テストユーザーA: 顧客Aに属する
-    const userA_customer_id = "CUST_A";
-    const filteredReportsA = filterReportsByCustomer(
-      allReports,
-      userA_customer_id
+    // テストデータ: 各顧客に紐付く複数のサービス
+    const testServices = [
+      { serviceId: 'SVC001', serviceName: 'サービス1' },
+      { serviceId: 'SVC002', serviceName: 'サービス2' },
+      { serviceId: 'SVC003', serviceName: 'サービス3' }
+    ];
+
+    // テストデータ: 顧客ごと・サービスごとの請求対象データ
+    const billableData = [
+      // 顧客Aのサービス1: 請求対象額 = 1000 + 2000 + 1500 = 4500
+      { customerId: 'CUST001', serviceId: 'SVC001', amount: 1000, isBillable: true },
+      { customerId: 'CUST001', serviceId: 'SVC001', amount: 2000, isBillable: true },
+      { customerId: 'CUST001', serviceId: 'SVC001', amount: 1500, isBillable: true },
+      // 顧客Aのサービス2: 請求対象額 = 3000 + 2500 = 5500
+      { customerId: 'CUST001', serviceId: 'SVC002', amount: 3000, isBillable: true },
+      { customerId: 'CUST001', serviceId: 'SVC002', amount: 2500, isBillable: true },
+      // 顧客Aのサービス3: 請求対象額 = 1200 (請求対象外 0 + 請求対象外 -500 は除外)
+      { customerId: 'CUST001', serviceId: 'SVC003', amount: 1200, isBillable: true },
+      { customerId: 'CUST001', serviceId: 'SVC003', amount: -500, isBillable: false },
+      
+      // 顧客Bのサービス1: 請求対象額 = 2000
+      { customerId: 'CUST002', serviceId: 'SVC001', amount: 2000, isBillable: true },
+      // 顧客Bのサービス2: 請求対象額 = 3500 + 1500 = 5000
+      { customerId: 'CUST002', serviceId: 'SVC002', amount: 3500, isBillable: true },
+      { customerId: 'CUST002', serviceId: 'SVC002', amount: 1500, isBillable: true },
+      // 顧客Bのサービス2: 請求対象外データは除外
+      { customerId: 'CUST002', serviceId: 'SVC002', amount: 800, isBillable: false },
+      
+      // 顧客Cのサービス1: 請求対象額 = 4000
+      { customerId: 'CUST003', serviceId: 'SVC001', amount: 4000, isBillable: true },
+      // 顧客Cのサービス2: 請求対象額 = 2500
+      { customerId: 'CUST003', serviceId: 'SVC002', amount: 2500, isBillable: true },
+      // 顧客Cのサービス3: 請求対象額 = 1800
+      { customerId: 'CUST003', serviceId: 'SVC003', amount: 1800, isBillable: true }
+    ];
+
+    // 集計ルール検証機能を実行
+    const result = validateAndAggregateByCustomerService({
+      customers: testCustomers,
+      services: testServices,
+      billableData: billableData
+    });
+
+    // 期待値の検証
+    expect(result).toBeDefined();
+    expect(result.success).toBe(true);
+    
+    // 顧客Aのサービス1の請求対象データが正確に抽出されたことを確認
+    const custA_svc1 = result.aggregations.find(
+      (agg) => agg.customerId === 'CUST001' && agg.serviceId === 'SVC001'
     );
+    expect(custA_svc1).toBeDefined();
+    expect(custA_svc1?.extractedItemCount).toBe(3);
+    expect(custA_svc1?.aggregatedAmount).toBe(4500);
+    
+    // 顧客Aのサービス1の集計額が期待値と一致することを確認
+    expect(custA_svc1?.customerName).toBe('顧客A');
+    expect(custA_svc1?.serviceName).toBe('サービス1');
 
-    // ユーザーAが表示可能なレポートは顧客Aに属するもののみ
-    expect(filteredReportsA.length).toBe(2);
-    expect(filteredReportsA[0].report_id).toBe("RPT001");
-    expect(filteredReportsA[0].customer_id).toBe("CUST_A");
-    expect(filteredReportsA[0].appointment_count).toBe(10);
-    expect(filteredReportsA[0].contract_count).toBe(3);
-    expect(filteredReportsA[0].service_type).toBe("営業支援");
-    expect(filteredReportsA[0].billing_amount).toBe(150000);
-
-    expect(filteredReportsA[1].report_id).toBe("RPT002");
-    expect(filteredReportsA[1].customer_id).toBe("CUST_A");
-    expect(filteredReportsA[1].appointment_count).toBe(8);
-    expect(filteredReportsA[1].contract_count).toBe(2);
-    expect(filteredReportsA[1].service_type).toBe("分析支援");
-    expect(filteredReportsA[1].billing_amount).toBe(100000);
-
-    // ユーザーAの結果に顧客Bのレポートが含まれていないことを確認
-    const userA_has_customer_B = filteredReportsA.some(
-      (r) => r.customer_id === "CUST_B"
+    // 顧客Bのサービス2に紐付く請求対象データが正確に抽出されたことを確認
+    const custB_svc2 = result.aggregations.find(
+      (agg) => agg.customerId === 'CUST002' && agg.serviceId === 'SVC002'
     );
-    expect(userA_has_customer_B).toBe(false);
+    expect(custB_svc2).toBeDefined();
+    // 請求対象のデータのみ: 3500 + 1500 = 5000（isBillable=false の 800 は除外）
+    expect(custB_svc2?.extractedItemCount).toBe(2);
+    expect(custB_svc2?.aggregatedAmount).toBe(5000);
 
-    // テストユーザーB: 顧客Bに属する
-    const userB_customer_id = "CUST_B";
-    const filteredReportsB = filterReportsByCustomer(
-      allReports,
-      userB_customer_id
+    // 顧客Bのサービス2の集計額が期待値と一致することを確認
+    expect(custB_svc2?.customerName).toBe('顧客B');
+    expect(custB_svc2?.serviceName).toBe('サービス2');
+
+    // 顧客C全体の複数サービスの請求対象データが顧客単位で正確に集計されていることを確認
+    const custC_svc1 = result.aggregations.find(
+      (agg) => agg.customerId === 'CUST003' && agg.serviceId === 'SVC001'
     );
-
-    // ユーザーBが表示可能なレポートは顧客Bに属するもののみ
-    expect(filteredReportsB.length).toBe(2);
-    expect(filteredReportsB[0].report_id).toBe("RPT003");
-    expect(filteredReportsB[0].customer_id).toBe("CUST_B");
-    expect(filteredReportsB[0].appointment_count).toBe(15);
-    expect(filteredReportsB[0].contract_count).toBe(5);
-    expect(filteredReportsB[0].service_type).toBe("営業支援");
-    expect(filteredReportsB[0].billing_amount).toBe(200000);
-
-    expect(filteredReportsB[1].report_id).toBe("RPT004");
-    expect(filteredReportsB[1].customer_id).toBe("CUST_B");
-    expect(filteredReportsB[1].appointment_count).toBe(12);
-    expect(filteredReportsB[1].contract_count).toBe(4);
-    expect(filteredReportsB[1].service_type).toBe("研修支援");
-    expect(filteredReportsB[1].billing_amount).toBe(180000);
-
-    // ユーザーBの結果に顧客Aのレポートが含まれていないことを確認
-    const userB_has_customer_A = filteredReportsB.some(
-      (r) => r.customer_id === "CUST_A"
+    const custC_svc2 = result.aggregations.find(
+      (agg) => agg.customerId === 'CUST003' && agg.serviceId === 'SVC002'
     );
-    expect(userB_has_customer_A).toBe(false);
-
-    // APIレスポンスが含むデータの検証: ユーザーAとユーザーBの結果が互いに排他的
-    expect(filteredReportsA.every((r) => r.customer_id === "CUST_A")).toBe(
-      true
+    const custC_svc3 = result.aggregations.find(
+      (agg) => agg.customerId === 'CUST003' && agg.serviceId === 'SVC003'
     );
-    expect(filteredReportsB.every((r) => r.customer_id === "CUST_B")).toBe(
-      true
-    );
+    
+    expect(custC_svc1?.aggregatedAmount).toBe(4000);
+    expect(custC_svc2?.aggregatedAmount).toBe(2500);
+    expect(custC_svc3?.aggregatedAmount).toBe(1800);
+    
+    // 顧客C全体の集計額: 4000 + 2500 + 1800 = 8300
+    const custC_total = result.aggregations
+      .filter((agg) => agg.customerId === 'CUST003')
+      .reduce((sum, agg) => sum + agg.aggregatedAmount, 0);
+    expect(custC_total).toBe(8300);
 
-    // 全体のレポート数は変わらず、フィルタリングのみ実施
-    expect(filteredReportsA.length + filteredReportsB.length).toBe(4);
+    // 請求対象外のデータが誤って含まれていないことを確認
+    // custA_svc3 の isBillable=false の -500 は含まれていないはず
+    const custA_svc3 = result.aggregations.find(
+      (agg) => agg.customerId === 'CUST001' && agg.serviceId === 'SVC003'
+    );
+    expect(custA_svc3?.aggregatedAmount).toBe(1200); // -500 は除外
+    expect(custA_svc3?.extractedItemCount).toBe(1);
+
+    // custB_svc2 の isBillable=false の 800 は含まれていないはず
+    expect(custB_svc2?.aggregatedAmount).toBe(5000); // 800 は除外
+
+    // 抽出・集計結果がJSON形式で正確に出力されていることを確認
+    expect(result.outputFormat).toBe('JSON');
+    expect(result.aggregations).toBeInstanceOf(Array);
+    expect(result.aggregations.length).toBeGreaterThan(0);
+
+    // 各集計レコードが必須フィールドを持っていることを確認
+    result.aggregations.forEach((agg) => {
+      expect(agg.customerId).toBeDefined();
+      expect(agg.customerName).toBeDefined();
+      expect(agg.serviceId).toBeDefined();
+      expect(agg.serviceName).toBeDefined();
+      expect(agg.extractedItemCount).toBeDefined();
+      expect(agg.aggregatedAmount).toBeDefined();
+      expect(typeof agg.aggregatedAmount).toBe('number');
+    });
+
+    // 全体の集計件数が期待値と一致することを確認
+    // 顧客A(3サービス) + 顧客B(2サービス) + 顧客C(3サービス) = 8件
+    expect(result.aggregations.length).toBe(8);
+
+    // 全体の合計請求額が期待値と一致することを確認
+    // custA: 4500 + 5500 + 1200 = 11200
+    // custB: 2000 + 5000 = 7000
+    // custC: 4000 + 2500 + 1800 = 8300
+    // 合計: 11200 + 7000 + 8300 = 26500
+    const totalAmount = result.aggregations.reduce(
+      (sum, agg) => sum + agg.aggregatedAmount,
+      0
+    );
+    expect(totalAmount).toBe(26500);
+
+    // 集計ルール検証が成功したことを確認
+    expect(result.validationPassed).toBe(true);
+    expect(result.errors).toEqual([]);
   });
 });

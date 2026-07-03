@@ -1,112 +1,204 @@
 import { describe, test, expect } from "@jest/globals";
-import { detectAnomalies } from "../../src/logic/it-1-1-1";
+import { detectValidationAnomalies } from "../../src/logic/it-1-1-1";
 
 describe("営業成果データの自動検証ルール定義と異常検出機能", () => {
   // SCEN-701
-  test("通常のデータ分布の外側にある外れ値を自動検出する", () => {
-    // 正常値データセット（月間売上100万円～500万円の範囲）150件以上
-    const normalData = [];
-    for (let i = 0; i < 150; i++) {
-      normalData.push({
-        revenue: 100 + (Math.random() * 400), // 100万円～500万円
-        salesRecordId: `normal_${i}`,
-        transactionDate: "2024-01-15",
-      });
-    }
-
-    // テストデータセット（正常値50件 + 外れ値5件）
-    const testNormalData = [];
-    for (let i = 0; i < 50; i++) {
-      testNormalData.push({
-        revenue: 150 + (Math.random() * 300), // 150万円～450万円
-        salesRecordId: `test_normal_${i}`,
-        transactionDate: "2024-01-15",
-      });
-    }
-
-    const testAnomalousData = [
+  test("複数の異常値を含む営業データに対して、すべての異常が一覧で検出される", () => {
+    // 検証ルール定義
+    const validationRules = [
       {
-        revenue: 2000, // 売上2000万円（明らかな外れ値）
-        salesRecordId: "anomaly_extreme_high",
-        transactionDate: "2024-01-15",
+        ruleId: "RULE_001",
+        ruleName: "金額範囲チェック",
+        fieldName: "amount",
+        condition: { min: 0, max: 1000000 },
       },
       {
-        revenue: -50, // マイナス値
-        salesRecordId: "anomaly_negative",
-        transactionDate: "2024-01-15",
+        ruleId: "RULE_002",
+        ruleName: "顧客名形式チェック",
+        fieldName: "customerName",
+        condition: { pattern: /^[ぁ-ん一-龯々〆ゝゞ\s]+$/, minLength: 1 },
       },
       {
-        revenue: 5, // 極端に低い値
-        salesRecordId: "anomaly_extreme_low",
-        transactionDate: "2024-01-15",
+        ruleId: "RULE_003",
+        ruleName: "日付妥当性チェック",
+        fieldName: "contactDate",
+        condition: { maxDate: "2024-12-31" },
       },
       {
-        revenue: 1800, // 売上1800万円（外れ値）
-        salesRecordId: "anomaly_high",
-        transactionDate: "2024-01-15",
-      },
-      {
-        revenue: 1, // 極端に低い値
-        salesRecordId: "anomaly_very_low",
-        transactionDate: "2024-01-15",
+        ruleId: "RULE_004",
+        ruleName: "商品コード存在確認",
+        fieldName: "productCode",
+        condition: { validCodes: ["PROD001", "PROD002", "PROD003"] },
       },
     ];
 
-    const allTestData = [...testNormalData, ...testAnomalousData];
+    // テストデータ：複数の異常値を含む営業データセット
+    const testDataSet = [
+      {
+        recordId: "REC001",
+        amount: -50000, // 異常：負の金額
+        customerName: "株式会社ABC",
+        contactDate: "2024-01-15",
+        productCode: "PROD001",
+      },
+      {
+        recordId: "REC002",
+        amount: 1500000, // 異常：上限超過
+        customerName: "Customer XYZ", // 異常：不正な顧客名形式
+        contactDate: "2024-06-10",
+        productCode: "PROD002",
+      },
+      {
+        recordId: "REC003",
+        amount: 500000,
+        customerName: "株式会社DEF",
+        contactDate: "2025-02-15", // 異常：未来の日付
+        productCode: "PROD999", // 異常：存在しない商品コード
+      },
+      {
+        recordId: "REC004",
+        amount: 250000,
+        customerName: "株式会社GHI",
+        contactDate: "2024-11-20",
+        productCode: "PROD003",
+      },
+      {
+        recordId: "REC005",
+        amount: 0, // 異常：金額が0
+        customerName: "", // 異常：顧客名空文字列
+        contactDate: "2024-03-05",
+        productCode: "PROD001",
+      },
+    ];
 
-    // 異常値検出アルゴリズムを『統計的外れ値検出（Z-score法）』に設定
-    // 感度レベルを『標準（±2.5σ）』に設定
-    const detectionParams = {
-      algorithm: "z-score",
-      sensitivityThreshold: 2.5,
-      baselineData: normalData,
-    };
+    // 異常検出機能を実行
+    const detectionResult = detectValidationAnomalies(
+      validationRules,
+      testDataSet
+    );
 
-    // 異常値検出処理を実行
-    const result = detectAnomalies(allTestData, detectionParams);
+    // 検出結果の検証
+    expect(detectionResult.totalAnomaliesCount).toBe(7);
 
-    // 検出精度の検証（95%以上）
-    const expectedAnomalies = 5;
-    const expectedNormals = 50;
-    const detectedAnomalies = result.filter((r) => r.isAnomaly === true);
-    const detectedNormals = result.filter((r) => r.isAnomaly === false);
+    // 異常の詳細内容を検証
+    expect(detectionResult.anomalies).toHaveLength(7);
 
-    const anomalyRecall = detectedAnomalies.length / expectedAnomalies;
-    const normalPrecision = detectedNormals.length / expectedNormals;
-
-    expect(detectedAnomalies.length).toBe(5);
-    expect(detectedNormals.length).toBe(50);
-    expect(anomalyRecall).toBeGreaterThanOrEqual(0.95);
-    expect(normalPrecision).toBeGreaterThanOrEqual(0.95);
-
-    // 外れ値として検出されたデータの詳細情報を検証
-    detectedAnomalies.forEach((anomaly) => {
-      expect(anomaly.isAnomaly).toBe(true);
-      expect(typeof anomaly.deviationScore).toBe("number");
-      expect(anomaly.deviationScore).toBeGreaterThan(2.5);
-      expect(typeof anomaly.detectionReason).toBe("string");
-      expect(anomaly.detectionReason.length).toBeGreaterThan(0);
+    // 異常1：REC001の負の金額
+    expect(detectionResult.anomalies[0]).toEqual({
+      recordId: "REC001",
+      fieldName: "amount",
+      ruleId: "RULE_001",
+      ruleName: "金額範囲チェック",
+      detectedValue: -50000,
+      errorMessage: "金額は0以上1000000以下である必要があります",
     });
 
-    // 検出された外れ値の sales record ID を検証
-    const detectedAnomalyIds = detectedAnomalies.map((a) => a.salesRecordId);
-    expect(detectedAnomalyIds).toContain("anomaly_extreme_high");
-    expect(detectedAnomalyIds).toContain("anomaly_negative");
-    expect(detectedAnomalyIds).toContain("anomaly_extreme_low");
-    expect(detectedAnomalyIds).toContain("anomaly_high");
-    expect(detectedAnomalyIds).toContain("anomaly_very_low");
-
-    // 正常データが正しく分類されたことを検証
-    detectedNormals.forEach((normal) => {
-      expect(normal.isAnomaly).toBe(false);
-      expect(typeof normal.deviationScore).toBe("number");
-      expect(normal.deviationScore).toBeLessThanOrEqual(2.5);
+    // 異常2：REC002の上限超過金額
+    expect(detectionResult.anomalies[1]).toEqual({
+      recordId: "REC002",
+      fieldName: "amount",
+      ruleId: "RULE_001",
+      ruleName: "金額範囲チェック",
+      detectedValue: 1500000,
+      errorMessage: "金額は0以上1000000以下である必要があります",
     });
 
-    // 検出精度が95%以上であることを検証
-    const totalCorrect = detectedAnomalies.length + detectedNormals.length;
-    const totalRecords = expectedAnomalies + expectedNormals;
-    const overallAccuracy = totalCorrect / totalRecords;
-    expect(overallAccuracy).toBeGreaterThanOrEqual(0.95);
+    // 異常3：REC002の不正な顧客名形式
+    expect(detectionResult.anomalies[2]).toEqual({
+      recordId: "REC002",
+      fieldName: "customerName",
+      ruleId: "RULE_002",
+      ruleName: "顧客名形式チェック",
+      detectedValue: "Customer XYZ",
+      errorMessage: "顧客名は日本語のみで構成されている必要があります",
+    });
+
+    // 異常4：REC003の未来の日付
+    expect(detectionResult.anomalies[3]).toEqual({
+      recordId: "REC003",
+      fieldName: "contactDate",
+      ruleId: "RULE_003",
+      ruleName: "日付妥当性チェック",
+      detectedValue: "2025-02-15",
+      errorMessage: "接触日付は2024-12-31以前である必要があります",
+    });
+
+    // 異常5：REC003の存在しない商品コード
+    expect(detectionResult.anomalies[4]).toEqual({
+      recordId: "REC003",
+      fieldName: "productCode",
+      ruleId: "RULE_004",
+      ruleName: "商品コード存在確認",
+      detectedValue: "PROD999",
+      errorMessage: "商品コードは登録済みのコードである必要があります",
+    });
+
+    // 異常6：REC005の金額0
+    expect(detectionResult.anomalies[5]).toEqual({
+      recordId: "REC005",
+      fieldName: "amount",
+      ruleId: "RULE_001",
+      ruleName: "金額範囲チェック",
+      detectedValue: 0,
+      errorMessage: "金額は0以上1000000以下である必要があります",
+    });
+
+    // 異常7：REC005の空文字列顧客名
+    expect(detectionResult.anomalies[6]).toEqual({
+      recordId: "REC005",
+      fieldName: "customerName",
+      ruleId: "RULE_002",
+      ruleName: "顧客名形式チェック",
+      detectedValue: "",
+      errorMessage: "顧客名は1文字以上である必要があります",
+    });
+
+    // 検出数と実際の異常値数の一致を確認
+    expect(detectionResult.totalAnomaliesCount).toBe(7);
+    expect(detectionResult.anomalies.length).toBe(
+      detectionResult.totalAnomaliesCount
+    );
+
+    // レコード別異常カウントの検証
+    const anomaliesByRecord = detectionResult.anomalies.reduce(
+      (acc: { [key: string]: number }, anomaly: any) => {
+        acc[anomaly.recordId] = (acc[anomaly.recordId] || 0) + 1;
+        return acc;
+      },
+      {}
+    );
+
+    expect(anomaliesByRecord["REC001"]).toBe(1);
+    expect(anomaliesByRecord["REC002"]).toBe(2);
+    expect(anomaliesByRecord["REC003"]).toBe(2);
+    expect(anomaliesByRecord["REC004"]).toBeUndefined();
+    expect(anomaliesByRecord["REC005"]).toBe(2);
+
+    // ルール別異常カウントの検証
+    const anomaliesByRule = detectionResult.anomalies.reduce(
+      (acc: { [key: string]: number }, anomaly: any) => {
+        acc[anomaly.ruleId] = (acc[anomaly.ruleId] || 0) + 1;
+        return acc;
+      },
+      {}
+    );
+
+    expect(anomaliesByRule["RULE_001"]).toBe(3);
+    expect(anomaliesByRule["RULE_002"]).toBe(2);
+    expect(anomaliesByRule["RULE_003"]).toBe(1);
+    expect(anomaliesByRule["RULE_004"]).toBe(1);
+
+    // 正常レコードの確認
+    expect(detectionResult.normalRecordIds).toEqual(["REC004"]);
+    expect(detectionResult.normalRecordIds.length).toBe(1);
+
+    // 全体統計の検証
+    expect(detectionResult.totalRecordsProcessed).toBe(5);
+    expect(detectionResult.totalRecordsWithAnomalies).toBe(4);
+    expect(detectionResult.totalRecordsNormal).toBe(1);
+    expect(
+      detectionResult.totalRecordsWithAnomalies +
+        detectionResult.totalRecordsNormal
+    ).toBe(detectionResult.totalRecordsProcessed);
   });
 });

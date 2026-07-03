@@ -1,46 +1,24 @@
-import { validateSalesDataIntegrity } from "../../src/logic/it-1781935279444-2-2-1";
+import { validateMonthlySummaryMapping } from "../../src/logic/it-1-br-1781935279444-1-2-1";
 
-describe("営業データの完全性・正確性自動検証", () => {
-  // SCEN-1122
-  test("必須項目がすべて存在する場合、検証が完了し異常値なしで判定される", () => {
-    const sales_data = {
-      sales_id: "SLS-20240115-001",
-      customer_id: "CUST-001",
-      sales_person_id: "SALES-001",
-      transaction_amount: 150000,
-      transaction_date: "2024-01-15",
-      service_type: "basic_plan",
-      status: "completed",
+describe("月次サマリーテンプレートの定義・管理機能", () => {
+  // SCEN-1122: [error] 営業データから月次サマリーへの自動マッピング - 存在しないメタデータ項目をマッピング対象とした場合にエラーが検出される
+  test("should detect and reject non-existent metadata field in monthly summary mapping", () => {
+    const existingMetadataFields = [
+      "appointment_count",
+      "contract_count",
+      "customer_response",
+      "service_type",
+      "sales_amount"
+    ];
+
+    const mappingConfig = {
+      source_field: "non_existent_field",
+      target_template_field: "monthly_summary_metrics",
+      transformation_rule: "sum"
     };
 
-    const billing_data = {
-      billing_id: "BIL-20240115-001",
-      billing_amount: 150000,
-      billing_date: "2024-01-20",
-      billing_target: "CUST-001",
-      status: "issued",
-    };
-
-    const contract_info = {
-      contract_id: "CTR-001",
-      contract_holder: "Acme Corp",
-      contract_start_date: "2024-01-01",
-      contract_end_date: "2024-12-31",
-      contract_amount: 1800000,
-      status: "active",
-    };
-
-    const result = validateSalesDataIntegrity({
-      sales_data,
-      billing_data,
-      contract_info,
-    });
-
-    expect(result.validation_status).toBe("completed");
-    expect(result.has_error).toBe(false);
-    expect(result.missing_required_fields).toEqual([]);
-    expect(result.anomaly_count).toBe(0);
-    expect(result.warning_count).toBe(0);
-    expect(result.validation_result).toBe("pass");
+    expect(() =>
+      validateMonthlySummaryMapping(mappingConfig, existingMetadataFields)
+    ).toThrow(/メタデータ項目/);
   });
 });

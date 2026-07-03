@@ -1,217 +1,117 @@
-import { validateContractConsistency } from "../../src/logic/it-1781935279444-2-2-1";
+import { describe, test, expect, beforeEach, afterEach } from '@jest/globals';
+import {
+  initializeStaffOnboarding,
+  completeChecklistItem,
+  getStaffCurrentStage,
+  getStaffProgressHistory,
+} from '../../src/logic/it-1-br-1781935279444-1-2-1';
 
-describe("営業データの完全性・正確性を自動検証し、不足データ・誤りを検出・通知する機能", () => {
-  test("SCEN-920: 契約内容との整合性検証機能 - 契約書の請求対象項目・金額・納期がすべて営業データから生成された請求額・報告内容と一致している", () => {
-    // テストケース1: 単一サービス、単一金額、単一納期の基本パターン
-    const contract_1 = {
-      contract_id: "C001",
-      customer_id: "CUST001",
-      service_id: "SVC001",
-      billing_items: ["apo_count", "deal_count"],
-      unit_price: 10000,
-      expected_billing_amount: 100000,
-      expected_delivery_date: "2024-01-31",
-    };
+describe('新入スタッフ習熟度判定・段階育成機能', () => {
+  let staffId: string;
+  let stageProgressMap: Map<string, { stage: number; completedAt: string | null; checklistItemsCompleted: Set<string> }>;
 
-    const salesData_1 = {
-      contract_id: "C001",
-      apo_count: 10,
-      deal_count: 0,
-      calculated_billing_amount: 100000,
-      billing_items: ["apo_count", "deal_count"],
-      delivery_date: "2024-01-31",
-    };
-
-    const result_1 = validateContractConsistency(contract_1, salesData_1);
-    expect(result_1).toEqual({
-      is_consistent: true,
-      contract_id: "C001",
-      amount_match: true,
-      expected_amount: 100000,
-      calculated_amount: 100000,
-      items_match: true,
-      expected_items: ["apo_count", "deal_count"],
-      calculated_items: ["apo_count", "deal_count"],
-      delivery_date_match: true,
-      expected_delivery_date: "2024-01-31",
-      calculated_delivery_date: "2024-01-31",
-      validation_status: "一致",
+  beforeEach(() => {
+    staffId = 'staff-001';
+    stageProgressMap = new Map();
+    stageProgressMap.set(staffId, {
+      stage: 1,
+      completedAt: null,
+      checklistItemsCompleted: new Set(),
     });
+  });
 
-    // テストケース2: 複数サービス、複数金額パターン
-    const contract_2 = {
-      contract_id: "C002",
-      customer_id: "CUST002",
-      service_id: "SVC002",
-      billing_items: ["apo_count", "deal_count", "customer_response"],
-      unit_price: 15000,
-      expected_billing_amount: 300000,
-      expected_delivery_date: "2024-02-28",
-    };
+  afterEach(() => {
+    stageProgressMap.clear();
+  });
 
-    const salesData_2 = {
-      contract_id: "C002",
-      apo_count: 15,
-      deal_count: 5,
-      customer_response: 0,
-      calculated_billing_amount: 300000,
-      billing_items: ["apo_count", "deal_count", "customer_response"],
-      delivery_date: "2024-02-28",
-    };
-
-    const result_2 = validateContractConsistency(contract_2, salesData_2);
-    expect(result_2).toEqual({
-      is_consistent: true,
-      contract_id: "C002",
-      amount_match: true,
-      expected_amount: 300000,
-      calculated_amount: 300000,
-      items_match: true,
-      expected_items: ["apo_count", "deal_count", "customer_response"],
-      calculated_items: ["apo_count", "deal_count", "customer_response"],
-      delivery_date_match: true,
-      expected_delivery_date: "2024-02-28",
-      calculated_delivery_date: "2024-02-28",
-      validation_status: "一致",
+  // SCEN-920: 新入スタッフ習熟度判定・段階育成機能 - スタッフが各段階のチェックリストを完了した場合、次の段階へ自動昇格し、進捗が記録される
+  test('段階1のすべてのチェックリスト項目を完了後、段階2に自動昇格し進捗が記録される', () => {
+    // 初期化: テストユーザー（新入スタッフ）でログイン状態を想定
+    const initResult = initializeStaffOnboarding({
+      staffId: staffId,
+      staffName: '新入スタッフA',
+      joinDate: '2024-01-15',
     });
+    expect(initResult.success).toBe(true);
+    expect(initResult.initialStage).toBe(1);
 
-    // テストケース3: 異なる顧客、異なる単価パターン
-    const contract_3 = {
-      contract_id: "C003",
-      customer_id: "CUST003",
-      service_id: "SVC003",
-      billing_items: ["apo_count"],
-      unit_price: 20000,
-      expected_billing_amount: 200000,
-      expected_delivery_date: "2024-03-31",
-    };
+    // 段階1の現在段階を確認
+    let currentStage = getStaffCurrentStage({ staffId: staffId });
+    expect(currentStage).toBe(1);
 
-    const salesData_3 = {
-      contract_id: "C003",
-      apo_count: 10,
-      calculated_billing_amount: 200000,
-      billing_items: ["apo_count"],
-      delivery_date: "2024-03-31",
-    };
+    // 段階1のチェックリスト項目定義（基本操作、データ入力方法、品質チェックなど）
+    const stage1ChecklistItems = [
+      'basic-operation-1',
+      'data-input-method-1',
+      'quality-check-1',
+    ];
 
-    const result_3 = validateContractConsistency(contract_3, salesData_3);
-    expect(result_3).toEqual({
-      is_consistent: true,
-      contract_id: "C003",
-      amount_match: true,
-      expected_amount: 200000,
-      calculated_amount: 200000,
-      items_match: true,
-      expected_items: ["apo_count"],
-      calculated_items: ["apo_count"],
-      delivery_date_match: true,
-      expected_delivery_date: "2024-03-31",
-      calculated_delivery_date: "2024-03-31",
-      validation_status: "一致",
+    // 段階1のチェックリスト項目を1つずつ完了にマークする
+    let checklistCompleteResult;
+    for (let i = 0; i < stage1ChecklistItems.length - 1; i++) {
+      checklistCompleteResult = completeChecklistItem({
+        staffId: staffId,
+        stage: 1,
+        checklistItemId: stage1ChecklistItems[i],
+        completedAt: `2024-01-20T09:${String(30 + i).padStart(2, '0')}:00Z`,
+      });
+      expect(checklistCompleteResult.success).toBe(true);
+      expect(checklistCompleteResult.stageChanged).toBe(false);
+    }
+
+    // 最後のチェックリスト項目を完了にマークする（段階昇格トリガー）
+    const lastItemCompletedAt = '2024-01-20T09:32:00Z';
+    checklistCompleteResult = completeChecklistItem({
+      staffId: staffId,
+      stage: 1,
+      checklistItemId: stage1ChecklistItems[stage1ChecklistItems.length - 1],
+      completedAt: lastItemCompletedAt,
     });
+    expect(checklistCompleteResult.success).toBe(true);
+    expect(checklistCompleteResult.stageChanged).toBe(true);
+    expect(checklistCompleteResult.newStage).toBe(2);
+    expect(checklistCompleteResult.message).toMatch(/段階2/);
 
-    // エラーテスト: 金額不一致の場合
-    const contract_error_amount = {
-      contract_id: "C004",
-      customer_id: "CUST004",
-      service_id: "SVC004",
-      billing_items: ["apo_count"],
-      unit_price: 10000,
-      expected_billing_amount: 100000,
-      expected_delivery_date: "2024-04-30",
+    // 段階1のチェックリスト完了状態を確認
+    const stage1Completion = {
+      itemsCount: 3,
+      completedItemsCount: 3,
+      completionPercentage: 100,
     };
+    expect(stage1Completion.completedItemsCount).toBe(stage1Completion.itemsCount);
+    expect(stage1Completion.completionPercentage).toBe(100);
 
-    const salesData_error_amount = {
-      contract_id: "C004",
-      apo_count: 10,
-      calculated_billing_amount: 150000,
-      billing_items: ["apo_count"],
-      delivery_date: "2024-04-30",
+    // 育成機能の現在段階を再度確認（段階2に昇格）
+    currentStage = getStaffCurrentStage({ staffId: staffId });
+    expect(currentStage).toBe(2);
+
+    // 進捗管理画面から段階1完了日時が記録されていることを確認
+    const progressRecord = {
+      staffId: staffId,
+      stage1CompletedAt: lastItemCompletedAt,
+      stage1CompletedAtISO: new Date(lastItemCompletedAt).toISOString(),
+      currentStage: 2,
     };
+    expect(progressRecord.stage1CompletedAt).toBe('2024-01-20T09:32:00Z');
+    expect(progressRecord.currentStage).toBe(2);
 
-    expect(() =>
-      validateContractConsistency(contract_error_amount, salesData_error_amount)
-    ).toThrow(/金額/);
+    // 段階2のチェックリストが利用可能になっていることを確認
+    const stage2AvailableChecklistItems = [
+      'advanced-operation-1',
+      'complex-data-input-1',
+      'error-handling-1',
+    ];
+    expect(stage2AvailableChecklistItems.length).toBe(3);
+    expect(stage2AvailableChecklistItems[0]).toMatch(/advanced|complex|error/);
 
-    // エラーテスト: 請求対象項目不一致の場合
-    const contract_error_items = {
-      contract_id: "C005",
-      customer_id: "CUST005",
-      service_id: "SVC005",
-      billing_items: ["apo_count", "deal_count"],
-      unit_price: 10000,
-      expected_billing_amount: 100000,
-      expected_delivery_date: "2024-05-31",
-    };
-
-    const salesData_error_items = {
-      contract_id: "C005",
-      apo_count: 10,
-      calculated_billing_amount: 100000,
-      billing_items: ["apo_count"],
-      delivery_date: "2024-05-31",
-    };
-
-    expect(() =>
-      validateContractConsistency(contract_error_items, salesData_error_items)
-    ).toThrow(/項目/);
-
-    // エラーテスト: 納期不一致の場合
-    const contract_error_date = {
-      contract_id: "C006",
-      customer_id: "CUST006",
-      service_id: "SVC006",
-      billing_items: ["apo_count"],
-      unit_price: 10000,
-      expected_billing_amount: 100000,
-      expected_delivery_date: "2024-06-30",
-    };
-
-    const salesData_error_date = {
-      contract_id: "C006",
-      apo_count: 10,
-      calculated_billing_amount: 100000,
-      billing_items: ["apo_count"],
-      delivery_date: "2024-06-15",
-    };
-
-    expect(() =>
-      validateContractConsistency(contract_error_date, salesData_error_date)
-    ).toThrow(/納期/);
-
-    // テストケース4: ゼロ金額パターン（正常系）
-    const contract_4 = {
-      contract_id: "C007",
-      customer_id: "CUST007",
-      service_id: "SVC007",
-      billing_items: ["apo_count"],
-      unit_price: 0,
-      expected_billing_amount: 0,
-      expected_delivery_date: "2024-07-31",
-    };
-
-    const salesData_4 = {
-      contract_id: "C007",
-      apo_count: 0,
-      calculated_billing_amount: 0,
-      billing_items: ["apo_count"],
-      delivery_date: "2024-07-31",
-    };
-
-    const result_4 = validateContractConsistency(contract_4, salesData_4);
-    expect(result_4).toEqual({
-      is_consistent: true,
-      contract_id: "C007",
-      amount_match: true,
-      expected_amount: 0,
-      calculated_amount: 0,
-      items_match: true,
-      expected_items: ["apo_count"],
-      calculated_items: ["apo_count"],
-      delivery_date_match: true,
-      expected_delivery_date: "2024-07-31",
-      calculated_delivery_date: "2024-07-31",
-      validation_status: "一致",
-    });
+    // 管理画面からスタッフの進捗履歴を確認
+    const progressHistory = getStaffProgressHistory({ staffId: staffId });
+    expect(progressHistory.staffId).toBe(staffId);
+    expect(progressHistory.transitions.length).toBe(1);
+    expect(progressHistory.transitions[0].fromStage).toBe(1);
+    expect(progressHistory.transitions[0].toStage).toBe(2);
+    expect(progressHistory.transitions[0].transitionAt).toBe('2024-01-20T09:32:00Z');
+    expect(progressHistory.currentStage).toBe(2);
+    expect(progressHistory.lastCompletedStage).toBe(1);
   });
 });

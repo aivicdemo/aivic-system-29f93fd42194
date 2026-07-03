@@ -1,144 +1,131 @@
-import { calculateBackdatedBillingAdjustment } from '../../src/logic/it-1-2-1';
+import { calculateCrmRequirementPriority } from '../../src/logic/it-1781935279444-1-1-1';
 
-describe('契約変更に伴う請求遡及調整機能', () => {
-  test('SCEN-1344: 契約変更日が遡及調整対象期間の境界値で正確に計算される', () => {
-    const contract_start_date = new Date('2024-01-01T00:00:00Z');
-    const retrospective_start_date = new Date('2024-04-01T00:00:00Z');
-    const retrospective_end_date = new Date('2024-06-30T23:59:59Z');
+describe('営業データ項目のメタデータ管理機能 - CRM要件優先度スコア算出', () => {
+  // SCEN-1344: [edge] CRM要件優先度スコア算出 - スコアが 0 点または満点の境界値で、要件の分類判定が正しく切り替わる
+  test('スコア0点では要件を除外に分類、満点では開発対象に分類、中間値では検討対象に分類される', () => {
+    // Arrange: スコア0点（最小境界値）での入力
+    const requirement_min = {
+      requirement_id: 'REQ-001',
+      requirement_name: 'Data mapping feature',
+      priority_score: 0,
+      impact_area: 'sales_data_mapping',
+      estimated_effort_days: 5
+    };
 
-    const base_monthly_fee = 100000;
-    const old_discount_rate = 0.1;
-    const new_discount_rate = 0.2;
-
-    // パターン1: 遡及調整対象期間の開始日（2024-04-01）
-    const result_boundary_start = calculateBackdatedBillingAdjustment({
-      contract_start_date,
-      contract_change_date: new Date('2024-04-01T00:00:00Z'),
-      retrospective_start_date,
-      retrospective_end_date,
-      base_monthly_fee,
-      old_discount_rate,
-      new_discount_rate,
+    // Act & Assert: スコア0点での分類結果を検証
+    const result_min = calculateCrmRequirementPriority(requirement_min);
+    expect(result_min).toEqual({
+      requirement_id: 'REQ-001',
+      requirement_name: 'Data mapping feature',
+      priority_score: 0,
+      classification: '除外',
+      development_target: false,
+      review_target: false,
+      exclude_target: true,
+      assigned_release_priority: null
     });
 
-    expect(result_boundary_start).toEqual({
-      is_within_retrospective_period: true,
-      adjustment_months: 3,
-      old_total_fee: 270000,
-      new_total_fee: 240000,
-      backdated_adjustment_amount: -30000,
-      affected_months: ['2024-04', '2024-05', '2024-06'],
+    // Arrange: スコア満点（100点、最大境界値）での入力
+    const requirement_max = {
+      requirement_id: 'REQ-002',
+      requirement_name: 'Automated billing calculation',
+      priority_score: 100,
+      impact_area: 'billing_automation',
+      estimated_effort_days: 20
+    };
+
+    // Act & Assert: スコア100点での分類結果を検証
+    const result_max = calculateCrmRequirementPriority(requirement_max);
+    expect(result_max).toEqual({
+      requirement_id: 'REQ-002',
+      requirement_name: 'Automated billing calculation',
+      priority_score: 100,
+      classification: '開発対象',
+      development_target: true,
+      review_target: false,
+      exclude_target: false,
+      assigned_release_priority: 1
     });
 
-    // パターン2: 遡及調整対象期間の終了日（2024-06-30）
-    const result_boundary_end = calculateBackdatedBillingAdjustment({
-      contract_start_date,
-      contract_change_date: new Date('2024-06-30T23:59:59Z'),
-      retrospective_start_date,
-      retrospective_end_date,
-      base_monthly_fee,
-      old_discount_rate,
-      new_discount_rate,
+    // Arrange: スコア中間値（50点、検討対象の閾値）での入力
+    const requirement_mid = {
+      requirement_id: 'REQ-003',
+      requirement_name: 'Report generation template',
+      priority_score: 50,
+      impact_area: 'report_generation',
+      estimated_effort_days: 10
+    };
+
+    // Act & Assert: スコア50点での分類結果を検証
+    const result_mid = calculateCrmRequirementPriority(requirement_mid);
+    expect(result_mid).toEqual({
+      requirement_id: 'REQ-003',
+      requirement_name: 'Report generation template',
+      priority_score: 50,
+      classification: '検討対象',
+      development_target: false,
+      review_target: true,
+      exclude_target: false,
+      assigned_release_priority: null
     });
 
-    expect(result_boundary_end).toEqual({
-      is_within_retrospective_period: true,
-      adjustment_months: 3,
-      old_total_fee: 270000,
-      new_total_fee: 240000,
-      backdated_adjustment_amount: -30000,
-      affected_months: ['2024-04', '2024-05', '2024-06'],
-    });
+    // Arrange: スコア下位境界超過値（1点）での入力 - 除外から検討対象への切り替わり検証
+    const requirement_threshold_low = {
+      requirement_id: 'REQ-004',
+      requirement_name: 'Minor UI improvement',
+      priority_score: 1,
+      impact_area: 'ui_enhancement',
+      estimated_effort_days: 2
+    };
 
-    // パターン3: 遡及調整対象期間の前日（2024-03-31）
-    const result_before_boundary = calculateBackdatedBillingAdjustment({
-      contract_start_date,
-      contract_change_date: new Date('2024-03-31T23:59:59Z'),
-      retrospective_start_date,
-      retrospective_end_date,
-      base_monthly_fee,
-      old_discount_rate,
-      new_discount_rate,
-    });
+    // Act & Assert: スコア1点での分類結果を検証（除外から検討対象への遷移確認）
+    const result_threshold_low = calculateCrmRequirementPriority(requirement_threshold_low);
+    expect(result_threshold_low.classification).not.toBe('除外');
+    expect(result_threshold_low.exclude_target).toBe(false);
 
-    expect(result_before_boundary).toEqual({
-      is_within_retrospective_period: false,
-      adjustment_months: 0,
-      old_total_fee: 0,
-      new_total_fee: 0,
-      backdated_adjustment_amount: 0,
-      affected_months: [],
-    });
+    // Arrange: スコア上位境界値直下（99点）での入力 - 検討対象から開発対象への切り替わり検証
+    const requirement_threshold_high = {
+      requirement_id: 'REQ-005',
+      requirement_name: 'Critical validation rule',
+      priority_score: 99,
+      impact_area: 'data_validation',
+      estimated_effort_days: 25
+    };
 
-    // パターン4: 遡及調整対象期間の翌日（2024-07-01）
-    const result_after_boundary = calculateBackdatedBillingAdjustment({
-      contract_start_date,
-      contract_change_date: new Date('2024-07-01T00:00:00Z'),
-      retrospective_start_date,
-      retrospective_end_date,
-      base_monthly_fee,
-      old_discount_rate,
-      new_discount_rate,
-    });
+    // Act & Assert: スコア99点での分類結果を検証（検討対象から開発対象への遷移確認）
+    const result_threshold_high = calculateCrmRequirementPriority(requirement_threshold_high);
+    expect(result_threshold_high.classification).toBe('開発対象');
+    expect(result_threshold_high.development_target).toBe(true);
 
-    expect(result_after_boundary).toEqual({
-      is_within_retrospective_period: false,
-      adjustment_months: 0,
-      old_total_fee: 0,
-      new_total_fee: 0,
-      backdated_adjustment_amount: 0,
-      affected_months: [],
-    });
+    // Assert: 各境界値での分類切り替わりが明確に異なることを確認
+    expect(result_min.classification).toBe('除外');
+    expect(result_mid.classification).toBe('検討対象');
+    expect(result_max.classification).toBe('開発対象');
+    expect(result_min.classification).not.toBe(result_mid.classification);
+    expect(result_mid.classification).not.toBe(result_max.classification);
 
-    // パターン5: タイムゾーン境界 23:59:59（遡及調整対象期間内）
-    const result_timezone_boundary_end_of_day = calculateBackdatedBillingAdjustment({
-      contract_start_date,
-      contract_change_date: new Date('2024-05-15T23:59:59Z'),
-      retrospective_start_date,
-      retrospective_end_date,
-      base_monthly_fee,
-      old_discount_rate,
-      new_discount_rate,
-    });
+    // Assert: 境界値入力時にシステムエラーや予期しない例外が発生しないことを確認
+    expect(result_min).toHaveProperty('requirement_id');
+    expect(result_min).toHaveProperty('classification');
+    expect(result_min).toHaveProperty('development_target');
+    expect(result_max).toHaveProperty('requirement_id');
+    expect(result_max).toHaveProperty('classification');
+    expect(result_max).toHaveProperty('development_target');
+    
+    // Assert: 分類フラグの論理矛盾がないことを確認
+    expect(
+      result_min.development_target === true || 
+      result_min.review_target === true || 
+      result_min.exclude_target === true
+    ).toBe(true);
+    expect(
+      result_max.development_target === true || 
+      result_max.review_target === true || 
+      result_max.exclude_target === true
+    ).toBe(true);
 
-    expect(result_timezone_boundary_end_of_day).toEqual({
-      is_within_retrospective_period: true,
-      adjustment_months: 3,
-      old_total_fee: 270000,
-      new_total_fee: 240000,
-      backdated_adjustment_amount: -30000,
-      affected_months: ['2024-04', '2024-05', '2024-06'],
-    });
-
-    // パターン6: タイムゾーン境界 00:00:00（遡及調整対象期間内）
-    const result_timezone_boundary_start_of_day = calculateBackdatedBillingAdjustment({
-      contract_start_date,
-      contract_change_date: new Date('2024-05-15T00:00:00Z'),
-      retrospective_start_date,
-      retrospective_end_date,
-      base_monthly_fee,
-      old_discount_rate,
-      new_discount_rate,
-    });
-
-    expect(result_timezone_boundary_start_of_day).toEqual({
-      is_within_retrospective_period: true,
-      adjustment_months: 3,
-      old_total_fee: 270000,
-      new_total_fee: 240000,
-      backdated_adjustment_amount: -30000,
-      affected_months: ['2024-04', '2024-05', '2024-06'],
-    });
-
-    // 境界内の変更と範囲外の変更で異なる結果が得られることを検証
-    expect(result_boundary_start.is_within_retrospective_period).toBe(true);
-    expect(result_before_boundary.is_within_retrospective_period).toBe(false);
-    expect(result_after_boundary.is_within_retrospective_period).toBe(false);
-
-    // 遡及調整金額が期待値と一致し、誤差が0円であることを確認
-    expect(result_boundary_start.backdated_adjustment_amount).toBe(-30000);
-    expect(result_boundary_end.backdated_adjustment_amount).toBe(-30000);
-    expect(result_before_boundary.backdated_adjustment_amount).toBe(0);
-    expect(result_after_boundary.backdated_adjustment_amount).toBe(0);
+    // Assert: スコア0点と満点での割り当てリリース優先度が異なることを確認
+    expect(result_min.assigned_release_priority).toBeNull();
+    expect(result_max.assigned_release_priority).toBe(1);
   });
 });

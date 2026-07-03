@@ -1,106 +1,89 @@
-import { extractBillingItemsAndAggregate } from '../../src/logic/it-1-2-1';
+import { detectBillingAnomaly } from "../../src/logic/it-1-2-1";
 
-describe('営業成果データから請求対象項目を自動抽出し、顧客ごと・サービスごとの請求額を集計する機能', () => {
-  // SCEN-1258: [normal] SLA時間内契約変更反映機能
-  test('顧客承認から契約・請求データ最新状態への反映がSLA時間内に完了する', () => {
-    // 前提: 既存の契約データを持つ顧客が存在
-    const customerId = 'CUST-001';
-    const serviceId = 'SVC-A';
-    
-    // 契約変更申請タイムスタンプ（固定値）
-    const changeRequestTimestamp = new Date('2024-01-15T09:00:00Z');
-    
-    // 顧客承認完了タイムスタンプ（固定値）
-    const customerApprovalTimestamp = new Date('2024-01-15T10:30:00Z');
-    
-    // SLA時間閾値: 4時間
-    const slaThresholdMs = 4 * 60 * 60 * 1000;
-    
-    // 契約変更内容
-    const contractChangeData = {
+describe("請求情報検証機能 - 異常金額検出", () => {
+  test("SCEN-1258: 過去請求パターンから大幅に乖離した金額が例外として記録される", () => {
+    // 過去12ヶ月の請求履歴（月額100万円～120万円の範囲）
+    const pastBillingHistory = [
+      { month: "2023-01", amount: 1000000 },
+      { month: "2023-02", amount: 1050000 },
+      { month: "2023-03", amount: 1100000 },
+      { month: "2023-04", amount: 1080000 },
+      { month: "2023-05", amount: 1120000 },
+      { month: "2023-06", amount: 1000000 },
+      { month: "2023-07", amount: 1090000 },
+      { month: "2023-08", amount: 1110000 },
+      { month: "2023-09", amount: 1070000 },
+      { month: "2023-10", amount: 1100000 },
+      { month: "2023-11", amount: 1050000 },
+      { month: "2023-12", amount: 1080000 },
+    ];
+
+    // 過去12ヶ月の統計値を計算
+    const amounts = pastBillingHistory.map((h) => h.amount);
+    const mean = amounts.reduce((a, b) => a + b, 0) / amounts.length; // 平均: 1082500
+    const variance =
+      amounts.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) /
+      amounts.length;
+    const stdDev = Math.sqrt(variance); // 標準偏差: 約44721.36
+    const upperThreshold = mean + 3 * stdDev; // 平均 + 3σ: 約1216664.08
+
+    // 異常金額：500万円（統計的閾値を大幅に超える）
+    const anomalousAmount = 5000000;
+
+    // 通常範囲内の金額：110万円
+    const normalAmount = 1100000;
+
+    const customerId = "CUST-001";
+    const serviceId = "SVC-A";
+    const detectionTimestamp = "2024-01-15T11:00:00Z";
+
+    // 異常金額の検出テスト
+    const anomalyResult = detectBillingAnomaly({
       customerId,
       serviceId,
-      changeType: 'price_update',
-      previousPrice: 100000,
-      newPrice: 120000,
-      effectiveDate: '2024-01-15',
-      changeRequestTimestamp,
-      customerApprovalTimestamp,
-    };
-    
-    // 営業データ（請求対象項目を含む）
-    const salesData = [
-      {
-        customerId,
-        serviceId,
-        appointmentCount: 10,
-        contractCount: 3,
-        responseRate: 85,
-        recordDate: '2024-01-15',
-      },
-    ];
-    
-    // 実行: 請求対象項目抽出と集計
-    const result = extractBillingItemsAndAggregate({
-      contractChangeData,
-      salesData,
-      slaThresholdMs,
+      billingAmount: anomalousAmount,
+      pastBillingHistory,
+      detectionTimestamp,
     });
-    
-    // 検証1: 請求対象項目が正しく抽出されている
-    expect(result.billingItems).toBeDefined();
-    expect(result.billingItems).toHaveLength(1);
-    expect(result.billingItems[0].customerId).toBe(customerId);
-    expect(result.billingItems[0].serviceId).toBe(serviceId);
-    
-    // 検証2: 顧客ごとの請求額が新しい価格で計算されている
-    // 計算式: 成約数（3件） × 新価格（120,000円） = 360,000円
-    expect(result.aggregatedBillingByCustomer).toBeDefined();
-    expect(result.aggregatedBillingByCustomer[customerId]).toBeDefined();
-    const expectedBillingAmount = 3 * 120000;
-    expect(result.aggregatedBillingByCustomer[customerId].totalAmount).toBe(expectedBillingAmount);
-    
-    // 検証3: サービス別請求額が計算されている
-    expect(result.aggregatedBillingByService).toBeDefined();
-    expect(result.aggregatedBillingByService[serviceId]).toBeDefined();
-    expect(result.aggregatedBillingByService[serviceId].totalAmount).toBe(expectedBillingAmount);
-    
-    // 検証4: SLA時間内に反映完了
-    const elapsedMs = customerApprovalTimestamp.getTime() - changeRequestTimestamp.getTime();
-    expect(elapsedMs).toBeLessThanOrEqual(slaThresholdMs);
-    expect(result.slaCompliant).toBe(true);
-    
-    // 検証5: 契約・請求データの一致確認
-    expect(result.contractAndBillingConsistent).toBe(true);
-    
-    // 検証6: 監査ログに全プロセスが記録されている
-    expect(result.auditLog).toBeDefined();
-    expect(result.auditLog).toHaveLength(5);
-    
-    // 監査ログ項目の確認
-    const auditEntries = result.auditLog.map((entry: any) => entry.action);
-    expect(auditEntries).toContain('contract_change_requested');
-    expect(auditEntries).toContain('customer_approval_granted');
-    expect(auditEntries).toContain('contract_data_updated');
-    expect(auditEntries).toContain('billing_data_updated');
-    expect(auditEntries).toContain('data_consistency_verified');
-    
-    // 検証7: 各監査ログエントリにタイムスタンプが記録されている
-    result.auditLog.forEach((entry: any) => {
-      expect(entry.timestamp).toBeDefined();
-      expect(typeof entry.timestamp).toBe('object');
+
+    // 異常検出の確認
+    expect(anomalyResult.isAnomaly).toBe(true);
+    expect(anomalyResult.detectedAmount).toBe(5000000);
+    expect(anomalyResult.detectionTimestamp).toBe("2024-01-15T11:00:00Z");
+
+    // 乖離率の計算: (異常金額 - 平均) / 平均 * 100 = (5000000 - 1082500) / 1082500 * 100 ≈ 361.6%
+    // テスト内の固定値: 乖離率が400%以上であることを確認
+    expect(anomalyResult.deviationPercentage).toBeGreaterThanOrEqual(361.6);
+
+    // リスク区分の確認
+    expect(anomalyResult.riskLevel).toBe("High");
+
+    // 例外レコードの検証
+    expect(anomalyResult.exceptionRecord).toBeDefined();
+    expect(anomalyResult.exceptionRecord.anomalousAmount).toBe(5000000);
+    expect(anomalyResult.exceptionRecord.customerId).toBe("CUST-001");
+    expect(anomalyResult.exceptionRecord.serviceId).toBe("SVC-A");
+    expect(anomalyResult.exceptionRecord.riskClassification).toBe("High");
+    expect(anomalyResult.exceptionRecord.threshold).toBeCloseTo(1216664.08, 0);
+
+    // 通常金額の検出テスト
+    const normalResult = detectBillingAnomaly({
+      customerId,
+      serviceId,
+      billingAmount: normalAmount,
+      pastBillingHistory,
+      detectionTimestamp,
     });
-    
-    // 検証8: 最後の監査ログエントリのタイムスタンプが顧客承認完了後
-    const lastAuditEntry = result.auditLog[result.auditLog.length - 1];
-    expect(new Date(lastAuditEntry.timestamp).getTime()).toBeGreaterThanOrEqual(
-      customerApprovalTimestamp.getTime()
-    );
-    
-    // 検証9: データ更新完了タイムスタンプがSLA時間内
-    expect(result.dataUpdateCompletedTimestamp).toBeDefined();
-    const updateElapsedMs = 
-      new Date(result.dataUpdateCompletedTimestamp).getTime() - changeRequestTimestamp.getTime();
-    expect(updateElapsedMs).toBeLessThanOrEqual(slaThresholdMs);
+
+    // 通常範囲内なので異常検出されない
+    expect(normalResult.isAnomaly).toBe(false);
+    expect(normalResult.detectedAmount).toBe(1100000);
+    expect(normalResult.riskLevel).toBe("Normal");
+
+    // 通常金額については例外記録が生成されていない
+    expect(normalResult.exceptionRecord).toBeNull();
+
+    // 乖離率が許容範囲内であることを確認
+    expect(normalResult.deviationPercentage).toBeLessThan(300);
   });
 });

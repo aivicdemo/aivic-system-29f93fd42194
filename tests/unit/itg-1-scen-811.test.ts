@@ -1,36 +1,30 @@
-import { calculateDeliveryDateDifference } from '../../src/logic/it-1781935279444-2-1-1';
+import { decidePolicyAndUpdateStatus } from '../../src/logic/it-1-2-1';
 
-describe('納期遅延・前倒し検出・通知機能', () => {
-  test('SCEN-811: 実績納期と契約納期の差異が正確に計算される', () => {
-    // ケース1: 遅延（実績 > 契約）
-    const delayResult = calculateDeliveryDateDifference(
-      new Date('2024-03-15'),
-      new Date('2024-03-20')
-    );
-    expect(delayResult).toBe(5);
+describe('営業成果データから請求対象項目を自動抽出し、顧客ごと・サービスごとの請求額を集計する機能', () => {
+  // SCEN-811
+  test('対応方針の決定・記録機能 - 営業責任者が契約・納期・請求確認後に対応方針を決定し、ステータスが正常に更新される', () => {
+    const input = {
+      caseId: 'CASE-20240115-001',
+      customerId: 'CUST-A001',
+      serviceId: 'SRV-001',
+      contractAmount: 500000,
+      deliveryDate: '2024-02-15',
+      billingAmount: 500000,
+      policyType: 'CONTINUE',
+      policyDetails: '契約条件を確認、継続的支援を実施',
+      decidedBy: 'USER-SALES-001',
+      decidedAt: '2024-01-15T14:30:00Z'
+    };
 
-    // ケース2: 前倒し（実績 < 契約）
-    const advanceResult = calculateDeliveryDateDifference(
-      new Date('2024-03-15'),
-      new Date('2024-03-10')
-    );
-    expect(advanceResult).toBe(-5);
+    const result = decidePolicyAndUpdateStatus(input);
 
-    // ケース3: 差異なし（実績 = 契約）
-    const noDifferenceResult = calculateDeliveryDateDifference(
-      new Date('2024-03-15'),
-      new Date('2024-03-15')
-    );
-    expect(noDifferenceResult).toBe(0);
-
-    // ケース4: 契約納期がnull
-    expect(() => {
-      calculateDeliveryDateDifference(null, new Date('2024-03-20'));
-    }).toThrow(/契約納期/);
-
-    // ケース5: 実績納期がnull
-    expect(() => {
-      calculateDeliveryDateDifference(new Date('2024-03-15'), null);
-    }).toThrow(/実績納期/);
+    expect(result.caseId).toBe('CASE-20240115-001');
+    expect(result.status).toBe('POLICY_DECIDED');
+    expect(result.policyType).toBe('CONTINUE');
+    expect(result.policyDetails).toBe('契約条件を確認、継続的支援を実施');
+    expect(result.decidedBy).toBe('USER-SALES-001');
+    expect(result.decidedAt).toBe('2024-01-15T14:30:00Z');
+    expect(result.recordedInHistory).toBe(true);
+    expect(result.historyEntryId).toMatch(/^HIST-/);
   });
 });

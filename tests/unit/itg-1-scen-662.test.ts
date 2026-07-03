@@ -1,49 +1,130 @@
-import { defineMetadata, retrieveMetadata, validateMetadataConsistency } from '../../src/logic/it-1781935279444-1-1-1';
+import { describe, test, expect } from "@jest/globals";
+import { validateAggregationRule } from "../../src/logic/it-1-2-1";
 
-describe('営業データ項目メタデータ一元管理機能', () => {
-  // SCEN-662: [normal] 営業データ項目定義（項目名・単位・データ型・計算ロジック）が統一される
-  test('should unify sales data item metadata definition across multiple administrators and reporting screens', () => {
-    // 1. 新規営業データ項目定義を作成
-    const newItemDefinition = {
-      itemName: '売上金額',
-      unit: '円',
-      dataType: '数値（10,2）',
-      calculationLogic: '受注金額×納入率'
+describe("顧客・サービス別集計ルール検証機能", () => {
+  test("SCEN-662: 不正な集計ルール定義が与えられた場合、エラーが適切に発生する", () => {
+    // ===== ハッピーパス: 正常な集計ルール定義 =====
+    const validRule = {
+      customerId: "CUST001",
+      serviceId: "SVC001",
+      aggregationMethod: "SUM",
+      targetFields: ["appointmentCount", "contractCount"],
+      aggregationPeriod: "MONTHLY",
+      aggregationUnit: "SERVICE",
     };
 
-    // 2. 項目定義を保存
-    const savedItemId = defineMetadata(newItemDefinition);
-    expect(savedItemId).toBeDefined();
-    expect(typeof savedItemId).toBe('string');
-
-    // 3. 別の管理者アカウントで同一の項目定義を取得
-    const retrievedMetadata = retrieveMetadata(savedItemId);
-
-    // 4. 項目名が一致することを検証
-    expect(retrievedMetadata.itemName).toBe('売上金額');
-
-    // 5. 単位が一致することを検証
-    expect(retrievedMetadata.unit).toBe('円');
-
-    // 6. データ型が一致することを検証
-    expect(retrievedMetadata.dataType).toBe('数値（10,2）');
-
-    // 7. 計算ロジックが一致することを検証
-    expect(retrievedMetadata.calculationLogic).toBe('受注金額×納入率');
-
-    // 8. 複数のレポート画面やダッシュボード内での整合性を検証
-    const consistencyCheckResult = validateMetadataConsistency({
-      metadataId: savedItemId,
-      screenNames: ['reportDashboard', 'billingReport', 'performanceAnalysis']
+    const validResult = validateAggregationRule(validRule);
+    expect(validResult).toEqual({
+      isValid: true,
+      errors: [],
+      errorCode: null,
     });
 
-    // 9. すべてのレポート画面で一元管理されたメタデータが適用されていることを検証
-    expect(consistencyCheckResult.isConsistent).toBe(true);
-    expect(consistencyCheckResult.appliedScreens).toEqual(['reportDashboard', 'billingReport', 'performanceAnalysis']);
-    expect(consistencyCheckResult.definitionCount).toBe(1);
-    expect(consistencyCheckResult.metadata.itemName).toBe('売上金額');
-    expect(consistencyCheckResult.metadata.unit).toBe('円');
-    expect(consistencyCheckResult.metadata.dataType).toBe('数値（10,2）');
-    expect(consistencyCheckResult.metadata.calculationLogic).toBe('受注金額×納入率');
+    // ===== エラーケース 1: 必須フィールド欠落 (customerId がない) =====
+    const missingCustomerId = {
+      serviceId: "SVC001",
+      aggregationMethod: "SUM",
+      targetFields: ["appointmentCount"],
+      aggregationPeriod: "MONTHLY",
+      aggregationUnit: "SERVICE",
+    };
+
+    expect(() => validateAggregationRule(missingCustomerId)).toThrow(
+      /顧客ID/
+    );
+
+    // ===== エラーケース 2: 必須フィールド欠落 (aggregationMethod がない) =====
+    const missingAggregationMethod = {
+      customerId: "CUST001",
+      serviceId: "SVC001",
+      targetFields: ["appointmentCount"],
+      aggregationPeriod: "MONTHLY",
+      aggregationUnit: "SERVICE",
+    };
+
+    expect(() => validateAggregationRule(missingAggregationMethod)).toThrow(
+      /集計方法/
+    );
+
+    // ===== エラーケース 3: データ型不正 (aggregationMethod が無効な値) =====
+    const invalidAggregationMethod = {
+      customerId: "CUST001",
+      serviceId: "SVC001",
+      aggregationMethod: "INVALID_METHOD",
+      targetFields: ["appointmentCount"],
+      aggregationPeriod: "MONTHLY",
+      aggregationUnit: "SERVICE",
+    };
+
+    expect(() => validateAggregationRule(invalidAggregationMethod)).toThrow(
+      /集計方法/
+    );
+
+    // ===== エラーケース 4: 値の範囲外 (aggregationPeriod が無効な値) =====
+    const invalidPeriod = {
+      customerId: "CUST001",
+      serviceId: "SVC001",
+      aggregationMethod: "SUM",
+      targetFields: ["appointmentCount"],
+      aggregationPeriod: "INVALID_PERIOD",
+      aggregationUnit: "SERVICE",
+    };
+
+    expect(() => validateAggregationRule(invalidPeriod)).toThrow(/集計期間/);
+
+    // ===== エラーケース 5: targetFields が空配列 =====
+    const emptyTargetFields = {
+      customerId: "CUST001",
+      serviceId: "SVC001",
+      aggregationMethod: "SUM",
+      targetFields: [],
+      aggregationPeriod: "MONTHLY",
+      aggregationUnit: "SERVICE",
+    };
+
+    expect(() => validateAggregationRule(emptyTargetFields)).toThrow(
+      /対象項目/
+    );
+
+    // ===== エラーケース 6: serviceId が空文字列 =====
+    const emptyServiceId = {
+      customerId: "CUST001",
+      serviceId: "",
+      aggregationMethod: "SUM",
+      targetFields: ["appointmentCount"],
+      aggregationPeriod: "MONTHLY",
+      aggregationUnit: "SERVICE",
+    };
+
+    expect(() => validateAggregationRule(emptyServiceId)).toThrow(/サービスID/);
+
+    // ===== エラーケース 7: aggregationUnit が無効な値 =====
+    const invalidUnit = {
+      customerId: "CUST001",
+      serviceId: "SVC001",
+      aggregationMethod: "SUM",
+      targetFields: ["appointmentCount"],
+      aggregationPeriod: "MONTHLY",
+      aggregationUnit: "INVALID_UNIT",
+    };
+
+    expect(() => validateAggregationRule(invalidUnit)).toThrow(/集計単位/);
+
+    // ===== リカバリーテスト: エラー発生後に正常なルールで復帰できる =====
+    const recoveryRule = {
+      customerId: "CUST002",
+      serviceId: "SVC002",
+      aggregationMethod: "AVG",
+      targetFields: ["conversionCount"],
+      aggregationPeriod: "MONTHLY",
+      aggregationUnit: "CUSTOMER",
+    };
+
+    const recoveryResult = validateAggregationRule(recoveryRule);
+    expect(recoveryResult).toEqual({
+      isValid: true,
+      errors: [],
+      errorCode: null,
+    });
   });
 });

@@ -1,105 +1,86 @@
-import { describe, test, expect, beforeEach } from '@jest/globals';
-import { applyBillingRuleChange } from '../../src/logic/it-1-2-1';
+import { validateSalesReportDateRange } from '../../src/logic/it-1-1-1';
 
-describe('請求ルール変更時の遡及適用判定', () => {
-  beforeEach(() => {
-    jest.clearAllMocks();
-  });
+describe('営業成果レポート内容妥当性判定機能', () => {
+  // SCEN-1014: [edge] 営業成果レポート内容妥当性判定機能 - レポート集計期間の境界日時が正確に判定される
+  test('集計期間開始日の00:00:00と終了日の23:59:59を含む境界値判定', () => {
+    const reportStartDate = new Date('2024-01-01T00:00:00Z');
+    const reportEndDate = new Date('2024-01-31T23:59:59Z');
 
-  // SCEN-1014
-  test('適用開始日が不明確または将来日の場合、ルール変更適用がスキップされエラーが返される', () => {
-    // 1. 適用開始日が空白（不明確）の場合
-    const ruleChangeWithEmptyStartDate = {
-      billingRuleId: 'rule-001',
-      customerId: 'cust-A',
-      serviceId: 'svc-B',
-      newDiscountRate: 0.1,
-      effectiveStartDate: '',
-      changeDescription: 'Discount rate update',
+    const recordAtStartBoundary = {
+      id: 'rec_001',
+      createdAt: new Date('2024-01-01T00:00:00Z'),
+      apoCount: 5,
+      contractCount: 2,
+      serviceType: 'standard'
     };
 
-    expect(() => applyBillingRuleChange(ruleChangeWithEmptyStartDate)).toThrow(/適用開始日/);
-
-    // 2. 適用開始日が将来日の場合
-    const futureDate = new Date();
-    futureDate.setDate(futureDate.getDate() + 30);
-    const ruleChangeWithFutureDate = {
-      billingRuleId: 'rule-002',
-      customerId: 'cust-B',
-      serviceId: 'svc-C',
-      newDiscountRate: 0.15,
-      effectiveStartDate: futureDate.toISOString(),
-      changeDescription: 'Future discount rate update',
+    const recordAtEndBoundary = {
+      id: 'rec_002',
+      createdAt: new Date('2024-01-31T23:59:59Z'),
+      apoCount: 3,
+      contractCount: 1,
+      serviceType: 'standard'
     };
 
-    expect(() => applyBillingRuleChange(ruleChangeWithFutureDate)).toThrow(/将来日/);
-
-    // 3. 適用開始日が有効な過去日の場合は成功
-    const validDate = new Date('2024-01-15T00:00:00Z');
-    const ruleChangeWithValidDate = {
-      billingRuleId: 'rule-003',
-      customerId: 'cust-C',
-      serviceId: 'svc-A',
-      newDiscountRate: 0.2,
-      effectiveStartDate: validDate.toISOString(),
-      changeDescription: 'Valid discount rate update',
+    const recordBeforeStart = {
+      id: 'rec_003',
+      createdAt: new Date('2023-12-31T23:59:59Z'),
+      apoCount: 2,
+      contractCount: 1,
+      serviceType: 'standard'
     };
 
-    const result = applyBillingRuleChange(ruleChangeWithValidDate);
-    expect(result).toEqual({
-      success: true,
-      ruleId: 'rule-003',
-      customerId: 'cust-C',
-      serviceId: 'svc-A',
-      appliedDiscountRate: 0.2,
-      effectiveStartDate: validDate.toISOString(),
-      retroactivelyApplied: true,
-      systemLogEntry: expect.objectContaining({
-        timestamp: expect.any(String),
-        action: 'billing_rule_applied',
-        ruleId: 'rule-003',
-        status: 'completed',
-      }),
+    const recordAfterEnd = {
+      id: 'rec_004',
+      createdAt: new Date('2024-02-01T00:00:00Z'),
+      apoCount: 4,
+      contractCount: 2,
+      serviceType: 'standard'
+    };
+
+    const allRecords = [
+      recordBeforeStart,
+      recordAtStartBoundary,
+      recordAtEndBoundary,
+      recordAfterEnd
+    ];
+
+    const result = validateSalesReportDateRange({
+      records: allRecords,
+      startDate: reportStartDate,
+      endDate: reportEndDate
     });
 
-    // 4. 遡及適用がスキップされたことを確認（適用開始日が不明確または将来日）
-    const ruleChangeSkipped = {
-      billingRuleId: 'rule-004',
-      customerId: 'cust-D',
-      serviceId: 'svc-D',
-      newDiscountRate: 0.05,
-      effectiveStartDate: '',
-      changeDescription: 'Skipped due to unclear date',
-    };
+    expect(result.includedRecords).toContainEqual(
+      expect.objectContaining({
+        id: 'rec_001',
+        createdAt: new Date('2024-01-01T00:00:00Z')
+      })
+    );
 
-    expect(() => applyBillingRuleChange(ruleChangeSkipped)).toThrow(/適用開始日/);
+    expect(result.includedRecords).toContainEqual(
+      expect.objectContaining({
+        id: 'rec_002',
+        createdAt: new Date('2024-01-31T23:59:59Z')
+      })
+    );
 
-    // 5. 適用開始日がnullの場合もエラー
-    const ruleChangeWithNullDate = {
-      billingRuleId: 'rule-005',
-      customerId: 'cust-E',
-      serviceId: 'svc-E',
-      newDiscountRate: 0.08,
-      effectiveStartDate: null as any,
-      changeDescription: 'Null date test',
-    };
+    expect(result.includedRecords).not.toContainEqual(
+      expect.objectContaining({
+        id: 'rec_003'
+      })
+    );
 
-    expect(() => applyBillingRuleChange(ruleChangeWithNullDate)).toThrow(/適用開始日/);
+    expect(result.includedRecords).not.toContainEqual(
+      expect.objectContaining({
+        id: 'rec_004'
+      })
+    );
 
-    // 6. 適用開始日が今日の日付の場合は成功
-    const todayDate = new Date();
-    todayDate.setHours(0, 0, 0, 0);
-    const ruleChangeWithToday = {
-      billingRuleId: 'rule-006',
-      customerId: 'cust-F',
-      serviceId: 'svc-F',
-      newDiscountRate: 0.12,
-      effectiveStartDate: todayDate.toISOString(),
-      changeDescription: 'Today effective date',
-    };
-
-    const resultToday = applyBillingRuleChange(ruleChangeWithToday);
-    expect(resultToday.success).toBe(true);
-    expect(resultToday.retroactivelyApplied).toBe(false);
+    expect(result.includedRecords).toHaveLength(2);
+    expect(result.excludedRecords).toHaveLength(2);
+    expect(result.isValid).toBe(true);
+    expect(result.totalApoCount).toBe(8);
+    expect(result.totalContractCount).toBe(3);
   });
 });

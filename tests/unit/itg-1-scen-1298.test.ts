@@ -1,114 +1,233 @@
-import { validateBillingApprovalCriteria } from '../../src/logic/it-1-2-1';
+import { extractBillingItems } from "../../src/logic/it-1-2-1";
 
-describe('営業成果データから請求対象項目を自動抽出し、顧客ごと・サービスごとの請求額を集計する機能', () => {
-  // SCEN-1298: [error] 請求情報の最終承認判定機能 - 承認基準の判定ロジックに矛盾がある場合に、エラーとして検出される
-  test('承認基準に矛盾が存在する場合、エラーメッセージと詳細ログを返す', () => {
-    // 承認金額の下限と上限が逆転している矛盾した条件
-    const contradictory_criteria_inverted_limits = {
-      approval_id: 'APP-001',
-      customer_id: 'CUST-2024-001',
-      service_id: 'SVC-SALES',
-      amount_lower_limit: 150000,
-      amount_upper_limit: 100000, // 下限 > 上限 → 矛盾
-      discount_threshold: 50000,
-      approval_status: 'PENDING',
-    };
+describe("営業成果データから請求対象項目を自動抽出し、顧客ごと・サービスごとの請求額を集計する機能", () => {
+  // SCEN-1298: [normal] 請求対象項目自動抽出機能 - 営業データから請求対象項目が正確に抽出され、顧客ごとに集計される
+  test("営業データから請求対象項目が漏れなく正確に抽出され、顧客ごとに正しく集計されたレポートが生成されること", () => {
+    const input_sales_data = [
+      {
+        customer_id: "CUST_A",
+        customer_name: "A社",
+        service_type: "product_sales",
+        service_name: "商品販売",
+        transaction_date: "2024-01-10",
+        amount: 50000,
+        quantity: 5,
+        unit_price: 10000,
+        billing_status: "billable",
+      },
+      {
+        customer_id: "CUST_A",
+        customer_name: "A社",
+        service_type: "maintenance_fee",
+        service_name: "保守料金",
+        transaction_date: "2024-01-15",
+        amount: 30000,
+        quantity: 1,
+        unit_price: 30000,
+        billing_status: "billable",
+      },
+      {
+        customer_id: "CUST_B",
+        customer_name: "B社",
+        service_type: "service_provision",
+        service_name: "サービス提供",
+        transaction_date: "2024-01-12",
+        amount: 80000,
+        quantity: 4,
+        unit_price: 20000,
+        billing_status: "billable",
+      },
+      {
+        customer_id: "CUST_B",
+        customer_name: "B社",
+        service_type: "product_sales",
+        service_name: "商品販売",
+        transaction_date: "2024-01-18",
+        amount: 60000,
+        quantity: 6,
+        unit_price: 10000,
+        billing_status: "billable",
+      },
+      {
+        customer_id: "CUST_B",
+        customer_name: "B社",
+        service_type: "consultation_fee",
+        service_name: "コンサルティング",
+        transaction_date: "2024-01-20",
+        amount: 40000,
+        quantity: 1,
+        unit_price: 40000,
+        billing_status: "billable",
+      },
+      {
+        customer_id: "CUST_C",
+        customer_name: "C社",
+        service_type: "service_provision",
+        service_name: "サービス提供",
+        transaction_date: "2024-01-11",
+        amount: 100000,
+        quantity: 5,
+        unit_price: 20000,
+        billing_status: "billable",
+      },
+      {
+        customer_id: "CUST_C",
+        customer_name: "C社",
+        service_type: "maintenance_fee",
+        service_name: "保守料金",
+        transaction_date: "2024-01-17",
+        amount: 25000,
+        quantity: 1,
+        unit_price: 25000,
+        billing_status: "billable",
+      },
+    ];
 
-    expect(() =>
-      validateBillingApprovalCriteria(contradictory_criteria_inverted_limits)
-    ).toThrow(/金額範囲/);
-  });
-
-  test('相互排他的な条件が同時に有効に設定されている場合、矛盾を検出してエラーを返す', () => {
-    // 「割引適用」と「割引非適用」が同時に有効という矛盾
-    const contradictory_criteria_mutually_exclusive = {
-      approval_id: 'APP-002',
-      customer_id: 'CUST-2024-002',
-      service_id: 'SVC-CONSULT',
-      is_discount_applied: true,
-      is_discount_not_applied: true, // 相互排他的矛盾
-      minimum_quantity: 5,
-      approval_status: 'PENDING',
-    };
-
-    expect(() =>
-      validateBillingApprovalCriteria(contradictory_criteria_mutually_exclusive)
-    ).toThrow(/相互排他/);
-  });
-
-  test('承認基準が正常に設定されている場合、検証に成功し承認可能なオブジェクトを返す', () => {
-    const valid_criteria = {
-      approval_id: 'APP-003',
-      customer_id: 'CUST-2024-003',
-      service_id: 'SVC-STANDARD',
-      amount_lower_limit: 50000,
-      amount_upper_limit: 500000,
-      discount_threshold: 100000,
-      minimum_quantity: 1,
-      approval_status: 'APPROVED',
-    };
-
-    const result = validateBillingApprovalCriteria(valid_criteria);
-
-    expect(result).toEqual({
-      approval_id: 'APP-003',
-      customer_id: 'CUST-2024-003',
-      service_id: 'SVC-STANDARD',
-      amount_lower_limit: 50000,
-      amount_upper_limit: 500000,
-      discount_threshold: 100000,
-      minimum_quantity: 1,
-      approval_status: 'APPROVED',
-      validation_result: 'PASSED',
-      error_details: null,
+    const result = extractBillingItems({
+      sales_data: input_sales_data,
+      billing_date: "2024-01-31",
+      extraction_period_start: "2024-01-01",
+      extraction_period_end: "2024-01-31",
     });
-  });
 
-  test('下限値が負数である場合、無効な金額範囲として矛盾を検出', () => {
-    const invalid_criteria_negative_limit = {
-      approval_id: 'APP-004',
-      customer_id: 'CUST-2024-004',
-      service_id: 'SVC-PREMIUM',
-      amount_lower_limit: -10000, // 負数 → 矛盾
-      amount_upper_limit: 500000,
-      approval_status: 'PENDING',
-    };
+    // 抽出結果の構造を検証
+    expect(result).toHaveProperty("extraction_status");
+    expect(result.extraction_status).toBe("success");
 
-    expect(() =>
-      validateBillingApprovalCriteria(invalid_criteria_negative_limit)
-    ).toThrow(/金額範囲/);
-  });
+    expect(result).toHaveProperty("customer_aggregations");
+    expect(Array.isArray(result.customer_aggregations)).toBe(true);
 
-  test('上限値が下限値と等しい場合は正常と判定し、検証に成功する', () => {
-    const valid_criteria_equal_limits = {
-      approval_id: 'APP-005',
-      customer_id: 'CUST-2024-005',
-      service_id: 'SVC-FIXED',
-      amount_lower_limit: 100000,
-      amount_upper_limit: 100000, // 下限 = 上限 → 固定金額として正常
-      approval_status: 'APPROVED',
-    };
+    // 顧客数が3社であることを検証
+    expect(result.customer_aggregations.length).toBe(3);
 
-    const result = validateBillingApprovalCriteria(valid_criteria_equal_limits);
+    // A社の抽出検証（2件、合計80000円）
+    const customer_a = result.customer_aggregations.find(
+      (agg) => agg.customer_id === "CUST_A"
+    );
+    expect(customer_a).toBeDefined();
+    expect(customer_a!.customer_name).toBe("A社");
+    expect(customer_a!.billing_items_count).toBe(2);
+    expect(customer_a!.total_billing_amount).toBe(80000);
+    expect(customer_a!.billing_items).toHaveLength(2);
+    expect(customer_a!.billing_items[0]).toEqual({
+      service_type: "product_sales",
+      service_name: "商品販売",
+      transaction_date: "2024-01-10",
+      amount: 50000,
+      quantity: 5,
+      unit_price: 10000,
+    });
+    expect(customer_a!.billing_items[1]).toEqual({
+      service_type: "maintenance_fee",
+      service_name: "保守料金",
+      transaction_date: "2024-01-15",
+      amount: 30000,
+      quantity: 1,
+      unit_price: 30000,
+    });
 
-    expect(result.validation_result).toBe('PASSED');
-    expect(result.error_details).toBeNull();
-  });
+    // B社の抽出検証（3件、合計180000円）
+    const customer_b = result.customer_aggregations.find(
+      (agg) => agg.customer_id === "CUST_B"
+    );
+    expect(customer_b).toBeDefined();
+    expect(customer_b!.customer_name).toBe("B社");
+    expect(customer_b!.billing_items_count).toBe(3);
+    expect(customer_b!.total_billing_amount).toBe(180000);
+    expect(customer_b!.billing_items).toHaveLength(3);
+    expect(customer_b!.billing_items[0]).toEqual({
+      service_type: "service_provision",
+      service_name: "サービス提供",
+      transaction_date: "2024-01-12",
+      amount: 80000,
+      quantity: 4,
+      unit_price: 20000,
+    });
+    expect(customer_b!.billing_items[1]).toEqual({
+      service_type: "product_sales",
+      service_name: "商品販売",
+      transaction_date: "2024-01-18",
+      amount: 60000,
+      quantity: 6,
+      unit_price: 10000,
+    });
+    expect(customer_b!.billing_items[2]).toEqual({
+      service_type: "consultation_fee",
+      service_name: "コンサルティング",
+      transaction_date: "2024-01-20",
+      amount: 40000,
+      quantity: 1,
+      unit_price: 40000,
+    });
 
-  test('複数の矛盾条件が同時に存在する場合、最初に検出された矛盾を優先してエラー返却', () => {
-    const multiple_contradictions = {
-      approval_id: 'APP-006',
-      customer_id: 'CUST-2024-006',
-      service_id: 'SVC-MULTI',
-      amount_lower_limit: 200000,
-      amount_upper_limit: 100000, // 矛盾 1: 下限 > 上限
-      is_discount_applied: true,
-      is_discount_not_applied: true, // 矛盾 2: 相互排他
-      approval_status: 'PENDING',
-    };
+    // C社の抽出検証（2件、合計125000円）
+    const customer_c = result.customer_aggregations.find(
+      (agg) => agg.customer_id === "CUST_C"
+    );
+    expect(customer_c).toBeDefined();
+    expect(customer_c!.customer_name).toBe("C社");
+    expect(customer_c!.billing_items_count).toBe(2);
+    expect(customer_c!.total_billing_amount).toBe(125000);
+    expect(customer_c!.billing_items).toHaveLength(2);
+    expect(customer_c!.billing_items[0]).toEqual({
+      service_type: "service_provision",
+      service_name: "サービス提供",
+      transaction_date: "2024-01-11",
+      amount: 100000,
+      quantity: 5,
+      unit_price: 20000,
+    });
+    expect(customer_c!.billing_items[1]).toEqual({
+      service_type: "maintenance_fee",
+      service_name: "保守料金",
+      transaction_date: "2024-01-17",
+      amount: 25000,
+      quantity: 1,
+      unit_price: 25000,
+    });
 
-    expect(() =>
-      validateBillingApprovalCriteria(multiple_contradictions)
-    ).toThrow(/金額範囲/);
+    // 全体集計値を検証
+    expect(result).toHaveProperty("total_extracted_items");
+    expect(result.total_extracted_items).toBe(7);
+    expect(result).toHaveProperty("grand_total_billing_amount");
+    expect(result.grand_total_billing_amount).toBe(385000);
+
+    // 処理時間がシステム要件内（5秒以内）であることを検証
+    expect(result).toHaveProperty("processing_time_ms");
+    expect(typeof result.processing_time_ms).toBe("number");
+    expect(result.processing_time_ms).toBeLessThan(5000);
+
+    // 抽出タイムスタンプが正確であることを検証
+    expect(result).toHaveProperty("extraction_timestamp");
+    expect(result.extraction_timestamp).toBe("2024-01-31T00:00:00Z");
+
+    // データ形式の完全性を検証
+    result.customer_aggregations.forEach((agg) => {
+      expect(agg).toHaveProperty("customer_id");
+      expect(agg).toHaveProperty("customer_name");
+      expect(agg).toHaveProperty("billing_items_count");
+      expect(agg).toHaveProperty("total_billing_amount");
+      expect(agg).toHaveProperty("billing_items");
+      expect(typeof agg.customer_id).toBe("string");
+      expect(typeof agg.customer_name).toBe("string");
+      expect(typeof agg.billing_items_count).toBe("number");
+      expect(typeof agg.total_billing_amount).toBe("number");
+      expect(Array.isArray(agg.billing_items)).toBe(true);
+
+      agg.billing_items.forEach((item) => {
+        expect(item).toHaveProperty("service_type");
+        expect(item).toHaveProperty("service_name");
+        expect(item).toHaveProperty("transaction_date");
+        expect(item).toHaveProperty("amount");
+        expect(item).toHaveProperty("quantity");
+        expect(item).toHaveProperty("unit_price");
+        expect(typeof item.service_type).toBe("string");
+        expect(typeof item.service_name).toBe("string");
+        expect(typeof item.transaction_date).toBe("string");
+        expect(typeof item.amount).toBe("number");
+        expect(typeof item.quantity).toBe("number");
+        expect(typeof item.unit_price).toBe("number");
+      });
+    });
   });
 });

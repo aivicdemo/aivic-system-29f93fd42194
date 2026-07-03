@@ -1,133 +1,82 @@
-import { filterImprovementItemsByPriorityRule } from '../../src/logic/it-1781935279444-2-1-1';
+import { validateSalesData } from "../../src/logic/it-1781935279444-2-2-1";
 
-describe('営業データ入力時の品質検証ルール定義・実行機能', () => {
-  // SCEN-929: [error] 改善項目の優先度判定・選別機能 - 判定ルール定義が不正または未設定の状態で選別が実行された場合、エラーが返される
-  test('判定ルール定義が不正または未設定の状態で選別実行時に、適切なエラーレスポンスが返される', () => {
-    const testCases = [
-      {
-        description: '判定ルール定義が null の場合',
-        input: {
-          priorityRuleDefinition: null,
-          improvementItems: [
-            { id: 'ITEM001', category: '営業データ品質', impact: 'high', frequency: 5 },
-            { id: 'ITEM002', category: '契約管理', impact: 'medium', frequency: 3 }
-          ]
-        },
-        expectedErrorPattern: /判定ルール定義/,
-        expectedStatusCode: 400
-      },
-      {
-        description: '判定ルール定義が空オブジェクトの場合',
-        input: {
-          priorityRuleDefinition: {},
-          improvementItems: [
-            { id: 'ITEM001', category: '営業データ品質', impact: 'high', frequency: 5 }
-          ]
-        },
-        expectedErrorPattern: /判定ルール定義/,
-        expectedStatusCode: 400
-      },
-      {
-        description: '判定ルール定義に必須フィールド (criteria) が不在の場合',
-        input: {
-          priorityRuleDefinition: {
-            ruleId: 'RULE001',
-            name: '優先度判定ルール'
-            // criteria が不在
-          },
-          improvementItems: [
-            { id: 'ITEM001', category: '営業データ品質', impact: 'high', frequency: 5 }
-          ]
-        },
-        expectedErrorPattern: /判定ルール定義が不正/,
-        expectedStatusCode: 400
-      },
-      {
-        description: '判定ルール定義の criteria が空配列の場合',
-        input: {
-          priorityRuleDefinition: {
-            ruleId: 'RULE002',
-            name: '優先度判定ルール',
-            criteria: []
-          },
-          improvementItems: [
-            { id: 'ITEM001', category: '営業データ品質', impact: 'high', frequency: 5 }
-          ]
-        },
-        expectedErrorPattern: /判定ルール定義/,
-        expectedStatusCode: 400
-      },
-      {
-        description: '判定ルール定義が無効化 (disabled: true) された場合',
-        input: {
-          priorityRuleDefinition: {
-            ruleId: 'RULE003',
-            name: '優先度判定ルール',
-            criteria: [
-              { field: 'impact', weight: 0.6, threshold: 'high' },
-              { field: 'frequency', weight: 0.4, threshold: 3 }
-            ],
-            disabled: true
-          },
-          improvementItems: [
-            { id: 'ITEM001', category: '営業データ品質', impact: 'high', frequency: 5 }
-          ]
-        },
-        expectedErrorPattern: /判定ルール定義が設定されていません/,
-        expectedStatusCode: 400
-      }
-    ];
-
-    testCases.forEach(({ description, input, expectedErrorPattern, expectedStatusCode }) => {
-      try {
-        const result = filterImprovementItemsByPriorityRule(input.priorityRuleDefinition, input.improvementItems);
-        // エラーが返されるべきだが返されない場合、テスト失敗
-        fail(`${description}: エラーが返されるべきだったが、結果 ${JSON.stringify(result)} が返された`);
-      } catch (error: any) {
-        // エラーメッセージのパターン検証
-        expect(error.message).toMatch(expectedErrorPattern);
-        
-        // エラーレスポンスにステータスコードが含まれている場合を検証
-        if (error.statusCode !== undefined) {
-          expect(error.statusCode).toBe(expectedStatusCode);
-        }
-        
-        // エラーが正しく発生したことを確認
-        expect(error).toBeDefined();
-      }
-    });
-
-    // 正常系: 判定ルール定義が正しく設定された場合、選別処理が成功することを確認
-    const validPriorityRuleDefinition = {
-      ruleId: 'RULE_VALID',
-      name: '優先度判定ルール',
-      criteria: [
-        { field: 'impact', weight: 0.6, threshold: 'high' },
-        { field: 'frequency', weight: 0.4, threshold: 3 }
-      ]
+describe("営業データ品質検証 - エラー検出と進行遮断", () => {
+  // SCEN-929: [error] 営業データ品質検証ルール適用 - 検証エラー検出時、請求額計算ステップへの進行が遮断される
+  test("検証エラーが検出された場合、エラーメッセージが表示され請求額計算ステップへの進行が遮断される", () => {
+    // 必須項目不足のデータ（顧客名が空）
+    const invalidData_missingCustomer = {
+      customer_name: "",
+      contact_date: "2024-01-15",
+      outcome_type: "appointment",
+      appointment_status: "confirmed",
+      amount: 50000,
     };
 
-    const validImprovementItems = [
-      { id: 'ITEM001', category: '営業データ品質', impact: 'high', frequency: 5 },
-      { id: 'ITEM002', category: '契約管理', impact: 'low', frequency: 1 },
-      { id: 'ITEM003', category: '請求管理', impact: 'high', frequency: 4 }
-    ];
+    // 第1検証: 必須項目欠落エラー
+    const validationResult_missing = validateSalesData(
+      invalidData_missingCustomer
+    );
+    expect(validationResult_missing.is_valid).toBe(false);
+    expect(validationResult_missing.error_message).toMatch(/顧客名/);
+    expect(validationResult_missing.can_proceed_to_billing).toBe(false);
 
-    try {
-      const result = filterImprovementItemsByPriorityRule(validPriorityRuleDefinition, validImprovementItems);
-      
-      // 正常系の結果検証
-      expect(result).toBeDefined();
-      expect(Array.isArray(result.selectedItems)).toBe(true);
-      expect(result.selectedItems.length).toBeGreaterThan(0);
-      
-      // 優先度が高い項目 (impact: high かつ frequency >= 3) が選別されていることを確認
-      const highPriorityItems = result.selectedItems.filter(
-        (item: any) => item.impact === 'high' && item.frequency >= 3
-      );
-      expect(highPriorityItems.length).toBe(2); // ITEM001 と ITEM003 が選別される
-    } catch (error) {
-      fail(`正常系で予期しないエラーが発生: ${error}`);
-    }
+    // データ型不整合（金額が文字列）
+    const invalidData_wrongType = {
+      customer_name: "顧客A",
+      contact_date: "2024-01-15",
+      outcome_type: "appointment",
+      appointment_status: "confirmed",
+      amount: "50000",
+    };
+
+    const validationResult_type = validateSalesData(invalidData_wrongType);
+    expect(validationResult_type.is_valid).toBe(false);
+    expect(validationResult_type.error_message).toMatch(/金額/);
+    expect(validationResult_type.can_proceed_to_billing).toBe(false);
+
+    // 値の範囲外（金額が負数）
+    const invalidData_outOfRange = {
+      customer_name: "顧客A",
+      contact_date: "2024-01-15",
+      outcome_type: "appointment",
+      appointment_status: "confirmed",
+      amount: -10000,
+    };
+
+    const validationResult_range = validateSalesData(invalidData_outOfRange);
+    expect(validationResult_range.is_valid).toBe(false);
+    expect(validationResult_range.error_message).toMatch(/範囲/);
+    expect(validationResult_range.can_proceed_to_billing).toBe(false);
+
+    // 不正な列挙値（outcome_type が定義外）
+    const invalidData_invalidEnum = {
+      customer_name: "顧客A",
+      contact_date: "2024-01-15",
+      outcome_type: "invalid_type",
+      appointment_status: "confirmed",
+      amount: 50000,
+    };
+
+    const validationResult_enum = validateSalesData(invalidData_invalidEnum);
+    expect(validationResult_enum.is_valid).toBe(false);
+    expect(validationResult_enum.error_message).toMatch(/成果種別/);
+    expect(validationResult_enum.can_proceed_to_billing).toBe(false);
+
+    // 修正後のデータ（全項目が正常）
+    const validData = {
+      customer_name: "顧客A",
+      contact_date: "2024-01-15",
+      outcome_type: "appointment",
+      appointment_status: "confirmed",
+      amount: 50000,
+    };
+
+    const validationResult_success = validateSalesData(validData);
+    expect(validationResult_success.is_valid).toBe(true);
+    expect(validationResult_success.error_message).toBe("");
+    expect(validationResult_success.can_proceed_to_billing).toBe(true);
+
+    // 進行ボタン有効化の確認
+    expect(validationResult_success.can_proceed_to_billing).toBe(true);
   });
 });

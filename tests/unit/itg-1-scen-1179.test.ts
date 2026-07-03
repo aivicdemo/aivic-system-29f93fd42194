@@ -1,115 +1,139 @@
-import { determineReportDistributionSuccess } from '../../src/logic/it-1-1-1';
+import { validateSalesDataStructure } from "../../src/logic/it-1781935279444-2-2-1";
 
-describe('営業成果データの自動検証ルール定義と異常検出機能', () => {
-  // SCEN-1179
-  test('レポートが全顧客に正常配信された場合、配信成功と判定される', () => {
-    // テストデータ: 複数顧客レコード（3件以上）
-    const customers = [
-      {
-        customer_id: 'CUST001',
-        customer_name: '顧客A',
-        email: 'contact_a@example.com',
-        contract_status: 'active',
+describe("営業データの完全性・正確性を自動検証し、不足データ・誤りを検出・通知する機能", () => {
+  // SCEN-1179: [normal] 検証結果と根拠資料の構造化整理機能 - 計算ロジックの根拠を含めて検証結果を構造化できる
+  test("検証結果が計算ロジックの根拠を含めて構造化され、入力パラメータから最終結果まで階層的に整理され、JSON形式で正しくシリアライズされ、外部システムとの連携が可能な状態で保存されること", () => {
+    // 入力: 単価と数量を含む営業データ検証ケース
+    const validationInput = {
+      caseId: "CASE-20240115-001",
+      validationType: "calculateRevenue",
+      inputParameters: {
+        unitPrice: 5000,
+        quantity: 12,
       },
-      {
-        customer_id: 'CUST002',
-        customer_name: '顧客B',
-        email: 'contact_b@example.com',
-        contract_status: 'active',
-      },
-      {
-        customer_id: 'CUST003',
-        customer_name: '顧客C',
-        email: 'contact_c@example.com',
-        contract_status: 'active',
-      },
-    ];
-
-    // 各顧客に対するレポート配信ログ（全て成功）
-    const distribution_logs = [
-      {
-        log_id: 'LOG001',
-        customer_id: 'CUST001',
-        report_id: 'RPT202501001',
-        distribution_date: new Date('2025-01-31T09:00:00Z'),
-        delivery_status: 'success',
-        status_code: 200,
-        error_message: null,
-        retry_count: 0,
-      },
-      {
-        log_id: 'LOG002',
-        customer_id: 'CUST002',
-        report_id: 'RPT202501001',
-        distribution_date: new Date('2025-01-31T09:05:00Z'),
-        delivery_status: 'success',
-        status_code: 200,
-        error_message: null,
-        retry_count: 0,
-      },
-      {
-        log_id: 'LOG003',
-        customer_id: 'CUST003',
-        report_id: 'RPT202501001',
-        distribution_date: new Date('2025-01-31T09:10:00Z'),
-        delivery_status: 'success',
-        status_code: 200,
-        error_message: null,
-        retry_count: 0,
-      },
-    ];
-
-    // レポート配信実行
-    const distribution_input = {
-      customers,
-      distribution_logs,
-      report_id: 'RPT202501001',
-      distribution_period_start: new Date('2025-01-31T00:00:00Z'),
-      distribution_period_end: new Date('2025-01-31T23:59:59Z'),
+      calculationLogic: "revenue = unitPrice * quantity",
     };
 
-    // 配信成功判定ロジックを実行
-    const result = determineReportDistributionSuccess(distribution_input);
+    // 実行: 検証結果を構造化データとして取得
+    const validationResult = validateSalesDataStructure(validationInput);
 
-    // 配信成功フラグが『true』に設定されたことを検証
-    expect(result.is_distribution_success).toBe(true);
-
-    // 配信成功ステータス
-    expect(result.distribution_status).toBe('全配信成功');
-
-    // 全顧客へのレポート配信が完了
-    expect(result.total_customers).toBe(3);
-    expect(result.successful_distributions).toBe(3);
-    expect(result.failed_distributions).toBe(0);
-
-    // 配信成功率が 100%
-    expect(result.success_rate).toBe(100);
-
-    // 配信成功に関連するアラートが生成されていない
-    expect(result.alerts).toEqual([]);
-
-    // 各顧客の配信ステータスが『成功』
-    expect(result.customer_delivery_statuses).toEqual([
-      {
-        customer_id: 'CUST001',
-        delivery_status: 'success',
-        error_message: null,
+    // 期待値: 計算ロジックの各ステップが根拠として記録された構造化データ
+    expect(validationResult).toEqual({
+      caseId: "CASE-20240115-001",
+      validationType: "calculateRevenue",
+      validationStatus: "success",
+      structuredResult: {
+        calculationFormula: "revenue = unitPrice * quantity",
+        inputParameters: {
+          unitPrice: 5000,
+          quantity: 12,
+        },
+        intermediateResults: [
+          {
+            step: 1,
+            description: "単価パラメータ確認",
+            value: 5000,
+            unit: "円",
+          },
+          {
+            step: 2,
+            description: "数量パラメータ確認",
+            value: 12,
+            unit: "件",
+          },
+          {
+            step: 3,
+            description: "乗算処理実行",
+            expression: "5000 * 12",
+            value: 60000,
+            unit: "円",
+          },
+        ],
+        finalResult: {
+          value: 60000,
+          unit: "円",
+          description: "売上金額",
+        },
+        validationBasis: {
+          dataCompleteness: true,
+          dataTypeValidation: true,
+          rangeValidation: true,
+          calculationAccuracy: true,
+        },
       },
-      {
-        customer_id: 'CUST002',
-        delivery_status: 'success',
-        error_message: null,
+      jsonSerialized: {
+        serialized: true,
+        format: "application/json",
+        hierarchyLevels: 4,
+        leafNodeCount: 8,
       },
-      {
-        customer_id: 'CUST003',
-        delivery_status: 'success',
-        error_message: null,
+      externalIntegration: {
+        storageStatus: "persisted",
+        integrationType: "api_ready",
+        persistedAt: "2024-01-15T11:00:00Z",
+        externalSystemsReady: true,
       },
-    ]);
+    });
 
-    // 配信成功ログが記録されたことを確認
-    expect(result.completion_log).toBeDefined();
-    expect(result.completion_log.completion_timestamp).toBeTruthy();
-    expect(result.completion_log.completion_status).toBe('成功');
+    // 検証: 計算式の各ステップが根拠として正しく記録されていること
+    expect(validationResult.structuredResult.intermediateResults).toHaveLength(
+      3
+    );
+    expect(validationResult.structuredResult.intermediateResults[0].step).toBe(
+      1
+    );
+    expect(validationResult.structuredResult.intermediateResults[0].value).toBe(
+      5000
+    );
+    expect(validationResult.structuredResult.intermediateResults[1].step).toBe(
+      2
+    );
+    expect(validationResult.structuredResult.intermediateResults[1].value).toBe(
+      12
+    );
+    expect(validationResult.structuredResult.intermediateResults[2].step).toBe(
+      3
+    );
+    expect(validationResult.structuredResult.intermediateResults[2].value).toBe(
+      60000
+    );
+
+    // 検証: 最終結果が正確に計算されていること
+    expect(validationResult.structuredResult.finalResult.value).toBe(60000);
+    expect(validationResult.structuredResult.finalResult.description).toBe(
+      "売上金額"
+    );
+
+    // 検証: JSON形式でシリアライズされていること
+    expect(validationResult.jsonSerialized.serialized).toBe(true);
+    expect(validationResult.jsonSerialized.format).toBe("application/json");
+    expect(validationResult.jsonSerialized.hierarchyLevels).toBe(4);
+
+    // 検証: 外部システムとの連携が可能な状態で保存されていること
+    expect(validationResult.externalIntegration.storageStatus).toBe(
+      "persisted"
+    );
+    expect(validationResult.externalIntegration.integrationType).toBe(
+      "api_ready"
+    );
+    expect(validationResult.externalIntegration.externalSystemsReady).toBe(
+      true
+    );
+
+    // 検証: データの完全性・正確性がすべて確認されていること
+    expect(validationResult.structuredResult.validationBasis).toEqual({
+      dataCompleteness: true,
+      dataTypeValidation: true,
+      rangeValidation: true,
+      calculationAccuracy: true,
+    });
+
+    // 検証: 計算ロジックが根拠資料として正しく記録されていること
+    expect(
+      validationResult.structuredResult.calculationFormula
+    ).toContain("unitPrice");
+    expect(
+      validationResult.structuredResult.calculationFormula
+    ).toContain("quantity");
   });
 });

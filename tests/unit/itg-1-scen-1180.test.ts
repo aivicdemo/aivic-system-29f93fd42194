@@ -1,62 +1,98 @@
-import { determineDistributionStatus } from "../../src/logic/it-1-1-1";
+import { validateAndCategorizeVerificationResult } from "../../src/logic/it-1781935279444-2-2-1";
 
-describe("営業成果データの自動検証ルール定義と異常検出機能", () => {
-  // SCEN-1180: [error] 配信成功・失敗判定・アラート管理 - 一部顧客への配信に失敗した場合、失敗として判定され再試行フラグが立つ
-  test("複数顧客への配信タスクで一部顧客が失敗した場合、全体が失敗と判定され再試行フラグが立つ", () => {
-    const distributionTask = {
-      taskId: "DIST-2024-001",
-      targetCustomers: [
-        {
-          customerId: "CUST-001",
-          customerName: "顧客A",
-          distributionStatus: "success",
-          retryFlag: false,
-        },
-        {
-          customerId: "CUST-002",
-          customerName: "顧客B",
-          distributionStatus: "failed",
-          retryFlag: false,
-        },
-        {
-          customerId: "CUST-003",
-          customerName: "顧客C",
-          distributionStatus: "success",
-          retryFlag: false,
-        },
+describe("検証結果と根拠資料の構造化整理", () => {
+  // SCEN-1180
+  test("判定内容が正確・誤り・要確認の3種類で正しく分類される", () => {
+    // === Test Data Setup ===
+    const accurateCase = {
+      salesDataValue: 150,
+      contractCondition: 150,
+      reportedValue: 150,
+      previousMonthValue: 140,
+      supportingDocuments: [
+        { type: "sales_record", id: "SR-001", timestamp: "2024-01-15T10:00:00Z" },
+        { type: "contract", id: "CT-001", timestamp: "2024-01-01T00:00:00Z" },
       ],
-      executedAt: "2024-01-15T09:00:00Z",
     };
 
-    const result = determineDistributionStatus(distributionTask);
+    const errorCase = {
+      salesDataValue: 150,
+      contractCondition: 150,
+      reportedValue: 120,
+      previousMonthValue: 140,
+      supportingDocuments: [
+        { type: "sales_record", id: "SR-002", timestamp: "2024-01-15T10:30:00Z" },
+        { type: "contract", id: "CT-001", timestamp: "2024-01-01T00:00:00Z" },
+      ],
+    };
 
-    // 期待結果：全体の配信結果が『失敗』と判定される
-    expect(result.overallStatus).toBe("failed");
+    const needsConfirmationCase = {
+      salesDataValue: 150,
+      contractCondition: 150,
+      reportedValue: 150,
+      previousMonthValue: 100,
+      supportingDocuments: [
+        { type: "sales_record", id: "SR-003", timestamp: "2024-01-15T11:00:00Z" },
+        { type: "proposal", id: "PRP-001", timestamp: "2024-01-10T09:00:00Z" },
+        { type: "email", id: "EM-001", timestamp: "2024-01-12T14:30:00Z" },
+      ],
+    };
 
-    // 期待結果：失敗した顧客レコードに再試行フラグが『True』で立つ
-    const failedCustomer = result.customerResults.find(
-      (c: any) => c.customerId === "CUST-002"
+    // === Verify "Accurate" Classification ===
+    const accurateResult = validateAndCategorizeVerificationResult(accurateCase);
+    expect(accurateResult.classification).toBe("正確");
+    expect(accurateResult.matchPercentage).toBe(100);
+    expect(accurateResult.supportingDocuments).toEqual([
+      { type: "sales_record", id: "SR-001", timestamp: "2024-01-15T10:00:00Z" },
+      { type: "contract", id: "CT-001", timestamp: "2024-01-01T00:00:00Z" },
+    ]);
+    expect(accurateResult.discrepancyReason).toBe(null);
+
+    // === Verify "Error" Classification ===
+    const errorResult = validateAndCategorizeVerificationResult(errorCase);
+    expect(errorResult.classification).toBe("誤り");
+    expect(errorResult.matchPercentage).toBe(80);
+    expect(errorResult.discrepancyAmount).toBe(-30);
+    expect(errorResult.discrepancyReason).toBe("報告値が売上データと不一致");
+    expect(errorResult.supportingDocuments).toEqual([
+      { type: "sales_record", id: "SR-002", timestamp: "2024-01-15T10:30:00Z" },
+      { type: "contract", id: "CT-001", timestamp: "2024-01-01T00:00:00Z" },
+    ]);
+
+    // === Verify "Needs Confirmation" Classification ===
+    const confirmationResult = validateAndCategorizeVerificationResult(needsConfirmationCase);
+    expect(confirmationResult.classification).toBe("要確認");
+    expect(confirmationResult.matchPercentage).toBe(100);
+    expect(confirmationResult.anomalyIndicator).toBe(true);
+    expect(confirmationResult.anomalyType).toBe("前月比上昇");
+    expect(confirmationResult.anomalyPercentage).toBe(50);
+    expect(confirmationResult.supportingDocuments).toEqual([
+      { type: "sales_record", id: "SR-003", timestamp: "2024-01-15T11:00:00Z" },
+      { type: "proposal", id: "PRP-001", timestamp: "2024-01-10T09:00:00Z" },
+      { type: "email", id: "EM-001", timestamp: "2024-01-12T14:30:00Z" },
+    ]);
+
+    // === Verify All Classifications Are Consistent ===
+    expect([accurateResult.classification, errorResult.classification, confirmationResult.classification]).toEqual(
+      expect.arrayContaining(["正確", "誤り", "要確認"]),
     );
-    expect(failedCustomer.retryFlag).toBe(true);
 
-    // 期待結果：成功した顧客には再試行フラグが立たない
-    const successCustomers = result.customerResults.filter(
-      (c: any) => c.distributionStatus === "success"
-    );
-    successCustomers.forEach((customer: any) => {
-      expect(customer.retryFlag).toBe(false);
+    // === Verify Supporting Documents Structure ===
+    [accurateResult, errorResult, confirmationResult].forEach((result) => {
+      expect(result.supportingDocuments).toBeDefined();
+      expect(Array.isArray(result.supportingDocuments)).toBe(true);
+      result.supportingDocuments.forEach((doc: any) => {
+        expect(doc).toHaveProperty("type");
+        expect(doc).toHaveProperty("id");
+        expect(doc).toHaveProperty("timestamp");
+      });
     });
 
-    // 期待結果：アラート管理画面に『配信失敗-再試行待機中』というアラートが自動生成される
-    expect(result.alertGenerated).toBe(true);
-    expect(result.alertMessage).toBe("配信失敗-再試行待機中");
-
-    // 期待結果：再試行フラグ付きの顧客は次回の再試行バッチ処理の対象となる
-    const retryTargets = result.customerResults.filter(
-      (c: any) => c.retryFlag === true
-    );
-    expect(retryTargets.length).toBe(1);
-    expect(retryTargets[0].customerId).toBe("CUST-002");
-    expect(result.nextRetryBatchEligible).toBe(true);
+    // === Verify Result Structure Consistency ===
+    expect(accurateResult).toHaveProperty("classification");
+    expect(accurateResult).toHaveProperty("matchPercentage");
+    expect(accurateResult).toHaveProperty("supportingDocuments");
+    expect(errorResult).toHaveProperty("discrepancyReason");
+    expect(confirmationResult).toHaveProperty("anomalyIndicator");
   });
 });

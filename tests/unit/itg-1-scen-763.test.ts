@@ -1,80 +1,96 @@
-import { validateContractDocumentChange } from "../../src/logic/it-1781935279444-2-1-1";
+import { determineValidVersion } from '../../src/logic/it-1781935279444-2-1-1';
 
-describe("営業データ入力時の品質検証ルール定義・実行機能", () => {
-  test("SCEN-763: 契約書・提案資料変更内容妥当性判定機能 - 適用対象顧客・案件が不正または存在しない場合にエラーとして検出される", () => {
-    // テストケース1: 存在しない顧客IDを含む契約書変更内容
-    const non_existent_customer_id = "CUST-99999999";
-    const contract_change_data_invalid_customer = {
-      document_type: "contract",
-      customer_id: non_existent_customer_id,
-      project_id: "PROJ-001",
-      change_content: "契約金額の変更",
-      change_date: "2024-01-15",
-    };
+describe('顧客別・案件別の有効版自動判定機能', () => {
+  test('SCEN-763: 有効期限が切れたバージョンは有効版として判定されない', () => {
+    // テストデータ: 複数バージョン（有効期限が異なる）
+    const customerId = 'CUST-001';
+    const projectId = 'PROJ-001';
+    const currentDate = new Date('2024-06-15T00:00:00Z');
 
-    expect(() =>
-      validateContractDocumentChange(contract_change_data_invalid_customer)
-    ).toThrow(/顧客/);
+    const versions = [
+      {
+        versionId: 'VER-001',
+        customerId,
+        projectId,
+        documentType: 'contract',
+        versionNumber: 1,
+        effectiveStartDate: new Date('2023-01-01T00:00:00Z'),
+        effectiveEndDate: new Date('2024-03-31T23:59:59Z'), // 期限切れ
+        createdAt: new Date('2023-01-01T00:00:00Z'),
+        createdBy: 'user-a',
+        isActive: true,
+      },
+      {
+        versionId: 'VER-002',
+        customerId,
+        projectId,
+        documentType: 'contract',
+        versionNumber: 2,
+        effectiveStartDate: new Date('2024-04-01T00:00:00Z'),
+        effectiveEndDate: new Date('2025-12-31T23:59:59Z'), // 有効期間内
+        createdAt: new Date('2024-04-01T00:00:00Z'),
+        createdBy: 'user-b',
+        isActive: true,
+      },
+      {
+        versionId: 'VER-003',
+        customerId,
+        projectId,
+        documentType: 'contract',
+        versionNumber: 3,
+        effectiveStartDate: new Date('2024-05-15T00:00:00Z'),
+        effectiveEndDate: new Date('2026-06-30T23:59:59Z'), // 有効期間内（最新）
+        createdAt: new Date('2024-05-15T00:00:00Z'),
+        createdBy: 'user-c',
+        isActive: true,
+      },
+    ];
 
-    // テストケース2: 存在しない案件IDを含む提案資料変更内容
-    const non_existent_project_id = "PROJ-99999999";
-    const proposal_change_data_invalid_project = {
-      document_type: "proposal",
-      customer_id: "CUST-001",
-      project_id: non_existent_project_id,
-      change_content: "提案内容の修正",
-      change_date: "2024-01-15",
-    };
-
-    expect(() =>
-      validateContractDocumentChange(proposal_change_data_invalid_project)
-    ).toThrow(/案件/);
-
-    // テストケース3: 不正なフォーマットの顧客IDを含むデータ
-    const malformed_customer_id = "INVALID-ID-FORMAT-12345";
-    const contract_change_data_malformed_customer = {
-      document_type: "contract",
-      customer_id: malformed_customer_id,
-      project_id: "PROJ-001",
-      change_content: "契約金額の変更",
-      change_date: "2024-01-15",
-    };
-
-    expect(() =>
-      validateContractDocumentChange(
-        contract_change_data_malformed_customer
-      )
-    ).toThrow(/形式/);
-
-    // テストケース4: 不正なフォーマットの案件IDを含むデータ
-    const malformed_project_id = "MALFORMED_PROJECT";
-    const proposal_change_data_malformed_project = {
-      document_type: "proposal",
-      customer_id: "CUST-001",
-      project_id: malformed_project_id,
-      change_content: "提案内容の修正",
-      change_date: "2024-01-15",
-    };
-
-    expect(() =>
-      validateContractDocumentChange(proposal_change_data_malformed_project)
-    ).toThrow(/形式/);
-
-    // テストケース5: 正常な顧客ID・案件IDで成功することを確認
-    const valid_contract_change_data = {
-      document_type: "contract",
-      customer_id: "CUST-001",
-      project_id: "PROJ-001",
-      change_content: "契約金額の変更",
-      change_date: "2024-01-15",
-    };
-
-    const result = validateContractDocumentChange(valid_contract_change_data);
-    expect(result).toEqual({
-      is_valid: true,
-      customer_id: "CUST-001",
-      project_id: "PROJ-001",
-      errors: [],
+    // 有効版自動判定実行
+    const result = determineValidVersion({
+      customerId,
+      projectId,
+      versions,
+      evaluationDate: currentDate,
     });
+
+    // 期待結果の検証
+    // 1. 期限切れバージョン（VER-001）は有効版として判定されない
+    expect(result.validVersions.some((v) => v.versionId === 'VER-001')).toBe(
+      false
+    );
+
+    // 2. 有効期間内のバージョン（VER-002, VER-003）は有効版として判定される
+    expect(result.validVersions.map((v) => v.versionId)).toContain('VER-002');
+    expect(result.validVersions.map((v) => v.versionId)).toContain('VER-003');
+
+    // 3. 最新の有効期限内バージョン（VER-003）が最優先版として正確に選定される
+    expect(result.primaryVersion.versionId).toBe('VER-003');
+    expect(result.primaryVersion.effectiveEndDate).toEqual(
+      new Date('2026-06-30T23:59:59Z')
+    );
+
+    // 4. 除外判定の詳細情報を検証
+    const excludedVersion = result.exclusionLog.find(
+      (log) => log.versionId === 'VER-001'
+    );
+    expect(excludedVersion).toBeDefined();
+    expect(excludedVersion?.reason).toMatch(/有効期限切れ/);
+    expect(excludedVersion?.excludedAt).toBeDefined();
+
+    // 5. 有効版リストの数が正確に2（VER-002, VER-003）であることを確認
+    expect(result.validVersions).toHaveLength(2);
+
+    // 6. 最優先版が有効版リスト内に含まれていることを確認
+    expect(result.validVersions.some((v) => v.versionId === 'VER-003')).toBe(
+      true
+    );
+
+    // 7. システムログに判定結果が記録されていることを確認
+    expect(result.systemLog).toBeDefined();
+    expect(result.systemLog.evaluatedAt).toEqual(currentDate);
+    expect(result.systemLog.totalVersionsEvaluated).toBe(3);
+    expect(result.systemLog.validVersionCount).toBe(2);
+    expect(result.systemLog.excludedVersionCount).toBe(1);
   });
 });

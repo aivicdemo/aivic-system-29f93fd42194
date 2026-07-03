@@ -1,135 +1,78 @@
-import { detectExceptionCase, judgeHandbookAddition } from '../../src/logic/it-1781935279444-2-1-1';
+import { detectBillingRuleContradiction } from '../../src/logic/it-1781935279444-2-1-1';
 
 describe('営業データ入力時の品質検証ルール定義・実行機能', () => {
-  test('SCEN-991: 例外ケース検出と手順書への追加判定 - 既存手順書では対応不可の新しい請求例外ケースが正確に検出される', () => {
-    // ========== 前提: 新しい請求例外ケース（既存手順書で未対応）をテストデータとして準備 ==========
-    const existingHandbookCases = [
-      { caseId: 'CASE-001', description: '基本料金計算', applicableScenarios: ['standard_billing'] },
-      { caseId: 'CASE-002', description: '割引適用ルール', applicableScenarios: ['discount_10_percent'] },
-      { caseId: 'CASE-003', description: '最小請求額チェック', applicableScenarios: ['minimum_charge'] },
-    ];
-
-    const newBillingData = {
-      customerId: 'CUST-2024-NEW-001',
-      contractId: 'CONTRACT-2024-003',
-      serviceType: 'premium_service',
-      billingAmount: 15000,
-      discountRate: 0,
-      contractStartDate: '2024-01-01',
-      contractEndDate: '2024-12-31',
-      serviceUsageQuantity: 150,
-      appliedDiscountType: 'volume_tiered_discount_15pct_over_100units',
-      expectedBillingAmount: 12750,
-      actualBillingAmount: 12750,
-      billingCycle: 'monthly',
-      invoiceGenerationDate: '2024-02-01T09:00:00Z',
+  // SCEN-991: [error] 請求ルール変更時の遡及適用判定機能 - 変更前の契約に基づく請求データとの矛盾が検出される
+  test('should detect contradiction when retroactive billing rule change is applied to past contract period', () => {
+    const legacyBillingRule = {
+      ruleId: 'rule_2024_01',
+      appliedPeriodStart: '2024-01-01',
+      appliedPeriodEnd: '2024-03-31',
+      baseCharge: 50000,
+      performanceBonus: 10000,
+      discountRate: 0.1,
     };
 
-    // ========== トリガー: 例外ケース検出エンジンを実行 ==========
-    const detectionResult = detectExceptionCase({
-      billingData: newBillingData,
-      existingCases: existingHandbookCases,
-      detectionTimestamp: '2024-02-01T09:15:30Z',
-    });
-
-    // ========== 結果検証: 例外ケースが正確に検出されること ==========
-    expect(detectionResult).toEqual(
-      expect.objectContaining({
-        isExceptionDetected: true,
-        exceptionCaseId: 'CASE-NEW-004',
-        exceptionDescription: 'volume_tiered_discount_15pct_over_100units',
-        appliedScenario: 'volume_tiered_discount',
-        detectionTimestamp: '2024-02-01T09:15:30Z',
-        detectionStatus: 'detected',
-        billingDataSnapshot: expect.objectContaining({
-          customerId: 'CUST-2024-NEW-001',
-          contractId: 'CONTRACT-2024-003',
-          serviceType: 'premium_service',
-          appliedDiscountType: 'volume_tiered_discount_15pct_over_100units',
-          serviceUsageQuantity: 150,
-          actualBillingAmount: 12750,
-        }),
-      })
-    );
-
-    // ========== 結果検証: 検出された例外ケースが既存手順書に対応していないことを確認 ==========
-    const handbookCaseIds = existingHandbookCases.map((c) => c.caseId);
-    expect(handbookCaseIds).not.toContain(detectionResult.exceptionCaseId);
-    expect(detectionResult.isHandbookCovered).toBe(false);
-
-    // ========== トリガー: 手順書追加判定フローを実行 ==========
-    const handbookAdditionJudgment = judgeHandbookAddition({
-      exceptionCase: detectionResult,
-      existingHandbook: existingHandbookCases,
-      judgmentTimestamp: '2024-02-01T09:16:00Z',
-      priorityLevel: 'high',
-    });
-
-    // ========== 結果検証: 例外ケースが手順書追加対象として正しく判定されること ==========
-    expect(handbookAdditionJudgment).toEqual(
-      expect.objectContaining({
-        handbookAdditionRequired: true,
-        additionTargetJudgment: 'add_to_handbook',
-        exceptionCaseId: 'CASE-NEW-004',
-        exceptionDescription: 'volume_tiered_discount_15pct_over_100units',
-        judgmentTimestamp: '2024-02-01T09:16:00Z',
-        priorityForAddition: 'high',
-        recommendedHandbookSection: 'discount_rules',
-        estimatedImplementationImpact: 'medium',
-      })
-    );
-
-    // ========== 結果検証: 検出ログおよび判定結果が正確に記録されること ==========
-    const detectionLog = {
-      logId: 'LOG-2024-02-01-001',
-      eventType: 'exception_case_detection_and_handbook_judgment',
-      detectionTimestamp: '2024-02-01T09:15:30Z',
-      judgmentTimestamp: '2024-02-01T09:16:00Z',
-      customerId: newBillingData.customerId,
-      contractId: newBillingData.contractId,
-      exceptionCaseId: detectionResult.exceptionCaseId,
-      exceptionDescription: detectionResult.exceptionDescription,
-      detectionStatus: 'detected',
-      isHandbookCovered: false,
-      handbookAdditionRequired: true,
-      additionTargetJudgment: 'add_to_handbook',
-      priorityLevel: 'high',
-      recordingStatus: 'recorded',
+    const legacyBillingData = {
+      contractId: 'contract_abc123',
+      billingMonth: '2024-02',
+      appliedRuleId: 'rule_2024_01',
+      baseAmount: 50000,
+      bonusAmount: 10000,
+      discountAmount: 6000,
+      totalBillingAmount: 54000,
     };
 
-    expect(detectionLog).toEqual(
-      expect.objectContaining({
-        logId: expect.stringMatching(/^LOG-\d{4}-\d{2}-\d{2}-\d{3}$/),
-        eventType: 'exception_case_detection_and_handbook_judgment',
-        detectionTimestamp: '2024-02-01T09:15:30Z',
-        judgmentTimestamp: '2024-02-01T09:16:00Z',
-        customerId: 'CUST-2024-NEW-001',
-        contractId: 'CONTRACT-2024-003',
-        exceptionCaseId: 'CASE-NEW-004',
-        exceptionDescription: 'volume_tiered_discount_15pct_over_100units',
-        detectionStatus: 'detected',
-        isHandbookCovered: false,
-        handbookAdditionRequired: true,
-        additionTargetJudgment: 'add_to_handbook',
-        priorityLevel: 'high',
-        recordingStatus: 'recorded',
-      })
-    );
+    const newBillingRule = {
+      ruleId: 'rule_2024_02',
+      appliedPeriodStart: '2024-02-01',
+      appliedPeriodEnd: '2024-12-31',
+      baseCharge: 60000,
+      performanceBonus: 15000,
+      discountRate: 0.15,
+      retroactiveApplied: true,
+      retroactiveStartDate: '2024-02-01',
+    };
 
-    // ========== 総合検証: 検出ロジックが例外内容を正確に特定していること ==========
-    expect(detectionResult.exceptionCaseId).not.toEqual('CASE-001');
-    expect(detectionResult.exceptionCaseId).not.toEqual('CASE-002');
-    expect(detectionResult.exceptionCaseId).not.toEqual('CASE-003');
-    expect(detectionResult.exceptionCaseId).toBe('CASE-NEW-004');
+    const retroactiveBillingCalculation = {
+      contractId: 'contract_abc123',
+      billingMonth: '2024-02',
+      appliedRuleId: 'rule_2024_02',
+      baseAmount: 60000,
+      bonusAmount: 15000,
+      discountAmount: 11250,
+      totalBillingAmount: 63750,
+    };
 
-    // ========== 総合検証: 手順書追加判定が『追加対象』として正しく判定されたこと ==========
-    expect(handbookAdditionJudgment.handbookAdditionRequired).toBe(true);
-    expect(handbookAdditionJudgment.additionTargetJudgment).toBe('add_to_handbook');
-    expect(handbookAdditionJudgment.priorityForAddition).toBe('high');
+    const result = detectBillingRuleContradiction({
+      legacyRule: legacyBillingRule,
+      legacyBillingData,
+      newRule: newBillingRule,
+      retroactiveBillingCalculation,
+      contractId: 'contract_abc123',
+      billingMonth: '2024-02',
+    });
 
-    // ========== 総合検証: ログ記録が成功し、タイムスタンプが正確であること ==========
-    expect(detectionLog.recordingStatus).toBe('recorded');
-    expect(detectionLog.detectionTimestamp).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
-    expect(detectionLog.judgmentTimestamp).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+    expect(result.hasContradiction).toBe(true);
+    expect(result.contradictionType).toBe('retroactive_amount_mismatch');
+    expect(result.previousAmount).toBe(54000);
+    expect(result.recalculatedAmount).toBe(63750);
+    expect(result.amountDifference).toBe(9750);
+    expect(result.affectedFields).toEqual([
+      'baseAmount',
+      'bonusAmount',
+      'discountAmount',
+      'totalBillingAmount',
+    ]);
+    expect(result.message).toMatch(/矛盾エラー/);
+    expect(result.message).toMatch(/遡及適用/);
+    expect(result.message).toMatch(/過去の請求データ/);
+    expect(result.details).toEqual({
+      previousRuleId: 'rule_2024_01',
+      newRuleId: 'rule_2024_02',
+      retroactiveStartDate: '2024-02-01',
+      contractPeriodStart: '2024-01-01',
+      contractPeriodEnd: '2024-03-31',
+      targetBillingMonth: '2024-02',
+    });
   });
 });

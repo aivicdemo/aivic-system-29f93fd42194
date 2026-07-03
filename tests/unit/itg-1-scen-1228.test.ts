@@ -1,84 +1,124 @@
-import { detectAndNotifySalesDataChange } from '../../src/logic/it-1-1-1';
+import { describe, test, expect, beforeEach, afterEach } from '@jest/globals';
+import { recordContractChangeAuditLog } from '../../src/logic/it-1781935279444-1-1-1';
 
-describe('営業成果データの自動検証ルール定義と異常検出機能', () => {
-  // SCEN-1228: [edge] 営業データ変更の自動検知・通知機能 - 通知先の顧客企業情報が登録されていない場合、通知準備がスキップされ警告ログが記録される
-  test('should skip notification preparation and log WARNING when customer enterprise info is missing', () => {
-    const salesDataChange = {
-      salesDataId: 'SD-20240115-001',
-      customerId: 'CUST-999',
-      changeType: 'AMOUNT_UPDATE',
-      previousAmount: 50000,
-      newAmount: 75000,
-      changedAt: new Date('2024-01-15T11:00:00Z'),
-      changedBy: 'operator-001',
+describe('営業データ項目のメタデータ管理機能 - 契約変更監査ログ自動記録', () => {
+  let mockDbConnection: any;
+  let mockAuditLogDb: any;
+  let transactionRolledBack: boolean;
+  let contractDataBeforeChange: any;
+
+  beforeEach(() => {
+    transactionRolledBack = false;
+    contractDataBeforeChange = {
+      contract_id: 'CONTRACT-12345',
+      customer_id: 'CUST-001',
+      monthly_fee: 100000,
+      contract_start_date: '2024-01-01',
+      contract_end_date: '2024-12-31',
+      service_type: 'BASIC',
+      status: 'ACTIVE',
     };
 
-    const customerEnterpriseRegistry = {
-      'CUST-001': {
-        customerId: 'CUST-001',
-        enterpriseName: 'Customer A Inc.',
-        contactEmail: 'contact@customera.co.jp',
-        isActive: true,
+    // Mock database connection for contract updates
+    mockDbConnection = {
+      beginTransaction: jest.fn().mockResolvedValue(true),
+      updateContract: jest.fn(async (contractData: any) => {
+        // Simulate successful contract update
+        return { success: true, updated_at: '2024-01-15T11:00:00Z' };
+      }),
+      rollback: jest.fn(async () => {
+        transactionRolledBack = true;
+      }),
+      commit: jest.fn().mockResolvedValue(true),
+      close: jest.fn().mockResolvedValue(true),
+    };
+
+    // Mock database connection for audit log (intentionally fails)
+    mockAuditLogDb = {
+      insertAuditLog: jest.fn(async (auditRecord: any) => {
+        // Simulate database connection error for audit log recording
+        throw new Error('監査ログデータベース接続エラー');
+      }),
+    };
+  });
+
+  afterEach(() => {
+    jest.clearAllMocks();
+  });
+
+  // SCEN-1228
+  test('契約変更時に監査ログ記録失敗でロールバック実行し変更前状態に復帰', async () => {
+    const changeDetails = {
+      contract_id: 'CONTRACT-12345',
+      customer_id: 'CUST-001',
+      changed_fields: {
+        monthly_fee: 150000, // Changed from 100000
       },
-      'CUST-002': {
-        customerId: 'CUST-002',
-        enterpriseName: 'Customer B Corp.',
-        contactEmail: 'contact@customerb.co.jp',
-        isActive: true,
+      change_reason: '割引終了に伴う料金改定',
+      changed_by: 'OP-USER-001',
+      changed_at: new Date('2024-01-15T11:00:00Z'),
+    };
+
+    const auditLogRecord = {
+      audit_log_id: 'AUDIT-LOG-001',
+      contract_id: changeDetails.contract_id,
+      change_type: 'UPDATE',
+      change_details: changeDetails.changed_fields,
+      change_reason: changeDetails.change_reason,
+      changed_by: changeDetails.changed_by,
+      changed_at: changeDetails.changed_at.toISOString(),
+      previous_values: {
+        monthly_fee: contractDataBeforeChange.monthly_fee,
+      },
+      new_values: {
+        monthly_fee: changeDetails.changed_fields.monthly_fee,
       },
     };
 
-    const mockLogs: { level: string; message: string; timestamp: Date }[] = [];
-    const mockSalesDataStorage: typeof salesDataChange[] = [];
+    // Call function with mocked connections
+    let thrownError: any = null;
+    let result: any = null;
 
-    const logCapture = (level: string, message: string) => {
-      mockLogs.push({
-        level,
-        message,
-        timestamp: new Date('2024-01-15T11:00:00Z'),
-      });
-    };
+    try {
+      result = await recordContractChangeAuditLog(
+        changeDetails,
+        contractDataBeforeChange,
+        mockDbConnection,
+        mockAuditLogDb
+      );
+    } catch (error) {
+      thrownError = error;
+    }
 
-    const saveData = (data: typeof salesDataChange) => {
-      mockSalesDataStorage.push(data);
-    };
+    // Assert 1: Error message displayed for audit log failure
+    expect(thrownError).not.toBeNull();
+    expect(thrownError?.message).toMatch(/監査ログ/);
 
-    const result = detectAndNotifySalesDataChange({
-      salesDataChange,
-      customerEnterpriseRegistry,
-      onLog: logCapture,
-      onSave: saveData,
+    // Assert 2: Transaction rollback was executed
+    expect(transactionRolledBack).toBe(true);
+    expect(mockDbConnection.rollback).toHaveBeenCalled();
+
+    // Assert 3: Contract data was NOT updated (rollback occurred before commit)
+    expect(mockDbConnection.commit).not.toHaveBeenCalled();
+
+    // Assert 4: Audit log insert was attempted but failed
+    expect(mockAuditLogDb.insertAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        contract_id: 'CONTRACT-12345',
+        change_type: 'UPDATE',
+        changed_by: 'OP-USER-USER-001',
+      })
+    );
+
+    // Assert 5: System returned to pre-change state (no update committed)
+    expect(result).toEqual({
+      success: false,
+      error_message: '監査ログの記録に失敗しました。変更は保存されていません',
+      rolled_back: true,
+      contract_id: 'CONTRACT-12345',
     });
 
-    // 1) 通知準備処理がスキップされ、メール送信などの通知処理が実行されない
-    expect(result.notificationSkipped).toBe(true);
-    expect(result.emailSent).toBe(false);
-    expect(result.notificationAttempted).toBe(false);
-
-    // 2) システムログに警告レベルのログが記録される
-    const warningLogs = mockLogs.filter((log) => log.level === 'WARNING');
-    expect(warningLogs.length).toBeGreaterThan(0);
-
-    // 3) ログメッセージに通知先顧客企業未登録の原因が明記される
-    const relevantWarning = warningLogs.find(
-      (log) =>
-        log.message.includes('通知先') &&
-        (log.message.includes('未登録') ||
-          log.message.includes('登録されていない') ||
-          log.message.includes('CUST-999'))
-    );
-    expect(relevantWarning).toBeDefined();
-    expect(relevantWarning?.message).toMatch(/CUST-999|未登録|登録されていない/);
-
-    // 4) 営業データ自体は正常に保存される
-    expect(mockSalesDataStorage.length).toBe(1);
-    expect(mockSalesDataStorage[0].salesDataId).toBe('SD-20240115-001');
-    expect(mockSalesDataStorage[0].newAmount).toBe(75000);
-    expect(mockSalesDataStorage[0].customerId).toBe('CUST-999');
-
-    // 5) システムエラーや例外は発生しない
-    expect(result.hasError).toBe(false);
-    expect(result.exceptionOccurred).toBe(false);
-    expect(result.salesDataPersisted).toBe(true);
+    // Assert 6: Verify contract data remains unchanged in system state
+    expect(mockDbConnection.updateContract).not.toHaveBeenCalled();
   });
 });

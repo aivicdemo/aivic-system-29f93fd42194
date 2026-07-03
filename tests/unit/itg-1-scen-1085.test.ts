@@ -1,89 +1,121 @@
-import { validateNamingRuleDefinition } from "../../src/logic/it-1-br-1781935279444-1-2-1";
+import { detectAndClassifyExceptionCases } from '../../src/logic/it-1781935279444-2-1-1';
 
-describe("月次サマリーテンプレートの定義・管理機能", () => {
-  // SCEN-1085: [error] ドキュメント命名規則・フォルダ構成自動適用機能 - 命名規則定義が不完全な場合にエラーが返される
-  test("命名規則定義が不完全な場合にエラーが返される", () => {
-    const incompleteNamingRuleDefinition = {
-      prefix: "DOC",
-      suffix: "",
-      folderStructure: "YYYY/MM",
-      dateFormat: "YYYYMMDD",
-    };
+describe('営業データ検証・異常検出機能', () => {
+  // SCEN-1085
+  test('新入スタッフの実行結果から発見された例外ケースが優先度順に分類される', () => {
+    const validation_results = [
+      {
+        record_id: 'rec_001',
+        field_name: 'contact_date',
+        error_type: 'format_error',
+        error_message: '日付形式が不正です',
+        severity: 'high',
+        affected_field: 'contact_date',
+      },
+      {
+        record_id: 'rec_002',
+        field_name: 'amount',
+        error_type: 'invalid_amount',
+        error_message: '金額が負の値です',
+        severity: 'high',
+        affected_field: 'amount',
+      },
+      {
+        record_id: 'rec_003',
+        field_name: 'customer_name',
+        error_type: 'duplicate_record',
+        error_message: '同一顧客の重複レコードです',
+        severity: 'medium',
+        affected_field: 'customer_name',
+      },
+      {
+        record_id: 'rec_004',
+        field_name: 'service_type',
+        error_type: 'missing_required_field',
+        error_message: '必須項目が入力されていません',
+        severity: 'low',
+        affected_field: 'service_type',
+      },
+      {
+        record_id: 'rec_005',
+        field_name: 'appointment_status',
+        error_type: 'invalid_enum_value',
+        error_message: 'ステータス値が無効です',
+        severity: 'medium',
+        affected_field: 'appointment_status',
+      },
+    ];
 
-    expect(() =>
-      validateNamingRuleDefinition(incompleteNamingRuleDefinition)
-    ).toThrow(/サフィックス/);
-  });
+    const result = detectAndClassifyExceptionCases(validation_results);
 
-  test("命名規則定義のプレフィックスが空白の場合にエラーが返される", () => {
-    const incompleteNamingRuleDefinition = {
-      prefix: "",
-      suffix: "_FINAL",
-      folderStructure: "YYYY/MM",
-      dateFormat: "YYYYMMDD",
-    };
+    // 全ての例外ケースが検出されることを確認
+    expect(result.total_cases_detected).toBe(5);
 
-    expect(() =>
-      validateNamingRuleDefinition(incompleteNamingRuleDefinition)
-    ).toThrow(/プレフィックス/);
-  });
+    // 優先度ごとの分類数を確認
+    expect(result.cases_by_severity.high).toBe(2);
+    expect(result.cases_by_severity.medium).toBe(2);
+    expect(result.cases_by_severity.low).toBe(1);
 
-  test("命名規則定義のフォルダ構成が空白の場合にエラーが返される", () => {
-    const incompleteNamingRuleDefinition = {
-      prefix: "DOC",
-      suffix: "_FINAL",
-      folderStructure: "",
-      dateFormat: "YYYYMMDD",
-    };
+    // 優先度の高い順に整列されていることを確認
+    expect(result.classified_cases).toHaveLength(5);
+    expect(result.classified_cases[0].severity).toBe('high');
+    expect(result.classified_cases[1].severity).toBe('high');
+    expect(result.classified_cases[2].severity).toBe('medium');
+    expect(result.classified_cases[3].severity).toBe('medium');
+    expect(result.classified_cases[4].severity).toBe('low');
 
-    expect(() =>
-      validateNamingRuleDefinition(incompleteNamingRuleDefinition)
-    ).toThrow(/フォルダ構成/);
-  });
-
-  test("命名規則定義の日付フォーマットが空白の場合にエラーが返される", () => {
-    const incompleteNamingRuleDefinition = {
-      prefix: "DOC",
-      suffix: "_FINAL",
-      folderStructure: "YYYY/MM",
-      dateFormat: "",
-    };
-
-    expect(() =>
-      validateNamingRuleDefinition(incompleteNamingRuleDefinition)
-    ).toThrow(/日付フォーマット/);
-  });
-
-  test("命名規則定義が完全な場合に検証成功が返される", () => {
-    const completeNamingRuleDefinition = {
-      prefix: "DOC",
-      suffix: "_FINAL",
-      folderStructure: "YYYY/MM",
-      dateFormat: "YYYYMMDD",
-    };
-
-    const result = validateNamingRuleDefinition(
-      completeNamingRuleDefinition
+    // 各優先度レベルに正しい例外ケースが割り当てられていることを確認
+    const high_priority_cases = result.classified_cases.filter(
+      (c) => c.severity === 'high'
+    );
+    expect(high_priority_cases).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          error_type: 'format_error',
+          severity: 'high',
+        }),
+        expect.objectContaining({
+          error_type: 'invalid_amount',
+          severity: 'high',
+        }),
+      ])
     );
 
-    expect(result).toEqual({
-      isValid: true,
-      errorCode: null,
-      errorMessage: null,
-      invalidFields: [],
-    });
-  });
+    const medium_priority_cases = result.classified_cases.filter(
+      (c) => c.severity === 'medium'
+    );
+    expect(medium_priority_cases).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          error_type: 'duplicate_record',
+          severity: 'medium',
+        }),
+        expect.objectContaining({
+          error_type: 'invalid_enum_value',
+          severity: 'medium',
+        }),
+      ])
+    );
 
-  test("命名規則定義の複数項目が不完全な場合に全てのエラー情報が返される", () => {
-    const incompleteNamingRuleDefinition = {
-      prefix: "",
-      suffix: "",
-      folderStructure: "",
-      dateFormat: "",
-    };
+    const low_priority_cases = result.classified_cases.filter(
+      (c) => c.severity === 'low'
+    );
+    expect(low_priority_cases).toHaveLength(1);
+    expect(low_priority_cases[0]).toEqual(
+      expect.objectContaining({
+        error_type: 'missing_required_field',
+        severity: 'low',
+      })
+    );
 
-    expect(() =>
-      validateNamingRuleDefinition(incompleteNamingRuleDefinition)
-    ).toThrow(/必須項目/);
+    // 同一優先度内での順序が一貫していることを確認
+    expect(result.classified_cases[0].record_id).toBe('rec_001');
+    expect(result.classified_cases[1].record_id).toBe('rec_002');
+    expect(result.classified_cases[2].record_id).toBe('rec_003');
+    expect(result.classified_cases[3].record_id).toBe('rec_005');
+    expect(result.classified_cases[4].record_id).toBe('rec_004');
+
+    // 全ての例外ケースが分類されたことを確認
+    expect(result.all_cases_classified).toBe(true);
   });
 });

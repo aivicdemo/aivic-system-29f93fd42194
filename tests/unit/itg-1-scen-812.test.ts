@@ -1,78 +1,97 @@
-import { detectDeliveryDelays } from '../../src/logic/it-1781935279444-2-1-1';
+import { recordResponsePlan } from "../../src/logic/it-1781935279444-2-2-1";
 
-describe('納期遅延・前倒し検出・通知機能', () => {
-  test('SCEN-812: 納期が遅延している場合に検出・フラグが立てられる', () => {
-    // 固定の現在日時を基準として設定
-    const currentDateTime = new Date('2024-02-15T10:00:00Z');
+describe("対応方針の決定・記録機能", () => {
+  // SCEN-812
+  test("対応方針の記録時に必須項目が欠落している場合にエラーが発生する", () => {
+    // 必須項目が完全に揃ったベースケース
+    const validInput = {
+      response_plan_name: "緊急対応",
+      response_content: "顧客へ電話で即座に説明する",
+      scheduled_execution_date: "2024-02-15T14:00:00Z",
+      priority: "high",
+      assignee: "代表者",
+    };
 
-    // テストデータ: 複数の受注レコード
-    const orders = [
-      {
-        orderId: 'ORD-001',
-        plannedDeliveryDate: new Date('2024-02-10T00:00:00Z'), // 過去日時 → 遅延
-        status: 'pending',
-        delayFlag: false,
-      },
-      {
-        orderId: 'ORD-002',
-        plannedDeliveryDate: new Date('2024-02-08T00:00:00Z'), // 過去日時 → 遅延
-        status: 'pending',
-        delayFlag: false,
-      },
-      {
-        orderId: 'ORD-003',
-        plannedDeliveryDate: new Date('2024-02-20T00:00:00Z'), // 未来日時 → 遅延なし
-        status: 'pending',
-        delayFlag: false,
-      },
-      {
-        orderId: 'ORD-004',
-        plannedDeliveryDate: new Date('2024-02-15T15:00:00Z'), // 現在日時以降 → 遅延なし
-        status: 'pending',
-        delayFlag: false,
-      },
-    ];
+    // ケース1: 対応方針名が空白
+    expect(() =>
+      recordResponsePlan({
+        response_plan_name: "",
+        response_content: "顧客へ電話で即座に説明する",
+        scheduled_execution_date: "2024-02-15T14:00:00Z",
+        priority: "high",
+        assignee: "代表者",
+      })
+    ).toThrow(/対応方針名/);
 
-    // 納期遅延検出ロジックを実行
-    const result = detectDeliveryDelays(orders, currentDateTime);
+    // ケース2: 対応内容が空白
+    expect(() =>
+      recordResponsePlan({
+        response_plan_name: "緊急対応",
+        response_content: "",
+        scheduled_execution_date: "2024-02-15T14:00:00Z",
+        priority: "high",
+        assignee: "代表者",
+      })
+    ).toThrow(/対応内容/);
 
-    // 検出されたレコードの検証: 遅延フラグが正しく立つ
-    expect(result).toHaveLength(4);
+    // ケース3: 実施予定日が空白
+    expect(() =>
+      recordResponsePlan({
+        response_plan_name: "緊急対応",
+        response_content: "顧客へ電話で即座に説明する",
+        scheduled_execution_date: "",
+        priority: "high",
+        assignee: "代表者",
+      })
+    ).toThrow(/実施予定日/);
 
-    // ORD-001: 過去日時 → 遅延フラグ立つ
-    const delayedOrder1 = result.find((o) => o.orderId === 'ORD-001');
-    expect(delayedOrder1?.delayFlag).toBe(true);
-    expect(delayedOrder1?.status).toBe('delayed');
+    // ケース4: 優先度が空白
+    expect(() =>
+      recordResponsePlan({
+        response_plan_name: "緊急対応",
+        response_content: "顧客へ電話で即座に説明する",
+        scheduled_execution_date: "2024-02-15T14:00:00Z",
+        priority: "",
+        assignee: "代表者",
+      })
+    ).toThrow(/優先度/);
 
-    // ORD-002: 過去日時 → 遅延フラグ立つ
-    const delayedOrder2 = result.find((o) => o.orderId === 'ORD-002');
-    expect(delayedOrder2?.delayFlag).toBe(true);
-    expect(delayedOrder2?.status).toBe('delayed');
+    // ケース5: 担当者が空白
+    expect(() =>
+      recordResponsePlan({
+        response_plan_name: "緊急対応",
+        response_content: "顧客へ電話で即座に説明する",
+        scheduled_execution_date: "2024-02-15T14:00:00Z",
+        priority: "high",
+        assignee: "",
+      })
+    ).toThrow(/担当者/);
 
-    // ORD-003: 未来日時 → 遅延フラグ立たない
-    const onTimeOrder1 = result.find((o) => o.orderId === 'ORD-003');
-    expect(onTimeOrder1?.delayFlag).toBe(false);
-    expect(onTimeOrder1?.status).toBe('pending');
+    // ケース6: 複数項目が欠落している場合
+    expect(() =>
+      recordResponsePlan({
+        response_plan_name: "",
+        response_content: "",
+        scheduled_execution_date: "2024-02-15T14:00:00Z",
+        priority: "high",
+        assignee: "代表者",
+      })
+    ).toThrow(/必須項目/);
 
-    // ORD-004: 現在日時以降 → 遅延フラグ立たない
-    const onTimeOrder2 = result.find((o) => o.orderId === 'ORD-004');
-    expect(onTimeOrder2?.delayFlag).toBe(false);
-    expect(onTimeOrder2?.status).toBe('pending');
-
-    // 複数の遅延受注レコードが正しく検出されたことを確認
-    const delayedOrders = result.filter((o) => o.delayFlag === true);
-    expect(delayedOrders).toHaveLength(2);
-
-    // 遅延受注のすべてがステータス更新されていることを確認
-    delayedOrders.forEach((order) => {
-      expect(order.status).toBe('delayed');
+    // ケース7: 正常な入力で成功する
+    const result = recordResponsePlan(validInput);
+    expect(result).toEqual({
+      success: true,
+      response_plan_id: expect.any(String),
+      response_plan_name: "緊急対応",
+      response_content: "顧客へ電話で即座に説明する",
+      scheduled_execution_date: "2024-02-15T14:00:00Z",
+      priority: "high",
+      assignee: "代表者",
+      recorded_at: expect.any(String),
+      status: "pending",
     });
-
-    // 非遅延受注のステータスが変更されていないことを確認
-    const onTimeOrders = result.filter((o) => o.delayFlag === false);
-    expect(onTimeOrders).toHaveLength(2);
-    onTimeOrders.forEach((order) => {
-      expect(order.status).toBe('pending');
-    });
+    expect(result.response_plan_id).toBeTruthy();
+    expect(result.status).toBe("pending");
   });
 });

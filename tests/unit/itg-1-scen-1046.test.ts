@@ -1,19 +1,32 @@
-import { extractSalesDataForQuestion } from "../../src/logic/it-1781935279444-2-2-1";
+import { describe, it, expect } from "@jest/globals";
+import { validateRuleDefinition } from "../../src/logic/it-1781935279444-2-1-1";
 
-describe("営業データの完全性・正確性を自動検証し、不足データ・誤りを検出・通知する機能", () => {
-  // SCEN-1046: [error] 質問内容に対応する根拠データ自動抽出と説明資料生成 - 質問内容に対応する営業データが存在しないとき抽出失敗が通知される
-  test("質問内容に対応する営業データが存在しないとき、抽出失敗エラーが通知される", () => {
-    const non_existent_customer_id = "XYZ999";
-    const question_content = `架空の顧客ID: ${non_existent_customer_id}`;
-    const user_id = "user_001";
-    const session_date = new Date("2024-01-15T11:00:00Z");
+describe("営業データ入力時の品質検証ルール定義・実行", () => {
+  it("SCEN-1046: 検証ルールの条件定義に矛盾がある場合、ルール適用前にエラーとして検出される", () => {
+    // 条件1: 金額 > 100000
+    // 条件2: 金額 < 50000
+    // この2つをANDで結合すると矛盾する（金額が同時に100000より大きく、50000より小さくなることは不可能）
 
-    expect(() => {
-      extractSalesDataForQuestion({
-        question_content: question_content,
-        user_id: user_id,
-        session_date: session_date,
-      });
-    }).toThrow(/抽出失敗/);
+    const ruleDefinition = {
+      ruleName: "矛盾条件テストルール",
+      conditions: [
+        {
+          conditionId: 1,
+          field: "金額",
+          operator: ">",
+          value: 100000,
+        },
+        {
+          conditionId: 2,
+          field: "金額",
+          operator: "<",
+          value: 50000,
+        },
+      ],
+      logicalOperator: "AND",
+    };
+
+    // validateRuleDefinition はルール定義の矛盾をチェックし、矛盾がある場合は例外をスロー
+    expect(() => validateRuleDefinition(ruleDefinition)).toThrow(/矛盾する条件/);
   });
 });

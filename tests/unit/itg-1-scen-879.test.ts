@@ -1,153 +1,196 @@
-import { calculateContractChangeVerificationDeadline } from "../../src/logic/it-1-1-1";
+import { validateSalesData } from "../../src/logic/it-1781935279444-2-2-1";
 
-describe("営業成果データの自動検証ルール定義と異常検出機能", () => {
-  // SCEN-879: [error] 契約変更検証完了期限の自動計算 - 検証対象契約データが不完全な場合、期限計算が失敗し適切なエラーが返される
-  test("不完全な契約データを入力すると、期限計算が失敗し適切なエラーが返される", () => {
-    // テストデータ: 必須項目が欠落している契約データ
-    const incompleteContractData = {
-      contract_id: "CTR-20240115-001",
-      customer_id: "CST-20240115-001",
-      // contract_type が欠落（必須項目）
-      contract_start_date: "2024-01-15",
-      // contract_end_date が欠落（必須項目）
-      service_name: "営業代行サービス",
+describe("営業データの完全性・正確性を自動検証", () => {
+  // SCEN-879: [error] 営業データ異常値自動検出機能 - 営業データの形式が不正な場合に『エラー』ステータスと詳細情報が返される
+  test("不正な形式の営業データを検証した場合、エラーステータスと詳細情報が返される", () => {
+    // 前提: 営業データ異常値自動検出機能が初期化されている状態
+    // 発生条件: 不正な形式の営業データ（必須フィールド欠落、データ型不一致、文字列制限超過など）をシステムに入力する
+
+    // 1. 必須フィールド欠落のケース
+    const data_missing_required = {
+      customer_id: "CUST001",
+      // contact_date が欠落（必須）
+      contact_content: "商談内容",
+      appointment_status: "confirmed",
     };
 
-    // エラーテスト: 必須項目が欠落していることを検出
-    expect(() =>
-      calculateContractChangeVerificationDeadline(incompleteContractData as any)
-    ).toThrow(/contract_type/);
-  });
+    const result_missing = validateSalesData(data_missing_required);
 
-  test("複数の必須項目が欠落している場合、最初に検出された欠落項目に関するエラーが返される", () => {
-    // テストデータ: 複数の必須項目が欠落
-    const contractDataMissingMultipleFields = {
-      contract_id: "CTR-20240115-002",
-      // customer_id が欠落
-      // contract_type が欠落
-      contract_start_date: "2024-01-15",
-      contract_end_date: "2024-12-31",
-    };
-
-    // 複数の欠落があっても、1 つのエラーを返す
-    expect(() =>
-      calculateContractChangeVerificationDeadline(
-        contractDataMissingMultipleFields as any
-      )
-    ).toThrow(/customer_id|contract_type/);
-  });
-
-  test("契約開始日が無効な形式の場合、期限計算が失敗しエラーが返される", () => {
-    // テストデータ: 無効な日付形式
-    const contractDataInvalidDate = {
-      contract_id: "CTR-20240115-003",
-      customer_id: "CST-20240115-003",
-      contract_type: "基本契約",
-      contract_start_date: "2024-13-45", // 無効な日付
-      contract_end_date: "2024-12-31",
-      service_name: "営業代行サービス",
-    };
-
-    expect(() =>
-      calculateContractChangeVerificationDeadline(contractDataInvalidDate as any)
-    ).toThrow(/contract_start_date|日付/);
-  });
-
-  test("有効な契約データを入力すると、検証完了期限が正確に計算されて返される", () => {
-    // テストデータ: 完全で有効な契約データ
-    const completeContractData = {
-      contract_id: "CTR-20240115-004",
-      customer_id: "CST-20240115-004",
-      contract_type: "基本契約",
-      contract_start_date: "2024-01-15",
-      contract_end_date: "2024-12-31",
-      service_name: "営業代行サービス",
-      last_change_date: "2024-01-14",
-    };
-
-    const result = calculateContractChangeVerificationDeadline(
-      completeContractData
+    // 期待結果: ステータスが『エラー』として返却される
+    expect(result_missing.status).toBe("error");
+    // エラー詳細情報に必須フィールド欠落を示す情報が含まれること
+    expect(result_missing.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          error_type: "required_field_missing",
+          field_name: "contact_date",
+          expected_format: "ISO 8601 date string (YYYY-MM-DDTHH:mm:ssZ)",
+          actual_value: null,
+        }),
+      ])
     );
 
-    // 期限計算ロジック: 契約変更通知受領日から営業日ベース1営業日以内に検証完了
-    // 2024-01-15 が月曜日なので、検証完了期限は 2024-01-15（その日中）
-    expect(result).toEqual({
-      contract_id: "CTR-20240115-004",
-      verification_deadline: "2024-01-15",
-      verification_deadline_time: "17:00:00",
-      status: "deadline_calculated",
-    });
-  });
-
-  test("契約終了日が契約開始日より前の場合、期限計算が失敗しエラーが返される", () => {
-    // テストデータ: 終了日が開始日より前
-    const contractDataInvalidDateRange = {
-      contract_id: "CTR-20240115-005",
-      customer_id: "CST-20240115-005",
-      contract_type: "基本契約",
-      contract_start_date: "2024-12-31",
-      contract_end_date: "2024-01-15", // 開始日より前
-      service_name: "営業代行サービス",
+    // 2. データ型不一致のケース
+    const data_type_mismatch = {
+      customer_id: "CUST002",
+      contact_date: "2024-01-15T10:00:00Z",
+      contact_content: "商談内容",
+      appointment_status: "confirmed",
+      amount: "100000", // 数値型であるべきが文字列型
     };
 
-    expect(() =>
-      calculateContractChangeVerificationDeadline(
-        contractDataInvalidDateRange as any
-      )
-    ).toThrow(/contract_end_date|開始日/);
-  });
+    const result_type = validateSalesData(data_type_mismatch);
 
-  test("契約 ID が空文字列または null の場合、期限計算が失敗しエラーが返される", () => {
-    // テストデータ: 契約 ID が null
-    const contractDataNullContractId = {
-      contract_id: null,
-      customer_id: "CST-20240115-006",
-      contract_type: "基本契約",
-      contract_start_date: "2024-01-15",
-      contract_end_date: "2024-12-31",
-      service_name: "営業代行サービス",
+    expect(result_type.status).toBe("error");
+    expect(result_type.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          error_type: "type_mismatch",
+          field_name: "amount",
+          expected_format: "number (integer, >= 0)",
+          actual_value: "100000",
+        }),
+      ])
+    );
+
+    // 3. 文字列制限超過のケース
+    const data_string_limit_exceeded = {
+      customer_id: "CUST003",
+      contact_date: "2024-01-15T10:00:00Z",
+      contact_content:
+        "a".repeat(1001), // 最大1000文字を超過する文字列（1001文字）
+      appointment_status: "confirmed",
     };
 
-    expect(() =>
-      calculateContractChangeVerificationDeadline(
-        contractDataNullContractId as any
-      )
-    ).toThrow(/contract_id/);
-  });
+    const result_limit = validateSalesData(data_string_limit_exceeded);
 
-  test("顧客 ID が空文字列の場合、期限計算が失敗しエラーが返される", () => {
-    // テストデータ: 顧客 ID が空
-    const contractDataEmptyCustomerId = {
-      contract_id: "CTR-20240115-007",
-      customer_id: "",
-      contract_type: "基本契約",
-      contract_start_date: "2024-01-15",
-      contract_end_date: "2024-12-31",
-      service_name: "営業代行サービス",
+    expect(result_limit.status).toBe("error");
+    expect(result_limit.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          error_type: "string_length_exceeded",
+          field_name: "contact_content",
+          expected_format: "string (max 1000 characters)",
+          actual_value: expect.stringContaining("a"),
+        }),
+      ])
+    );
+
+    // 4. 複数の形式不正がある場合
+    const data_multiple_errors = {
+      customer_id: "CUST004",
+      // contact_date が欠落
+      contact_content: "b".repeat(1001), // 文字列超過
+      appointment_status: "invalid_status", // 無効な値
+      amount: "50000", // 型不一致（文字列）
     };
 
-    expect(() =>
-      calculateContractChangeVerificationDeadline(
-        contractDataEmptyCustomerId as any
-      )
-    ).toThrow(/customer_id/);
-  });
+    const result_multiple = validateSalesData(data_multiple_errors);
 
-  test("契約タイプが空文字列の場合、期限計算が失敗しエラーが返される", () => {
-    // テストデータ: 契約タイプが空
-    const contractDataEmptyContractType = {
-      contract_id: "CTR-20240115-008",
-      customer_id: "CST-20240115-008",
-      contract_type: "",
-      contract_start_date: "2024-01-15",
-      contract_end_date: "2024-12-31",
-      service_name: "営業代行サービス",
+    expect(result_multiple.status).toBe("error");
+    // 複数のエラーが全て列挙されること
+    expect(result_multiple.errors.length).toBeGreaterThanOrEqual(4);
+    expect(result_multiple.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          error_type: "required_field_missing",
+          field_name: "contact_date",
+        }),
+        expect.objectContaining({
+          error_type: "string_length_exceeded",
+          field_name: "contact_content",
+        }),
+        expect.objectContaining({
+          error_type: "invalid_enum_value",
+          field_name: "appointment_status",
+        }),
+        expect.objectContaining({
+          error_type: "type_mismatch",
+          field_name: "amount",
+        }),
+      ])
+    );
+
+    // 5. 無効な enum 値のケース（appointment_status）
+    const data_invalid_enum = {
+      customer_id: "CUST005",
+      contact_date: "2024-01-15T10:00:00Z",
+      contact_content: "商談内容",
+      appointment_status: "pending_invalid", // 無効な値
     };
 
-    expect(() =>
-      calculateContractChangeVerificationDeadline(
-        contractDataEmptyContractType as any
-      )
-    ).toThrow(/contract_type/);
+    const result_enum = validateSalesData(data_invalid_enum);
+
+    expect(result_enum.status).toBe("error");
+    expect(result_enum.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          error_type: "invalid_enum_value",
+          field_name: "appointment_status",
+          expected_format: "one of [confirmed, pending, cancelled]",
+          actual_value: "pending_invalid",
+        }),
+      ])
+    );
+
+    // 6. 日付形式不正のケース
+    const data_invalid_date = {
+      customer_id: "CUST006",
+      contact_date: "2024-13-45", // 無効な日付形式
+      contact_content: "商談内容",
+      appointment_status: "confirmed",
+    };
+
+    const result_date = validateSalesData(data_invalid_date);
+
+    expect(result_date.status).toBe("error");
+    expect(result_date.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          error_type: "invalid_date_format",
+          field_name: "contact_date",
+          expected_format: "ISO 8601 date string (YYYY-MM-DDTHH:mm:ssZ)",
+          actual_value: "2024-13-45",
+        }),
+      ])
+    );
+
+    // 7. 負の数値のケース（amount は 0 以上であるべき）
+    const data_negative_amount = {
+      customer_id: "CUST007",
+      contact_date: "2024-01-15T10:00:00Z",
+      contact_content: "商談内容",
+      appointment_status: "confirmed",
+      amount: -50000, // 負の数値
+    };
+
+    const result_negative = validateSalesData(data_negative_amount);
+
+    expect(result_negative.status).toBe("error");
+    expect(result_negative.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          error_type: "value_out_of_range",
+          field_name: "amount",
+          expected_format: "integer >= 0",
+          actual_value: -50000,
+        }),
+      ])
+    );
+
+    // 8. すべてが正しい場合は成功（負のテスト）
+    const data_valid = {
+      customer_id: "CUST008",
+      contact_date: "2024-01-15T10:00:00Z",
+      contact_content: "商談内容",
+      appointment_status: "confirmed",
+      amount: 75000,
+    };
+
+    const result_valid = validateSalesData(data_valid);
+
+    // この場合はエラーが空配列であること
+    expect(result_valid.status).toBe("success");
+    expect(result_valid.errors).toEqual([]);
   });
 });

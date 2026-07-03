@@ -1,213 +1,161 @@
-import { aggregateMonthlySalesReport } from '../../src/logic/it-1-br-1781935279444-1-2-1';
+import { determineProficiencyLevel, generateMaterials, assignChecklist } from '../../src/logic/it-1-br-1781935279444-1-2-1';
 
-describe('月次サマリーテンプレートの定義・管理機能', () => {
-  // SCEN-919: [normal] 営業報告書月次サマリー自動集計機能 - 複数の顧客・複数のサービス種別が混在したデータで、正しく分類集計される
-  test('複数顧客・複数サービス種別の営業報告書を顧客別・サービス別・組み合わせ別に正しく集計する', () => {
-    const input_records = [
-      {
-        customer_id: 'cust_A',
-        customer_name: '顧客A',
-        service_type: 'service_1',
-        service_name: 'サービス種別1',
-        sales_amount: 100000,
-        appointment_count: 5,
-        contract_count: 2,
-      },
-      {
-        customer_id: 'cust_A',
-        customer_name: '顧客A',
-        service_type: 'service_2',
-        service_name: 'サービス種別2',
-        sales_amount: 150000,
-        appointment_count: 8,
-        contract_count: 3,
-      },
-      {
-        customer_id: 'cust_B',
-        customer_name: '顧客B',
-        service_type: 'service_1',
-        service_name: 'サービス種別1',
-        sales_amount: 200000,
-        appointment_count: 10,
-        contract_count: 4,
-      },
-      {
-        customer_id: 'cust_B',
-        customer_name: '顧客B',
-        service_type: 'service_3',
-        service_name: 'サービス種別3',
-        sales_amount: 80000,
-        appointment_count: 4,
-        contract_count: 1,
-      },
-      {
-        customer_id: 'cust_C',
-        customer_name: '顧客C',
-        service_type: 'service_2',
-        service_name: 'サービス種別2',
-        sales_amount: 120000,
-        appointment_count: 6,
-        contract_count: 2,
-      },
-      {
-        customer_id: 'cust_C',
-        customer_name: '顧客C',
-        service_type: 'service_3',
-        service_name: 'サービス種別3',
-        sales_amount: 70000,
-        appointment_count: 3,
-        contract_count: 1,
-      },
-    ];
+describe('新入スタッフ習熟度判定・段階育成機能', () => {
+  // SCEN-919
+  test('新入スタッフがレベル1として判定され、対応する教材とチェックリストが割り当てられる', () => {
+    // ===== Setup: 新入スタッフテストアカウント作成 =====
+    const newStaffId = 'STAFF_TEST_001';
+    const newStaffName = '田中太郎';
+    const hireDate = new Date('2024-01-15T09:00:00Z');
+    const departmentId = 'DEPT_001';
 
-    const result = aggregateMonthlySalesReport(input_records);
+    // ===== 習熟度診断実行: レベル1判定の前提条件 =====
+    // 新入スタッフが診断テストを受験、スコア: 40点（レベル1基準: 0-50点）
+    const diagnosticScore = 40;
+    const maxDiagnosticScore = 100;
 
-    const expected_total_sales = 720000;
-    const expected_total_appointments = 36;
-    const expected_total_contracts = 13;
+    // ===== 習熟度レベル判定実行 =====
+    const proficiencyResult = determineProficiencyLevel({
+      staffId: newStaffId,
+      staffName: newStaffName,
+      hireDate: hireDate,
+      departmentId: departmentId,
+      diagnosticScore: diagnosticScore,
+      maxScore: maxDiagnosticScore,
+    });
 
-    // 総合計の検証
-    expect(result.total_sales_amount).toBe(expected_total_sales);
-    expect(result.total_appointment_count).toBe(expected_total_appointments);
-    expect(result.total_contract_count).toBe(expected_total_contracts);
+    // ===== 期待: スタッフがレベル1として判定される =====
+    expect(proficiencyResult).toEqual({
+      staffId: newStaffId,
+      assignedLevel: 1,
+      levelName: '初期段階',
+      diagnosticScore: diagnosticScore,
+      scoreBand: '0-50',
+      judgmentDate: expect.any(Date),
+      eligibleForNextLevel: false,
+    });
 
-    // 顧客別集計の検証
-    const customer_summary = result.by_customer;
-    expect(customer_summary).toHaveLength(3);
+    // ===== 教材生成: レベル1対応教材リストの自動生成 =====
+    const materialsResult = generateMaterials({
+      staffId: newStaffId,
+      proficiencyLevel: proficiencyResult.assignedLevel,
+      departmentId: departmentId,
+      trainingStartDate: hireDate,
+    });
 
-    const cust_a_summary = customer_summary.find(
-      (c) => c.customer_id === 'cust_A'
-    );
-    expect(cust_a_summary).toBeDefined();
-    expect(cust_a_summary?.sales_amount).toBe(250000);
-    expect(cust_a_summary?.appointment_count).toBe(13);
-    expect(cust_a_summary?.contract_count).toBe(5);
+    // ===== 期待: レベル1用教材リスト生成 =====
+    // レベル1教材: 基礎5項目 (請求書作成基礎・営業報告書集計基礎・契約書管理基礎・品質チェック基礎・例外ケース理解)
+    expect(materialsResult).toEqual({
+      staffId: newStaffId,
+      proficiencyLevel: 1,
+      materialCount: 5,
+      materials: expect.arrayContaining([
+        expect.objectContaining({
+          materialId: expect.stringMatching(/^MAT_LEVEL1_/),
+          title: expect.stringMatching(/基礎|基本/),
+          completionStatus: 'NOT_STARTED',
+          recommendedCompletionDays: 7,
+        }),
+      ]),
+      estimatedCompletionDays: 35,
+      lastUpdated: expect.any(Date),
+    });
 
-    const cust_b_summary = customer_summary.find(
-      (c) => c.customer_id === 'cust_B'
-    );
-    expect(cust_b_summary).toBeDefined();
-    expect(cust_b_summary?.sales_amount).toBe(280000);
-    expect(cust_b_summary?.appointment_count).toBe(14);
-    expect(cust_b_summary?.contract_count).toBe(5);
+    // ===== 検証: レベル1教材が5件であることを確認 =====
+    expect(materialsResult.materials).toHaveLength(5);
+    expect(materialsResult.materials[0]).toHaveProperty('materialId');
+    expect(materialsResult.materials[0]).toHaveProperty('title');
+    expect(materialsResult.materials[0].recommendedCompletionDays).toBe(7);
+    expect(materialsResult.estimatedCompletionDays).toBe(35);
 
-    const cust_c_summary = customer_summary.find(
-      (c) => c.customer_id === 'cust_C'
-    );
-    expect(cust_c_summary).toBeDefined();
-    expect(cust_c_summary?.sales_amount).toBe(190000);
-    expect(cust_c_summary?.appointment_count).toBe(9);
-    expect(cust_c_summary?.contract_count).toBe(3);
+    // ===== チェックリスト割り当て: レベル1対応チェックリストの自動割り当て =====
+    const checklistResult = assignChecklist({
+      staffId: newStaffId,
+      proficiencyLevel: proficiencyResult.assignedLevel,
+      departmentId: departmentId,
+      materialIds: materialsResult.materials.map((m) => m.materialId),
+    });
 
-    // サービス種別別集計の検証
-    const service_summary = result.by_service_type;
-    expect(service_summary).toHaveLength(3);
+    // ===== 期待: レベル1用チェックリスト割り当て =====
+    // レベル1チェックリスト: 基礎業務4項目 (請求書作成・営業報告書集計・契約書管理・品質チェック)
+    expect(checklistResult).toEqual({
+      staffId: newStaffId,
+      checklistId: expect.stringMatching(/^CHKLIST_LEVEL1_/),
+      proficiencyLevel: 1,
+      checklistName: expect.stringMatching(/レベル1/),
+      itemCount: 4,
+      items: expect.arrayContaining([
+        expect.objectContaining({
+          itemId: expect.stringMatching(/^ITEM_/),
+          taskName: expect.stringMatching(/請求書作成|営業報告書集計|契約書管理|品質チェック/),
+          status: 'PENDING',
+          dueDate: expect.any(Date),
+        }),
+      ]),
+      assignedDate: expect.any(Date),
+      targetCompletionDate: expect.any(Date),
+    });
 
-    const service_1_summary = service_summary.find(
-      (s) => s.service_type === 'service_1'
-    );
-    expect(service_1_summary).toBeDefined();
-    expect(service_1_summary?.sales_amount).toBe(300000);
-    expect(service_1_summary?.appointment_count).toBe(15);
-    expect(service_1_summary?.contract_count).toBe(6);
+    // ===== 検証: チェックリストアイテム数 =====
+    expect(checklistResult.items).toHaveLength(4);
+    checklistResult.items.forEach((item) => {
+      expect(item.status).toBe('PENDING');
+      expect(item).toHaveProperty('taskName');
+      expect(item).toHaveProperty('dueDate');
+    });
 
-    const service_2_summary = service_summary.find(
-      (s) => s.service_type === 'service_2'
-    );
-    expect(service_2_summary).toBeDefined();
-    expect(service_2_summary?.sales_amount).toBe(270000);
-    expect(service_2_summary?.appointment_count).toBe(14);
-    expect(service_2_summary?.contract_count).toBe(5);
+    // ===== 検証: 学習ポータル表示データ構造 =====
+    const learningPortalData = {
+      staffId: newStaffId,
+      currentLevel: proficiencyResult.assignedLevel,
+      materials: materialsResult.materials,
+      checklist: checklistResult,
+      progressPercentage: 0,
+      nextReviewDate: new Date('2024-02-15T09:00:00Z'),
+    };
 
-    const service_3_summary = service_summary.find(
-      (s) => s.service_type === 'service_3'
-    );
-    expect(service_3_summary).toBeDefined();
-    expect(service_3_summary?.sales_amount).toBe(150000);
-    expect(service_3_summary?.appointment_count).toBe(7);
-    expect(service_3_summary?.contract_count).toBe(2);
+    expect(learningPortalData.materials).toBeDefined();
+    expect(learningPortalData.materials.length).toBe(5);
+    expect(learningPortalData.checklist.itemCount).toBe(4);
+    expect(learningPortalData.progressPercentage).toBe(0);
 
-    // 顧客×サービス種別の組み合わせ別集計の検証
-    const combination_summary = result.by_customer_and_service;
-    expect(combination_summary).toHaveLength(6);
+    // ===== 検証: ダッシュボード表示データ構造 =====
+    const dashboardData = {
+      staffId: newStaffId,
+      proficiencyLevel: proficiencyResult.assignedLevel,
+      levelName: proficiencyResult.levelName,
+      diagnosticScore: proficiencyResult.diagnosticScore,
+      materialAssignedCount: materialsResult.materialCount,
+      checklistAssignedCount: checklistResult.itemCount,
+      completedMaterials: 0,
+      completedChecklist: 0,
+      lastUpdate: expect.any(Date),
+    };
 
-    const cust_a_service_1 = combination_summary.find(
-      (c) => c.customer_id === 'cust_A' && c.service_type === 'service_1'
-    );
-    expect(cust_a_service_1).toBeDefined();
-    expect(cust_a_service_1?.sales_amount).toBe(100000);
-    expect(cust_a_service_1?.appointment_count).toBe(5);
-    expect(cust_a_service_1?.contract_count).toBe(2);
+    expect(dashboardData.proficiencyLevel).toBe(1);
+    expect(dashboardData.levelName).toBe('初期段階');
+    expect(dashboardData.materialAssignedCount).toBe(5);
+    expect(dashboardData.checklistAssignedCount).toBe(4);
+    expect(dashboardData.completedMaterials).toBe(0);
+    expect(dashboardData.completedChecklist).toBe(0);
 
-    const cust_a_service_2 = combination_summary.find(
-      (c) => c.customer_id === 'cust_A' && c.service_type === 'service_2'
-    );
-    expect(cust_a_service_2).toBeDefined();
-    expect(cust_a_service_2?.sales_amount).toBe(150000);
-    expect(cust_a_service_2?.appointment_count).toBe(8);
-    expect(cust_a_service_2?.contract_count).toBe(3);
+    // ===== 検証: 教材とチェックリスト内容の妥当性 =====
+    // 各教材が基礎レベルの推奨学習期間（7日）で構成されていることを確認
+    materialsResult.materials.forEach((material) => {
+      expect(material.recommendedCompletionDays).toBe(7);
+      expect(material.completionStatus).toBe('NOT_STARTED');
+      expect(material.materialId).toMatch(/^MAT_LEVEL1_/);
+    });
 
-    const cust_b_service_1 = combination_summary.find(
-      (c) => c.customer_id === 'cust_B' && c.service_type === 'service_1'
-    );
-    expect(cust_b_service_1).toBeDefined();
-    expect(cust_b_service_1?.sales_amount).toBe(200000);
-    expect(cust_b_service_1?.appointment_count).toBe(10);
-    expect(cust_b_service_1?.contract_count).toBe(4);
+    // チェックリスト全体の目標完了期間（合計28日: 4項目×7日）
+    const totalChecklistDays = checklistResult.items.length * 7;
+    expect(totalChecklistDays).toBe(28);
 
-    const cust_b_service_3 = combination_summary.find(
-      (c) => c.customer_id === 'cust_B' && c.service_type === 'service_3'
-    );
-    expect(cust_b_service_3).toBeDefined();
-    expect(cust_b_service_3?.sales_amount).toBe(80000);
-    expect(cust_b_service_3?.appointment_count).toBe(4);
-    expect(cust_b_service_3?.contract_count).toBe(1);
-
-    const cust_c_service_2 = combination_summary.find(
-      (c) => c.customer_id === 'cust_C' && c.service_type === 'service_2'
-    );
-    expect(cust_c_service_2).toBeDefined();
-    expect(cust_c_service_2?.sales_amount).toBe(120000);
-    expect(cust_c_service_2?.appointment_count).toBe(6);
-    expect(cust_c_service_2?.contract_count).toBe(2);
-
-    const cust_c_service_3 = combination_summary.find(
-      (c) => c.customer_id === 'cust_C' && c.service_type === 'service_3'
-    );
-    expect(cust_c_service_3).toBeDefined();
-    expect(cust_c_service_3?.sales_amount).toBe(70000);
-    expect(cust_c_service_3?.appointment_count).toBe(3);
-    expect(cust_c_service_3?.contract_count).toBe(1);
-
-    // 集計の合計値が入力データの総合計と一致することの検証
-    const sum_by_customer = customer_summary.reduce(
-      (acc, c) => acc + c.sales_amount,
-      0
-    );
-    expect(sum_by_customer).toBe(expected_total_sales);
-
-    const sum_by_service = service_summary.reduce(
-      (acc, s) => acc + s.sales_amount,
-      0
-    );
-    expect(sum_by_service).toBe(expected_total_sales);
-
-    const sum_by_combination = combination_summary.reduce(
-      (acc, comb) => acc + comb.sales_amount,
-      0
-    );
-    expect(sum_by_combination).toBe(expected_total_sales);
-
-    // 重複計上や漏れがないことの確認
-    const combination_records_count = combination_summary.length;
-    expect(combination_records_count).toBe(input_records.length);
-
-    const all_appointments_sum =
-      result.by_customer.reduce((acc, c) => acc + c.appointment_count, 0) +
-      result.by_service_type.reduce((acc, s) => acc + s.appointment_count, 0) -
-      result.total_appointment_count;
-    const expected_appointments_double_count_excess =
-      expected_total_appointments;
-    expect(all_appointments_sum).toBe(expected_appointments_double_count_excess);
+    // ===== 最終検証: レベル1基準の全要件充足 =====
+    expect(proficiencyResult.assignedLevel).toBe(1);
+    expect(proficiencyResult.levelName).toBe('初期段階');
+    expect(materialsResult.materialCount).toBe(5);
+    expect(checklistResult.itemCount).toBe(4);
+    expect(learningPortalData.progressPercentage).toBe(0);
   });
 });

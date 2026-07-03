@@ -1,100 +1,128 @@
-import { describe, test, expect, beforeEach } from "@jest/globals";
-import { validateGeneratedReportChecklist } from "../../src/logic/it-1781935279444-2-2-1";
+import { validateReportGenerationParameters } from '../../src/logic/it-1-2-1';
 
-describe("自動生成レポート品質チェックリスト検証機能", () => {
-  beforeEach(() => {
-    jest.clearAllMocks();
-  });
-
+describe('営業成果データから請求対象項目を自動抽出し、顧客ごと・サービスごとの請求額を集計する機能', () => {
   // SCEN-657
-  test("チェックリスト項目が0件の場合に検証スキップまたはエラーとして正しく処理される", () => {
-    // ========================================
-    // 入力: チェックリスト項目が0件の状態
-    // ========================================
-    const emptyChecklistInput = {
-      reportId: "report-001",
-      checklistItems: [],
-      reportData: {
-        customerId: "cust-001",
-        serviceId: "svc-001",
-        appointmentCount: 5,
-        contractCount: 2,
-        generatedAt: "2024-01-15T09:00:00Z",
-      },
+  test('レポート生成パラメータ妥当性検証機能 - 契約条件に違反するパラメータが指定された場合、検証エラーが通知される', () => {
+    const validContract = {
+      contract_id: 'C001',
+      customer_id: 'CUS001',
+      service_id: 'SVC001',
+      contract_start_date: '2024-01-01',
+      contract_end_date: '2024-12-31',
+      allowed_sales_divisions: ['SalesDiv_A', 'SalesDiv_B'],
+      report_frequency: 'monthly',
     };
 
-    // ========================================
-    // 実行: 検証処理を実行
-    // ========================================
-    const result = validateGeneratedReportChecklist(emptyChecklistInput);
-
-    // ========================================
-    // 検証1: チェックリスト項目が0件の場合、スキップステータスまたはエラーコードが返されること
-    // ========================================
-    expect(result).toHaveProperty("status");
-    expect(["SKIPPED", "ERROR"]).toContain(result.status);
-
-    // ========================================
-    // 検証2: スキップの場合、警告メッセージが表示されること
-    // ========================================
-    if (result.status === "SKIPPED") {
-      expect(result).toHaveProperty("message");
-      expect(result.message).toMatch(/チェックリスト項目/);
-      expect(result.message).toMatch(/ありません/);
-      expect(result.shouldProceed).toBe(true);
-    }
-
-    // ========================================
-    // 検証3: エラーの場合、適切なエラーコードが返されること
-    // ========================================
-    if (result.status === "ERROR") {
-      expect(result).toHaveProperty("errorCode");
-      expect(result.errorCode).toMatch(/ERR_EMPTY_CHECKLIST|ERR_NO_ITEMS/);
-      expect(result).toHaveProperty("errorMessage");
-      expect(result.errorMessage).toBeTruthy();
-      expect(result.shouldProceed).toBe(false);
-    }
-
-    // ========================================
-    // 検証4: システムがクラッシュせず、ユーザーに対して処理結果が明確に伝わること
-    // ========================================
-    expect(result).not.toHaveProperty("crash");
-    expect(result).toHaveProperty("reportId");
-    expect(result.reportId).toBe("report-001");
-
-    // ========================================
-    // 検証5: ハッピーパス: 正常なチェックリスト項目がある場合、検証が実行されること
-    // ========================================
-    const validChecklistInput = {
-      reportId: "report-002",
-      checklistItems: [
-        {
-          id: "check-001",
-          itemName: "顧客名確認",
-          required: true,
-          validationRule: "NOT_EMPTY",
-        },
-        {
-          id: "check-002",
-          itemName: "金額妥当性確認",
-          required: true,
-          validationRule: "NUMERIC_RANGE",
-        },
-      ],
-      reportData: {
-        customerId: "cust-002",
-        serviceId: "svc-002",
-        appointmentCount: 3,
-        contractCount: 1,
-        generatedAt: "2024-01-15T10:00:00Z",
-      },
+    const validParams = {
+      report_start_date: '2024-01-01',
+      report_end_date: '2024-01-31',
+      target_customer_id: 'CUS001',
+      sales_division: 'SalesDiv_A',
+      include_discount: false,
     };
 
-    const validResult = validateGeneratedReportChecklist(validChecklistInput);
+    const validationResult = validateReportGenerationParameters(
+      validContract,
+      validParams
+    );
+    expect(validationResult.is_valid).toBe(true);
+    expect(validationResult.error_details).toEqual([]);
 
-    expect(validResult.status).toBe("COMPLETED");
-    expect(validResult.itemsChecked).toBe(2);
-    expect(validResult.validItemCount).toBeGreaterThanOrEqual(0);
-    expect(validResult.shouldProceed).toBe(true);
+    // 契約期間外の開始日付を指定
+    const invalidParamsOutOfRange = {
+      report_start_date: '2023-12-15',
+      report_end_date: '2024-01-31',
+      target_customer_id: 'CUS001',
+      sales_division: 'SalesDiv_A',
+      include_discount: false,
+    };
+
+    const resultOutOfRange = validateReportGenerationParameters(
+      validContract,
+      invalidParamsOutOfRange
+    );
+    expect(resultOutOfRange.is_valid).toBe(false);
+    expect(resultOutOfRange.error_details).toContainEqual(
+      expect.objectContaining({
+        error_code: 'REPORT_DATE_OUT_OF_CONTRACT_PERIOD',
+        message: expect.stringMatching(/契約期間/),
+        detail: expect.objectContaining({
+          contract_start_date: '2024-01-01',
+          contract_end_date: '2024-12-31',
+          specified_start_date: '2023-12-15',
+        }),
+      })
+    );
+
+    // 許可されていない売上区分を指定
+    const invalidParamsSalesDivision = {
+      report_start_date: '2024-01-01',
+      report_end_date: '2024-01-31',
+      target_customer_id: 'CUS001',
+      sales_division: 'SalesDiv_C',
+      include_discount: false,
+    };
+
+    const resultSalesDivision = validateReportGenerationParameters(
+      validContract,
+      invalidParamsSalesDivision
+    );
+    expect(resultSalesDivision.is_valid).toBe(false);
+    expect(resultSalesDivision.error_details).toContainEqual(
+      expect.objectContaining({
+        error_code: 'SALES_DIVISION_NOT_ALLOWED',
+        message: expect.stringMatching(/売上区分/),
+        detail: expect.objectContaining({
+          specified_division: 'SalesDiv_C',
+          allowed_divisions: ['SalesDiv_A', 'SalesDiv_B'],
+        }),
+      })
+    );
+
+    // 無効な顧客IDを指定
+    const invalidParamsCustomerId = {
+      report_start_date: '2024-01-01',
+      report_end_date: '2024-01-31',
+      target_customer_id: 'CUS999',
+      sales_division: 'SalesDiv_A',
+      include_discount: false,
+    };
+
+    const resultCustomerId = validateReportGenerationParameters(
+      validContract,
+      invalidParamsCustomerId
+    );
+    expect(resultCustomerId.is_valid).toBe(false);
+    expect(resultCustomerId.error_details).toContainEqual(
+      expect.objectContaining({
+        error_code: 'CUSTOMER_ID_MISMATCH',
+        message: expect.stringMatching(/顧客/),
+        detail: expect.objectContaining({
+          contract_customer_id: 'CUS001',
+          specified_customer_id: 'CUS999',
+        }),
+      })
+    );
+
+    // 複数エラーを同時に検出する場合
+    const invalidParamsMultiple = {
+      report_start_date: '2023-11-01',
+      report_end_date: '2024-02-28',
+      target_customer_id: 'CUS999',
+      sales_division: 'SalesDiv_D',
+      include_discount: false,
+    };
+
+    const resultMultiple = validateReportGenerationParameters(
+      validContract,
+      invalidParamsMultiple
+    );
+    expect(resultMultiple.is_valid).toBe(false);
+    expect(resultMultiple.error_details.length).toBeGreaterThanOrEqual(2);
+    expect(resultMultiple.error_details).toContainEqual(
+      expect.objectContaining({
+        error_code: expect.stringMatching(/DATE_OUT_OF_CONTRACT_PERIOD|CUSTOMER_ID_MISMATCH|SALES_DIVISION_NOT_ALLOWED/),
+      })
+    );
   });
 });

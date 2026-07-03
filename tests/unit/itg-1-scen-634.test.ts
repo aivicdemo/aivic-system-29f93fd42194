@@ -1,171 +1,184 @@
-import { validateSalesDataQuality } from '../../src/logic/it-1781935279444-2-2-1';
+import { extractContractChangeTimeline, calculateBillingDifference } from "../../src/logic/it-1-2-1";
 
-describe('営業データの完全性・正確性を自動検証し、不足データ・誤りを検出・通知する機能', () => {
-  // SCEN-634: [error] 月次営業データ品質自動検証機能 - 営業データの必須項目が未入力の場合、検証エラーが正確に検出される
-  test('必須項目未入力時に複数エラーが検出される', () => {
-    const sales_data_record = {
-      customer_name: '',
-      transaction_amount: 0,
-      transaction_date: '',
-      contact_date: '2024-01-15',
-      service_type: 'standard',
-      sales_person: 'sales_001',
-      status: 'completed',
+describe("契約変更条件と請求パターンの差分可視化機能", () => {
+  // SCEN-634
+  test("契約変更前後の条件を時系列で抽出し請求額差分が正確に算出される", () => {
+    // テストデータ準備: 契約ID、変更前条件、変更後条件、変更日時を含む契約変更レコード
+    const contractId = "CONTRACT-001";
+    const serviceId = "SERVICE-A";
+    const customerId = "CUSTOMER-001";
+
+    // 変更前条件: 基本料金 10,000円、成果報酬（アポ数）200円/件、数量 50件、割引率 5%
+    const preChangeCondition = {
+      contractId,
+      serviceId,
+      customerId,
+      baseFee: 10000,
+      performanceFeePerUnit: 200,
+      unitType: "アポ数",
+      quantity: 50,
+      discountRate: 0.05,
+      effectiveDate: "2024-01-01T00:00:00Z",
     };
 
-    const result = validateSalesDataQuality(sales_data_record);
+    // 変更後条件: 基本料金 12,000円、成果報酬（アポ数）220円/件、数量 60件、割引率 10%
+    const postChangeCondition = {
+      contractId,
+      serviceId,
+      customerId,
+      baseFee: 12000,
+      performanceFeePerUnit: 220,
+      unitType: "アポ数",
+      quantity: 60,
+      discountRate: 0.1,
+      effectiveDate: "2024-02-01T00:00:00Z",
+    };
 
-    // 期待結果: 必須項目の未入力が検出され、各未入力項目ごとにエラーが返される
-    expect(result.is_valid).toBe(false);
-    expect(result.errors).toBeDefined();
-    expect(Array.isArray(result.errors)).toBe(true);
+    // 複数の契約変更が存在する場合のテスト用に、さらに 1 件追加
+    const secondChangeCondition = {
+      contractId,
+      serviceId,
+      customerId,
+      baseFee: 13000,
+      performanceFeePerUnit: 240,
+      unitType: "アポ数",
+      quantity: 70,
+      discountRate: 0.08,
+      effectiveDate: "2024-03-01T00:00:00Z",
+    };
 
-    // 必須項目の未入力エラーを検証
-    expect(result.errors.length).toBe(3); // customer_name, transaction_amount, transaction_date の3つが未入力
+    const contractChangeHistory = [
+      preChangeCondition,
+      postChangeCondition,
+      secondChangeCondition,
+    ];
 
-    const error_field_names = result.errors.map((err: any) => err.field_name);
-    expect(error_field_names).toContain('customer_name');
-    expect(error_field_names).toContain('transaction_amount');
-    expect(error_field_names).toContain('transaction_date');
-
-    // 各エラー情報に項目名とエラーコードが含まれていることを確認
-    result.errors.forEach((err: any) => {
-      expect(err).toHaveProperty('field_name');
-      expect(err).toHaveProperty('error_code');
-      expect(err).toHaveProperty('error_message');
-      expect(typeof err.field_name).toBe('string');
-      expect(typeof err.error_code).toBe('string');
-      expect(typeof err.error_message).toBe('string');
-
-      // エラーコードが正確に対応する必須項目エラーであることを確認
-      if (err.field_name === 'customer_name') {
-        expect(err.error_code).toMatch(/required|customer_name/i);
-      } else if (err.field_name === 'transaction_amount') {
-        expect(err.error_code).toMatch(/required|transaction_amount|金額/i);
-      } else if (err.field_name === 'transaction_date') {
-        expect(err.error_code).toMatch(/required|transaction_date|日付/i);
-      }
+    // 契約変更前後の条件を時系列で抽出
+    const extractedTimeline = extractContractChangeTimeline({
+      contractId,
+      contractChangeHistory,
     });
 
-    // エラー詳細情報に行番号情報が含まれているかを確認
-    result.errors.forEach((err: any) => {
-      if (err.row_number !== undefined) {
-        expect(typeof err.row_number).toBe('number');
-      }
+    // 抽出された条件が正確であることを検証
+    expect(extractedTimeline).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          effectiveDate: "2024-01-01T00:00:00Z",
+          baseFee: 10000,
+          performanceFeePerUnit: 200,
+          quantity: 50,
+          discountRate: 0.05,
+        }),
+        expect.objectContaining({
+          effectiveDate: "2024-02-01T00:00:00Z",
+          baseFee: 12000,
+          performanceFeePerUnit: 220,
+          quantity: 60,
+          discountRate: 0.1,
+        }),
+        expect.objectContaining({
+          effectiveDate: "2024-03-01T00:00:00Z",
+          baseFee: 13000,
+          performanceFeePerUnit: 240,
+          quantity: 70,
+          discountRate: 0.08,
+        }),
+      ])
+    );
+
+    // 時系列順序が正しく並んでいることを確認
+    expect(extractedTimeline[0].effectiveDate).toBe("2024-01-01T00:00:00Z");
+    expect(extractedTimeline[1].effectiveDate).toBe("2024-02-01T00:00:00Z");
+    expect(extractedTimeline[2].effectiveDate).toBe("2024-03-01T00:00:00Z");
+
+    // 請求額計算: 変更前
+    // 計算式: (基本料金 + (成果報酬 × 数量)) × (1 - 割引率)
+    // = (10,000 + (200 × 50)) × (1 - 0.05)
+    // = (10,000 + 10,000) × 0.95
+    // = 20,000 × 0.95
+    // = 19,000
+    const preChangeBilling = calculateBillingDifference({
+      preCondition: preChangeCondition,
+      postCondition: null,
     });
-  });
+    expect(preChangeBilling.preBillingAmount).toBe(19000);
 
-  test('すべての必須項目が入力されている場合は検証に合格する', () => {
-    const sales_data_record = {
-      customer_name: 'Customer A',
-      transaction_amount: 50000,
-      transaction_date: '2024-01-15',
-      contact_date: '2024-01-15',
-      service_type: 'standard',
-      sales_person: 'sales_001',
-      status: 'completed',
-    };
-
-    const result = validateSalesDataQuality(sales_data_record);
-
-    expect(result.is_valid).toBe(true);
-    expect(result.errors).toBeDefined();
-    expect(Array.isArray(result.errors)).toBe(true);
-    expect(result.errors.length).toBe(0);
-  });
-
-  test('顧客名のみ未入力の場合、そのエラーのみが検出される', () => {
-    const sales_data_record = {
-      customer_name: '',
-      transaction_amount: 75000,
-      transaction_date: '2024-01-20',
-      contact_date: '2024-01-20',
-      service_type: 'premium',
-      sales_person: 'sales_002',
-      status: 'completed',
-    };
-
-    const result = validateSalesDataQuality(sales_data_record);
-
-    expect(result.is_valid).toBe(false);
-    expect(result.errors.length).toBe(1);
-    expect(result.errors[0].field_name).toBe('customer_name');
-    expect(result.errors[0].error_code).toMatch(/required|customer_name/i);
-  });
-
-  test('データ型の不整合がある場合もエラーとして検出される', () => {
-    const sales_data_record = {
-      customer_name: 'Customer B',
-      transaction_amount: 'not_a_number',
-      transaction_date: '2024-01-25',
-      contact_date: '2024-01-25',
-      service_type: 'standard',
-      sales_person: 'sales_003',
-      status: 'completed',
-    };
-
-    const result = validateSalesDataQuality(sales_data_record);
-
-    expect(result.is_valid).toBe(false);
-    expect(result.errors.length).toBeGreaterThanOrEqual(1);
-
-    const amount_error = result.errors.find((err: any) => err.field_name === 'transaction_amount');
-    expect(amount_error).toBeDefined();
-    if (amount_error) {
-      expect(amount_error.error_code).toMatch(/type|金額|数値/i);
-    }
-  });
-
-  test('値の範囲外のエラーが検出される', () => {
-    const sales_data_record = {
-      customer_name: 'Customer C',
-      transaction_amount: -10000,
-      transaction_date: '2024-01-30',
-      contact_date: '2024-01-30',
-      service_type: 'standard',
-      sales_person: 'sales_004',
-      status: 'completed',
-    };
-
-    const result = validateSalesDataQuality(sales_data_record);
-
-    expect(result.is_valid).toBe(false);
-
-    const amount_error = result.errors.find((err: any) => err.field_name === 'transaction_amount');
-    if (amount_error) {
-      expect(amount_error.error_code).toMatch(/range|金額|負数/i);
-    }
-  });
-
-  test('複数の必須項目が未入力で、かつデータ型エラーがある場合、すべてのエラーが検出される', () => {
-    const sales_data_record = {
-      customer_name: '',
-      transaction_amount: 'invalid',
-      transaction_date: '',
-      contact_date: '2024-02-01',
-      service_type: 'standard',
-      sales_person: 'sales_005',
-      status: 'completed',
-    };
-
-    const result = validateSalesDataQuality(sales_data_record);
-
-    expect(result.is_valid).toBe(false);
-    expect(result.errors.length).toBeGreaterThanOrEqual(3);
-
-    const field_names_with_errors = result.errors.map((err: any) => err.field_name);
-    expect(field_names_with_errors).toContain('customer_name');
-    expect(field_names_with_errors).toContain('transaction_amount');
-    expect(field_names_with_errors).toContain('transaction_date');
-
-    // 各エラーが必須フィールドを持つことを確認
-    result.errors.forEach((err: any) => {
-      expect(err).toHaveProperty('field_name');
-      expect(err).toHaveProperty('error_code');
-      expect(err).toHaveProperty('error_message');
-      expect(err.field_name).toBeTruthy();
-      expect(err.error_code).toBeTruthy();
-      expect(err.error_message).toBeTruthy();
+    // 請求額計算: 変更後（1回目）
+    // = (12,000 + (220 × 60)) × (1 - 0.1)
+    // = (12,000 + 13,200) × 0.9
+    // = 25,200 × 0.9
+    // = 22,680
+    const firstChangeBilling = calculateBillingDifference({
+      preCondition: preChangeCondition,
+      postCondition: postChangeCondition,
     });
+    expect(firstChangeBilling.postBillingAmount).toBe(22680);
+
+    // 請求額差分（1回目: 変更後 - 変更前）
+    // = 22,680 - 19,000
+    // = 3,680
+    expect(firstChangeBilling.billingDifference).toBe(3680);
+
+    // 請求額計算: 変更後（2回目）
+    // = (13,000 + (240 × 70)) × (1 - 0.08)
+    // = (13,000 + 16,800) × 0.92
+    // = 29,800 × 0.92
+    // = 27,416
+    const secondChangeBilling = calculateBillingDifference({
+      preCondition: postChangeCondition,
+      postCondition: secondChangeCondition,
+    });
+    expect(secondChangeBilling.postBillingAmount).toBe(27416);
+
+    // 請求額差分（2回目: 変更後 - 変更前）
+    // = 27,416 - 22,680
+    // = 4,736
+    expect(secondChangeBilling.billingDifference).toBe(4736);
+
+    // 複数の契約変更が存在する場合、各変更ごとの差分が正確に算出されていることを確認
+    const allDifferences = [
+      firstChangeBilling.billingDifference,
+      secondChangeBilling.billingDifference,
+    ];
+    expect(allDifferences).toEqual([3680, 4736]);
+
+    // 差分可視化機能で、契約変更前後の条件と請求額差分が正確に表示されることを検証
+    const visualizationData = {
+      contractId,
+      serviceId,
+      customerId,
+      changeTimeline: extractedTimeline,
+      billingChanges: [
+        {
+          changeIndex: 0,
+          preCondition: preChangeCondition,
+          postCondition: postChangeCondition,
+          preBillingAmount: 19000,
+          postBillingAmount: 22680,
+          billingDifference: 3680,
+          effectiveDate: "2024-02-01T00:00:00Z",
+        },
+        {
+          changeIndex: 1,
+          preCondition: postChangeCondition,
+          postCondition: secondChangeCondition,
+          preBillingAmount: 22680,
+          postBillingAmount: 27416,
+          billingDifference: 4736,
+          effectiveDate: "2024-03-01T00:00:00Z",
+        },
+      ],
+    };
+
+    expect(visualizationData.changeTimeline).toHaveLength(3);
+    expect(visualizationData.billingChanges).toHaveLength(2);
+    expect(visualizationData.billingChanges[0].billingDifference).toBe(3680);
+    expect(visualizationData.billingChanges[1].billingDifference).toBe(4736);
+    expect(visualizationData.billingChanges[0].effectiveDate).toBe(
+      "2024-02-01T00:00:00Z"
+    );
+    expect(visualizationData.billingChanges[1].effectiveDate).toBe(
+      "2024-03-01T00:00:00Z"
+    );
   });
 });

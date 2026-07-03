@@ -1,100 +1,194 @@
-import { describe, test, expect, beforeEach } from "@jest/globals";
-import { computeMetadataFields } from "../../src/logic/it-1781935279444-1-1-1";
+import { validateReportApprovalCriteria } from '../../src/logic/it-1-br-1781935279444-1-2-1';
 
-describe("営業データ項目メタデータ一元管理機能", () => {
-  // SCEN-664: [error] 営業データ項目メタデータ一元管理機能 - 計算ロジックが未定義の項目は計算がスキップされる
-  test("計算ロジック未定義の項目は計算がスキップされ、ログに記録される", () => {
-    // Arrange: 計算ロジックが未定義の営業データ項目メタデータを準備
-    const metadata_items = [
+describe('月次サマリーテンプレート定義・管理 - レポート承認基準検証', () => {
+  // SCEN-664: [error] レポート承認基準検証機能 - レポート内容が承認基準の一部に違反する場合、差戻し理由が正確に識別される
+  test('承認基準違反を正確に識別し、詳細な差戻し理由を返却する', () => {
+    const approvalCriteria = [
       {
-        item_id: "META_001",
-        item_name: "月間アポ数",
-        data_type: "INTEGER",
-        unit: "件",
-        is_required: true,
-        calculation_logic: "SUM(daily_appointments)",
-        report_mapping: "report_kpi_001",
-        status: "ACTIVE",
+        criteriaId: 'SALES_AMOUNT_RANGE',
+        criteriaName: '売上金額範囲',
+        minValue: 100000,
+        maxValue: 5000000,
+        dataType: 'number'
       },
       {
-        item_id: "META_002",
-        item_name: "顧客反応スコア",
-        data_type: "DECIMAL",
-        unit: "点",
-        is_required: false,
-        calculation_logic: null, // 計算ロジック未定義
-        report_mapping: "report_kpi_002",
-        status: "ACTIVE",
+        criteriaId: 'CUSTOMER_CODE_FORMAT',
+        criteriaName: '顧客コード形式',
+        pattern: '^CUST[0-9]{6}$',
+        dataType: 'string'
       },
       {
-        item_id: "META_003",
-        item_name: "成約率",
-        data_type: "DECIMAL",
-        unit: "%",
-        is_required: true,
-        calculation_logic: "(成約数 / アポ数) * 100",
-        report_mapping: "report_kpi_003",
-        status: "ACTIVE",
+        criteriaId: 'REPORT_COMPLETION_RATE',
+        criteriaName: 'レポート完成度',
+        minValue: 80,
+        maxValue: 100,
+        dataType: 'number'
       },
+      {
+        criteriaId: 'REQUIRED_FIELDS',
+        criteriaName: '必須項目',
+        requiredFields: ['reportDate', 'salesAmount', 'customerCode', 'approvalStatus'],
+        dataType: 'array'
+      }
     ];
 
-    const source_data = {
-      daily_appointments: [5, 3, 7, 4, 6],
-      deals_count: 12,
-      appointment_count: 30,
-      customer_feedback: 45,
+    const reportContent = {
+      reportDate: '2024-01-15',
+      salesAmount: 50000,
+      customerCode: 'INVALID-CODE',
+      approvalStatus: 'pending',
+      completionRate: 75
     };
 
-    // Act: 計算ロジックが未定義の項目を含めて計算処理を実行
-    const result = computeMetadataFields({
-      metadata_items: metadata_items,
-      source_data: source_data,
+    const result = validateReportApprovalCriteria({
+      approvalCriteria,
+      reportContent
     });
 
-    // Assert: 計算結果の検証
-    // META_001: 計算ロジック定義あり → 合計 25 件（5+3+7+4+6）
-    expect(result.computed_values).toEqual(
-      expect.objectContaining({
-        META_001: 25,
-      })
+    expect(result.isValid).toBe(false);
+    expect(result.violations).toHaveLength(3);
+
+    const salesAmountViolation = result.violations.find(
+      (v: any) => v.criteriaId === 'SALES_AMOUNT_RANGE'
+    );
+    expect(salesAmountViolation).toBeDefined();
+    expect(salesAmountViolation.criteriaName).toBe('売上金額範囲');
+    expect(salesAmountViolation.violationType).toBe('OUT_OF_RANGE');
+    expect(salesAmountViolation.expectedRange).toEqual({
+      min: 100000,
+      max: 5000000
+    });
+    expect(salesAmountViolation.actualValue).toBe(50000);
+    expect(salesAmountViolation.message).toBe(
+      '売上金額は100000以上5000000以下である必要があります。実際の値: 50000'
     );
 
-    // META_002: 計算ロジック未定義 → 計算スキップ、値なし
-    expect(result.computed_values).toEqual(
-      expect.objectContaining({
-        META_002: undefined,
-      })
+    const customerCodeViolation = result.violations.find(
+      (v: any) => v.criteriaId === 'CUSTOMER_CODE_FORMAT'
+    );
+    expect(customerCodeViolation).toBeDefined();
+    expect(customerCodeViolation.criteriaName).toBe('顧客コード形式');
+    expect(customerCodeViolation.violationType).toBe('FORMAT_MISMATCH');
+    expect(customerCodeViolation.expectedPattern).toBe('^CUST[0-9]{6}$');
+    expect(customerCodeViolation.actualValue).toBe('INVALID-CODE');
+    expect(customerCodeViolation.message).toBe(
+      '顧客コード形式が正しくありません。期待形式: ^CUST[0-9]{6}$、実際の値: INVALID-CODE'
     );
 
-    // META_003: 計算ロジック定義あり → 成約率 40%（12/30*100）
-    expect(result.computed_values).toEqual(
-      expect.objectContaining({
-        META_003: 40,
-      })
+    const completionRateViolation = result.violations.find(
+      (v: any) => v.criteriaId === 'REPORT_COMPLETION_RATE'
+    );
+    expect(completionRateViolation).toBeDefined();
+    expect(completionRateViolation.criteriaName).toBe('レポート完成度');
+    expect(completionRateViolation.violationType).toBe('OUT_OF_RANGE');
+    expect(completionRateViolation.expectedRange).toEqual({
+      min: 80,
+      max: 100
+    });
+    expect(completionRateViolation.actualValue).toBe(75);
+    expect(completionRateViolation.message).toBe(
+      'レポート完成度は80以上100以下である必要があります。実際の値: 75'
     );
 
-    // ログにスキップ通知が記録されていることを確認
-    expect(result.execution_logs).toContainEqual(
-      expect.objectContaining({
-        item_id: "META_002",
-        status: "SKIPPED",
-        message: expect.stringMatching(/計算ロジック/),
-      })
+    expect(result.rejectionReasons).toBe(
+      '以下の承認基準を満たしていません: 売上金額範囲 (売上金額は100000以上5000000以下である必要があります。実際の値: 50000), 顧客コード形式 (顧客コード形式が正しくありません。期待形式: ^CUST[0-9]{6}$、実際の値: INVALID-CODE), レポート完成度 (レポート完成度は80以上100以下である必要があります。実際の値: 75)'
     );
+  });
 
-    // 計算対象外の項目ステータスが正しく標識されていることを確認
-    expect(result.item_status_mapping).toEqual(
-      expect.objectContaining({
-        META_001: "CALCULATED",
-        META_002: "EXCLUDED",
-        META_003: "CALCULATED",
-      })
-    );
+  // 補助テスト: 単一違反ケース
+  test('単一の承認基準違反を正確に識別する', () => {
+    const approvalCriteria = [
+      {
+        criteriaId: 'SALES_AMOUNT_RANGE',
+        criteriaName: '売上金額範囲',
+        minValue: 100000,
+        maxValue: 5000000,
+        dataType: 'number'
+      }
+    ];
 
-    // 全体の処理ステータスが正常完了であることを確認
-    expect(result.overall_status).toBe("COMPLETED");
+    const reportContent = {
+      salesAmount: 6000000
+    };
 
-    // エラーが発生していないことを確認
-    expect(result.errors).toHaveLength(0);
+    const result = validateReportApprovalCriteria({
+      approvalCriteria,
+      reportContent
+    });
+
+    expect(result.isValid).toBe(false);
+    expect(result.violations).toHaveLength(1);
+    expect(result.violations[0].criteriaId).toBe('SALES_AMOUNT_RANGE');
+    expect(result.violations[0].actualValue).toBe(6000000);
+    expect(result.violations[0].expectedRange.max).toBe(5000000);
+  });
+
+  // 補助テスト: すべての基準を満たすケース
+  test('すべての承認基準を満たす場合は合格を返却する', () => {
+    const approvalCriteria = [
+      {
+        criteriaId: 'SALES_AMOUNT_RANGE',
+        criteriaName: '売上金額範囲',
+        minValue: 100000,
+        maxValue: 5000000,
+        dataType: 'number'
+      },
+      {
+        criteriaId: 'CUSTOMER_CODE_FORMAT',
+        criteriaName: '顧客コード形式',
+        pattern: '^CUST[0-9]{6}$',
+        dataType: 'string'
+      },
+      {
+        criteriaId: 'REPORT_COMPLETION_RATE',
+        criteriaName: 'レポート完成度',
+        minValue: 80,
+        maxValue: 100,
+        dataType: 'number'
+      }
+    ];
+
+    const reportContent = {
+      salesAmount: 2500000,
+      customerCode: 'CUST123456',
+      completionRate: 95
+    };
+
+    const result = validateReportApprovalCriteria({
+      approvalCriteria,
+      reportContent
+    });
+
+    expect(result.isValid).toBe(true);
+    expect(result.violations).toHaveLength(0);
+    expect(result.rejectionReasons).toBe('');
+  });
+
+  // 補助テスト: 必須項目欠落
+  test('必須項目が欠落している場合、欠落項目を明示する', () => {
+    const approvalCriteria = [
+      {
+        criteriaId: 'REQUIRED_FIELDS',
+        criteriaName: '必須項目',
+        requiredFields: ['reportDate', 'salesAmount', 'customerCode'],
+        dataType: 'array'
+      }
+    ];
+
+    const reportContent = {
+      reportDate: '2024-01-15',
+      customerCode: 'CUST123456'
+    };
+
+    const result = validateReportApprovalCriteria({
+      approvalCriteria,
+      reportContent
+    });
+
+    expect(result.isValid).toBe(false);
+    expect(result.violations).toHaveLength(1);
+    expect(result.violations[0].criteriaId).toBe('REQUIRED_FIELDS');
+    expect(result.violations[0].violationType).toBe('MISSING_REQUIRED_FIELDS');
+    expect(result.violations[0].missingFields).toEqual(['salesAmount']);
   });
 });

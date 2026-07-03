@@ -1,109 +1,119 @@
-import { detectDeprecatedMaterial } from "../../src/logic/it-1781935279444-1-1-1";
+import { describe, test, expect, beforeEach } from "@jest/globals";
+import {
+  validateSLACompliance,
+  recordSLAMonitoringLog,
+} from "../../src/logic/it-1781935279444-1-1-1";
 
-describe("営業データ項目のメタデータ管理機能 - 非推奨版資料の自動検出・警告機能", () => {
-  // SCEN-784
-  test("営業担当者が旧バージョン資料を選択しようとした場合、警告表示またはロックが実行される", () => {
-    // Arrange
-    const customerId = "CUST-001";
-    const proposalId = "PROP-2024-001";
-    const selectedMaterialId = "MAT-OLD-001";
+describe("営業データ項目のメタデータ管理機能 - SLA期限監視", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
 
-    const availableMaterials = [
-      {
-        materialId: "MAT-OLD-001",
-        version: 1,
-        fileName: "proposal_v1.pdf",
-        createdAt: new Date("2023-06-15T10:00:00Z"),
-        isDeprecated: true,
-        status: "deprecated",
-      },
-      {
-        materialId: "MAT-LATEST-001",
-        version: 3,
-        fileName: "proposal_v3.pdf",
-        createdAt: new Date("2024-01-20T14:30:00Z"),
-        isDeprecated: false,
-        status: "active",
-      },
-      {
-        materialId: "MAT-OLD-002",
-        version: 2,
-        fileName: "proposal_v2.pdf",
-        createdAt: new Date("2023-11-10T09:15:00Z"),
-        isDeprecated: true,
-        status: "deprecated",
-      },
-    ];
+  // SCEN-784: [edge] 資料リリース通知から確認完了までのSLA監視機能 - SLA期限とちょうど同じ時間で正常系として扱う（境界値チェック）
+  test("確認完了時刻がSLA期限と同じ時間の場合、SLAステータスが正常系と判定され、アラートが発報されないこと", () => {
+    // テストデータセットアップ
+    const slaDueDateTime = new Date("2024-01-15T17:00:00Z");
+    const confirmedDateTime = new Date("2024-01-15T17:00:00Z");
+    const materialReleaseNotificationId = "notification-001";
+    const documentVersionId = "version-001";
 
-    const detectionConfig = {
-      enforceLatestVersion: true,
-      showWarningDialog: true,
-      lockDeprecatedMaterials: true,
+    // SLA監視機能の開始
+    const slaComplianceInput = {
+      materialReleaseNotificationId: materialReleaseNotificationId,
+      documentVersionId: documentVersionId,
+      slaDueDateTime: slaDueDateTime.toISOString(),
+      confirmedDateTime: confirmedDateTime.toISOString(),
     };
 
-    // Act
-    const detectionResult = detectDeprecatedMaterial({
-      customerId: customerId,
-      proposalId: proposalId,
-      selectedMaterialId: selectedMaterialId,
-      availableMaterials: availableMaterials,
-      config: detectionConfig,
-    });
+    // SLA監視関数を実行
+    const slaComplianceResult = validateSLACompliance(slaComplianceInput);
 
-    // Assert - 非推奨版資料が正しく検出されている
-    expect(detectionResult.isDeprecated).toBe(true);
-    expect(detectionResult.selectedMaterial.version).toBe(1);
-    expect(detectionResult.selectedMaterial.status).toBe("deprecated");
+    // SLAステータスが正常系（期限内）であることを検証
+    expect(slaComplianceResult.slaStatus).toBe("WITHIN_SLA");
 
-    // Assert - ロック状態が有効
-    expect(detectionResult.isLocked).toBe(true);
+    // アラート発報フラグがfalseであることを検証
+    expect(slaComplianceResult.alertTriggered).toBe(false);
 
-    // Assert - 警告メッセージが含まれている
-    expect(detectionResult.warningMessage).toMatch(/旧バージョン/);
-    expect(detectionResult.warningMessage).toMatch(/最新版/);
+    // SLAステータスメッセージを検証
+    expect(slaComplianceResult.statusMessage).toMatch(/期限内/);
 
-    // Assert - 推奨される最新版資料が正しく特定されている
-    expect(detectionResult.recommendedMaterial).toBeDefined();
-    expect(detectionResult.recommendedMaterial?.materialId).toBe(
-      "MAT-LATEST-001"
+    // 監視ログ記録用の入力データを準備
+    const monitoringLogInput = {
+      materialReleaseNotificationId: materialReleaseNotificationId,
+      documentVersionId: documentVersionId,
+      slaDueDateTime: slaDueDateTime.toISOString(),
+      confirmedDateTime: confirmedDateTime.toISOString(),
+      slaStatus: "WITHIN_SLA",
+      alertTriggered: false,
+      complianceTimestampUtc: confirmedDateTime.toISOString(),
+    };
+
+    // 監視ログを記録する
+    const monitoringLog = recordSLAMonitoringLog(monitoringLogInput);
+
+    // 監視ログの内容を検証
+    expect(monitoringLog.logMessage).toMatch(/SLA期限内で完了/);
+    expect(monitoringLog.materialReleaseNotificationId).toBe(
+      materialReleaseNotificationId
     );
-    expect(detectionResult.recommendedMaterial?.version).toBe(3);
-    expect(detectionResult.recommendedMaterial?.isDeprecated).toBe(false);
+    expect(monitoringLog.documentVersionId).toBe(documentVersionId);
 
-    // Assert - 非推奨版資料一覧に旧バージョンが含まれている
-    expect(detectionResult.deprecatedMaterials.length).toBe(2);
-    expect(
-      detectionResult.deprecatedMaterials.some(
-        (m) => m.materialId === "MAT-OLD-001"
-      )
-    ).toBe(true);
-    expect(
-      detectionResult.deprecatedMaterials.some(
-        (m) => m.materialId === "MAT-OLD-002"
-      )
-    ).toBe(true);
+    // ログレコードのタイムスタンプが記録されていることを検証
+    expect(monitoringLog.recordedAtUtc).toBeDefined();
 
-    // Assert - ユーザーアクション（選択操作）が阻止される
-    expect(detectionResult.allowSelection).toBe(false);
+    // SLAコンプライアンスログのモニタリング結果検証
+    const compliance_timestamp_diff_ms =
+      new Date(confirmedDateTime).getTime() -
+      new Date(slaDueDateTime).getTime();
 
-    // Assert - 理由・推奨資料・代替案情報が構造化されている
-    expect(detectionResult.reason).toMatch(/非推奨/);
-    expect(detectionResult.actionRequired).toBe("switchToLatestVersion");
-    expect(detectionResult.switchTarget?.materialId).toBe("MAT-LATEST-001");
-    expect(detectionResult.switchTarget?.switchReason).toMatch(/品質向上/);
+    // 差分が0ミリ秒（ちょうど同じ時間）であることを検証
+    expect(compliance_timestamp_diff_ms).toBe(0);
 
-    // Assert - ロック時刻とロック理由がタイムスタンプ付きで記録される
-    expect(detectionResult.lockedAt).toBeDefined();
-    expect(typeof detectionResult.lockedAt).toBe("string");
-    expect(detectionResult.lockReason).toMatch(/非推奨版/);
+    // SLAステータスと請求自動化への引き継ぎフラグを検証
+    expect(slaComplianceResult.proceedToBillingAutomation).toBe(true);
 
-    // Assert - ダイアログ表示設定が正しく反映されている
-    expect(detectionResult.displayWarningDialog).toBe(true);
-    expect(detectionResult.dialogTitle).toMatch(/注意/);
-    expect(detectionResult.dialogMessage).toMatch(/最新版を使用してください/);
+    // 追加: 複数の検証ケースを同一テスト内で実行
+    // ケース1: 期限より前に完了（さらに期限内）
+    const confirmedDateTimeEarly = new Date("2024-01-15T16:30:00Z");
+    const earlyComplianceInput = {
+      materialReleaseNotificationId: "notification-002",
+      documentVersionId: "version-002",
+      slaDueDateTime: slaDueDateTime.toISOString(),
+      confirmedDateTime: confirmedDateTimeEarly.toISOString(),
+    };
 
-    // Assert - ビジネス要件: 営業担当者への切り替え促進メッセージが明確
-    expect(detectionResult.userPromptMessage).toBeDefined();
-    expect(detectionResult.userPromptMessage).toMatch(/切り替え/);
+    const earlyComplianceResult = validateSLACompliance(earlyComplianceInput);
+    expect(earlyComplianceResult.slaStatus).toBe("WITHIN_SLA");
+    expect(earlyComplianceResult.alertTriggered).toBe(false);
+
+    // ケース2: 期限を1秒超過
+    const confirmedDateTimeLate = new Date("2024-01-15T17:00:01Z");
+    const lateComplianceInput = {
+      materialReleaseNotificationId: "notification-003",
+      documentVersionId: "version-003",
+      slaDueDateTime: slaDueDateTime.toISOString(),
+      confirmedDateTime: confirmedDateTimeLate.toISOString(),
+    };
+
+    const lateComplianceResult = validateSLACompliance(lateComplianceInput);
+    expect(lateComplianceResult.slaStatus).toBe("EXCEEDED_SLA");
+    expect(lateComplianceResult.alertTriggered).toBe(true);
+    expect(lateComplianceResult.statusMessage).toMatch(/期限超過/);
+    expect(lateComplianceResult.proceedToBillingAutomation).toBe(false);
+
+    // ケース3: 期限より1秒前に完了
+    const confirmedDateTimeJustBefore = new Date("2024-01-15T16:59:59Z");
+    const justBeforeComplianceInput = {
+      materialReleaseNotificationId: "notification-004",
+      documentVersionId: "version-004",
+      slaDueDateTime: slaDueDateTime.toISOString(),
+      confirmedDateTime: confirmedDateTimeJustBefore.toISOString(),
+    };
+
+    const justBeforeComplianceResult = validateSLACompliance(
+      justBeforeComplianceInput
+    );
+    expect(justBeforeComplianceResult.slaStatus).toBe("WITHIN_SLA");
+    expect(justBeforeComplianceResult.alertTriggered).toBe(false);
   });
 });

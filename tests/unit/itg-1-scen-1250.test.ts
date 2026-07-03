@@ -1,108 +1,140 @@
-import { describe, test, expect, beforeEach } from "@jest/globals";
-import {
-  updateContractAndBillingDataOnCustomerAgreement,
-} from "../../src/logic/it-1781935279444-1-1-1";
+import { validateSalesDataQuality } from "../../src/logic/it-1781935279444-2-2-1";
 
-describe("営業データ項目のメタデータ管理機能 - 契約・請求データ更新", () => {
-  beforeEach(() => {
-    jest.clearAllMocks();
-  });
+describe("営業データの完全性・正確性を自動検証し、不足データ・誤りを検出・通知する機能", () => {
+  // SCEN-1250: [error] 営業データ異常値・漏れ自動検出・通知機能
+  test("異常値が検出された場合、異常内容と修正指示を代表に通知して工程を一時停止する", () => {
+    // テストデータ：複数の異常値を含む営業データ
+    const invalidSalesData = [
+      {
+        id: "data_001",
+        customerId: "cust_001",
+        customerName: "", // 異常：顧客名が空欄
+        serviceType: "service_A",
+        appointmentCount: 5,
+        contractCount: 2,
+        revenue: -50000, // 異常：売上金額がマイナス値
+        invoiceDate: "2024-13-45", // 異常：請求日付が不正形式
+        status: "pending",
+      },
+      {
+        id: "data_002",
+        customerId: "cust_002",
+        customerName: "Customer B",
+        serviceType: "", // 異常：サービスタイプが空欄
+        appointmentCount: 10,
+        contractCount: 5,
+        revenue: 250000,
+        invoiceDate: "2024-01-15",
+        status: "pending",
+      },
+      {
+        id: "data_003",
+        customerId: "cust_003",
+        customerName: "Customer C",
+        serviceType: "service_C",
+        appointmentCount: -3, // 異常：アポ数がマイナス値
+        contractCount: 2,
+        revenue: 180000,
+        invoiceDate: "2024-01-20",
+        status: "pending",
+      },
+    ];
 
-  // SCEN-1250: [normal] 契約・請求データ更新機能 - 顧客合意確認受領・確認時に契約・請求データが最新状態に更新される
-  test("顧客合意確認受領・確認後、契約・請求データが最新状態に更新される", () => {
-    // ===== 前提条件: 顧客合意確認前のデータベース状態をスナップショット =====
-    const customer_id = "CUST-001";
-    const contract_id = "CONTRACT-001";
-    const billing_id = "BILLING-001";
+    // データ品質検証エンジンを実行
+    const validationResult = validateSalesDataQuality(invalidSalesData);
 
-    // スナップショット時点の契約・請求データ
-    const snapshot_contract_start_date = "2024-01-01";
-    const snapshot_contract_end_date = "2024-12-31";
-    const snapshot_contract_amount = 500000;
-    const snapshot_billing_date = "2024-02-01";
-    const snapshot_billing_amount = 50000;
-    const snapshot_payment_deadline = "2024-02-15";
-    const snapshot_updated_at = "2024-01-15T09:00:00Z";
+    // 検証結果の構造を確認
+    expect(validationResult).toHaveProperty("isValid");
+    expect(validationResult).toHaveProperty("errors");
+    expect(validationResult).toHaveProperty("notifications");
+    expect(validationResult).toHaveProperty("workflowStatus");
 
-    // 顧客合意確認後に反映される新しい契約・請求条件
-    const new_contract_start_date = "2024-01-01";
-    const new_contract_end_date = "2025-12-31"; // 契約期間を2025年まで延長
-    const new_contract_amount = 600000; // 契約金額を増加
-    const new_billing_date = "2024-02-05"; // 請求日変更
-    const new_billing_amount = 60000; // 請求額増加
-    const new_payment_deadline = "2024-02-20"; // 支払期限変更
-    const expected_updated_at = "2024-01-15T14:30:00Z"; // 確認処理完了時刻
+    // 検証失敗を確認
+    expect(validationResult.isValid).toBe(false);
 
-    // ===== トリガー: 顧客合意確認フォームに必要情報を入力して確認受領・確認を実行 =====
-    const confirmation_input = {
-      customer_id: customer_id,
-      contract_id: contract_id,
-      billing_id: billing_id,
-      agreement_status: "confirmed", // 確認受領・確認完了状態
-      new_contract_end_date: new_contract_end_date,
-      new_contract_amount: new_contract_amount,
-      new_billing_date: new_billing_date,
-      new_billing_amount: new_billing_amount,
-      new_payment_deadline: new_payment_deadline,
-      confirmation_timestamp: expected_updated_at,
-      confirmed_by: "rep-001", // 代表兼営業オペレーター
-    };
+    // 検出された異常値の内容を検証
+    expect(validationResult.errors).toBeInstanceOf(Array);
+    expect(validationResult.errors.length).toBeGreaterThan(0);
 
-    // ===== 実行: 契約・請求データ更新関数を呼び出し =====
-    const result = updateContractAndBillingDataOnCustomerAgreement(
-      confirmation_input
+    // 異常値の詳細内容を検証
+    const customerNameError = validationResult.errors.find(
+      (err: any) => err.dataId === "data_001" && err.field === "customerName"
     );
+    expect(customerNameError).toBeDefined();
+    expect(customerNameError.errorType).toBe("EMPTY_FIELD");
+    expect(customerNameError.message).toContain("顧客名");
 
-    // ===== 検証: 期待結果に対する assertion =====
-    // 更新後の契約データが正確に反映されていることを確認
-    expect(result.contract_updated).toBe(true);
-    expect(result.contract.contract_id).toBe(contract_id);
-    expect(result.contract.contract_end_date).toBe(new_contract_end_date); // 契約期間が2025年に更新
-    expect(result.contract.contract_amount).toBe(new_contract_amount); // 契約金額が600000に更新
-    expect(result.contract.updated_at).toBe(expected_updated_at); // 更新日時が正確に記録
+    const negativeRevenueError = validationResult.errors.find(
+      (err: any) => err.dataId === "data_001" && err.field === "revenue"
+    );
+    expect(negativeRevenueError).toBeDefined();
+    expect(negativeRevenueError.errorType).toBe("INVALID_VALUE_RANGE");
+    expect(negativeRevenueError.message).toContain("売上");
 
-    // 更新後の請求データが正確に反映されていることを確認
-    expect(result.billing_updated).toBe(true);
-    expect(result.billing.billing_id).toBe(billing_id);
-    expect(result.billing.billing_date).toBe(new_billing_date); // 請求日が2024-02-05に変更
-    expect(result.billing.billing_amount).toBe(new_billing_amount); // 請求額が60000に更新
-    expect(result.billing.payment_deadline).toBe(new_payment_deadline); // 支払期限が2024-02-20に変更
-    expect(result.billing.updated_at).toBe(expected_updated_at); // 更新日時が正確に記録
+    const invalidInvoiceDateError = validationResult.errors.find(
+      (err: any) => err.dataId === "data_001" && err.field === "invoiceDate"
+    );
+    expect(invalidInvoiceDateError).toBeDefined();
+    expect(invalidInvoiceDateError.errorType).toBe("INVALID_FORMAT");
+    expect(invalidInvoiceDateError.message).toContain("日付");
 
-    // スナップショットからの差分が正確に記録されていることを確認
-    expect(result.changes_recorded).toBe(true);
-    expect(result.changes.contract_end_date_changed).toBe(true);
-    expect(result.changes.contract_amount_changed).toBe(true);
-    expect(result.changes.billing_date_changed).toBe(true);
-    expect(result.changes.billing_amount_changed).toBe(true);
-    expect(result.changes.payment_deadline_changed).toBe(true);
+    const emptyServiceTypeError = validationResult.errors.find(
+      (err: any) => err.dataId === "data_002" && err.field === "serviceType"
+    );
+    expect(emptyServiceTypeError).toBeDefined();
+    expect(emptyServiceTypeError.errorType).toBe("EMPTY_FIELD");
 
-    // 管理画面に反映される更新内容が正確であることを確認
-    expect(result.admin_display).toEqual({
-      contract_id: contract_id,
-      customer_id: customer_id,
-      update_status: "completed", // 更新完了
-      updated_at: expected_updated_at,
-      updated_by: "rep-001",
-      previous_contract_end_date: snapshot_contract_end_date,
-      new_contract_end_date: new_contract_end_date,
-      previous_contract_amount: snapshot_contract_amount,
-      new_contract_amount: new_contract_amount,
-      previous_billing_date: snapshot_billing_date,
-      new_billing_date: new_billing_date,
-      previous_billing_amount: snapshot_billing_amount,
-      new_billing_amount: new_billing_amount,
-      previous_payment_deadline: snapshot_payment_deadline,
-      new_payment_deadline: new_payment_deadline,
-    });
+    const negativeAppointmentError = validationResult.errors.find(
+      (err: any) => err.dataId === "data_003" && err.field === "appointmentCount"
+    );
+    expect(negativeAppointmentError).toBeDefined();
+    expect(negativeAppointmentError.errorType).toBe("INVALID_VALUE_RANGE");
 
-    // システムの整合性が保たれていることを確認（更新前後の全データが記録）
-    expect(result.system_consistency_verified).toBe(true);
-    expect(result.audit_log_created).toBe(true);
-    expect(result.audit_log.action).toBe("contract_billing_update_on_agreement");
-    expect(result.audit_log.contract_id).toBe(contract_id);
-    expect(result.audit_log.customer_id).toBe(customer_id);
-    expect(result.audit_log.timestamp).toBe(expected_updated_at);
-    expect(result.audit_log.status).toBe("success");
+    // 修正指示を含む通知メッセージが生成されることを確認
+    expect(validationResult.notifications).toBeInstanceOf(Array);
+    expect(validationResult.notifications.length).toBeGreaterThan(0);
+
+    const notification = validationResult.notifications[0];
+    expect(notification).toHaveProperty("recipientType");
+    expect(notification.recipientType).toBe("REPRESENTATIVE");
+    expect(notification).toHaveProperty("notificationType");
+    expect(notification.notificationType).toBe("DATA_QUALITY_ERROR");
+    expect(notification).toHaveProperty("message");
+    expect(notification.message).toContain("異常値");
+    expect(notification.message).toContain("修正");
+    expect(notification).toHaveProperty("channel");
+    expect(["email", "system", "both"]).toContain(notification.channel);
+
+    // 工程を一時停止状態に遷移することを確認
+    expect(validationResult.workflowStatus).toBe("PAUSED");
+
+    // 異常値の総数を検証（最低4件の異常が検出される）
+    expect(validationResult.errors.length).toBeGreaterThanOrEqual(4);
+
+    // 通知に含まれる異常データの参照情報を検証
+    expect(notification).toHaveProperty("affectedDataIds");
+    expect(notification.affectedDataIds).toBeInstanceOf(Array);
+    expect(notification.affectedDataIds.length).toBe(3);
+
+    // 一時停止中は後続の自動処理が実行されないことを確認
+    expect(validationResult).toHaveProperty("canProceedToNextStep");
+    expect(validationResult.canProceedToNextStep).toBe(false);
+
+    // 修正と承認後に再開可能な状態を確認
+    expect(validationResult).toHaveProperty("requiresManualApproval");
+    expect(validationResult.requiresManualApproval).toBe(true);
+    expect(validationResult).toHaveProperty("resumeToken");
+    expect(typeof validationResult.resumeToken).toBe("string");
+    expect(validationResult.resumeToken.length).toBeGreaterThan(0);
+
+    // 通知の送信対象が代表であることを確認
+    expect(notification.recipientRole).toBe("REPRESENTATIVE");
+    expect(notification).toHaveProperty("sentAt");
+    expect(typeof notification.sentAt).toBe("string");
+
+    // 各異常値の詳細が通知に含まれることを確認
+    expect(notification).toHaveProperty("errorSummary");
+    expect(notification.errorSummary).toBeInstanceOf(Array);
+    expect(notification.errorSummary.length).toBeGreaterThanOrEqual(4);
   });
 });

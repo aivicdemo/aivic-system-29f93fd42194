@@ -1,118 +1,198 @@
-import { submitFeedbackWithDefaultClassification } from "../../src/logic/it-1-br-1781935279444-1-2-1";
+import { describe, test, expect } from "@jest/globals";
+import { validateSalesDataMetadata } from "../../src/logic/it-1781935279444-2-2-1";
 
-describe("Monthly Summary Template Definition and Management - Feedback Classification", () => {
-  test("SCEN-1313: Undefined feedback category automatically assigned to default classification", () => {
-    // Setup: Define predefined categories and default category
-    const predefinedCategories = ["accuracy", "clarity", "completeness"];
-    const defaultCategory = "other";
+describe("営業データ品質検証 - メタデータ定義欠落時のエラーハンドリング", () => {
+  // SCEN-1313
+  test("メタデータ定義が欠落している場合、検証処理が中断されて欠落項目を示すエラーが発生する", () => {
+    // 前提: 営業データファイルが選択され、メタデータ定義が一部欠落している状態
 
-    // Input: Feedback with undefined category
-    const feedbackInput = {
-      content: "Report data seems unclear in some sections",
-      category: "undefined_category_xyz",
-      templateId: "template_001",
-      submittedBy: "user_123",
-      submittedAt: "2024-01-15T10:30:00Z",
-    };
-
-    // Execute: Submit feedback with undefined category
-    const result = submitFeedbackWithDefaultClassification(
-      feedbackInput,
-      predefinedCategories,
-      defaultCategory
-    );
-
-    // Assertions: Verify that undefined category is mapped to default
-    expect(result).toEqual({
-      feedbackId: expect.any(String),
-      content: "Report data seems unclear in some sections",
-      category: "other",
-      originalCategory: "undefined_category_xyz",
-      templateId: "template_001",
-      submittedBy: "user_123",
-      submittedAt: "2024-01-15T10:30:00Z",
-      assignedAt: "2024-01-15T10:30:00Z",
-      status: "classified",
-    });
-
-    expect(result.category).toBe("other");
-    expect(result.originalCategory).toBe("undefined_category_xyz");
-    expect(result.status).toBe("classified");
-
-    // Verify: Test that predefined categories are NOT reassigned
-    const validFeedbackInput = {
-      content: "Report is very accurate",
-      category: "accuracy",
-      templateId: "template_001",
-      submittedBy: "user_124",
-      submittedAt: "2024-01-15T11:00:00Z",
-    };
-
-    const validResult = submitFeedbackWithDefaultClassification(
-      validFeedbackInput,
-      predefinedCategories,
-      defaultCategory
-    );
-
-    expect(validResult.category).toBe("accuracy");
-    expect(validResult.originalCategory).toBeUndefined();
-
-    // Edge case: Empty category string should map to default
-    const emptyFeedbackInput = {
-      content: "Some feedback",
-      category: "",
-      templateId: "template_001",
-      submittedBy: "user_125",
-      submittedAt: "2024-01-15T11:30:00Z",
-    };
-
-    const emptyResult = submitFeedbackWithDefaultClassification(
-      emptyFeedbackInput,
-      predefinedCategories,
-      defaultCategory
-    );
-
-    expect(emptyResult.category).toBe("other");
-
-    // Edge case: Null/undefined category should map to default
-    const nullFeedbackInput = {
-      content: "Some feedback",
-      category: null,
-      templateId: "template_001",
-      submittedBy: "user_126",
-      submittedAt: "2024-01-15T12:00:00Z",
-    };
-
-    const nullResult = submitFeedbackWithDefaultClassification(
-      nullFeedbackInput,
-      predefinedCategories,
-      defaultCategory
-    );
-
-    expect(nullResult.category).toBe("other");
-
-    // Error case: Missing required fields should throw
-    expect(() =>
-      submitFeedbackWithDefaultClassification(
-        { content: "Test" },
-        predefinedCategories,
-        defaultCategory
-      )
-    ).toThrow(/テンプレート/);
-
-    // Error case: Invalid template ID should throw
-    expect(() =>
-      submitFeedbackWithDefaultClassification(
+    // ハッピーパス: 完全なメタデータ定義がある場合は検証成功
+    const completeMetadata = {
+      fields: [
         {
-          content: "Test feedback",
-          category: "custom",
-          templateId: "",
-          submittedBy: "user_127",
-          submittedAt: "2024-01-15T12:30:00Z",
+          columnName: "contact_date",
+          dataType: "DATE",
+          required: true,
+          validationRule: "YYYY-MM-DD",
         },
-        predefinedCategories,
-        defaultCategory
-      )
-    ).toThrow(/テンプレートID/);
+        {
+          columnName: "appointment_count",
+          dataType: "INTEGER",
+          required: true,
+          validationRule: ">=0",
+        },
+        {
+          columnName: "contract_count",
+          dataType: "INTEGER",
+          required: true,
+          validationRule: ">=0",
+        },
+      ],
+      validationRules: [
+        {
+          ruleId: "rule_001",
+          fieldName: "contact_date",
+          condition: "NOT NULL",
+        },
+      ],
+    };
+
+    const result = validateSalesDataMetadata(completeMetadata);
+    expect(result.isValid).toBe(true);
+    expect(result.errors).toEqual([]);
+
+    // エラーケース 1: fields 配列が完全に欠落している場合
+    const missingFieldsMetadata = {
+      validationRules: [
+        {
+          ruleId: "rule_001",
+          fieldName: "contact_date",
+          condition: "NOT NULL",
+        },
+      ],
+    };
+
+    expect(() => validateSalesDataMetadata(missingFieldsMetadata)).toThrow(
+      /メタデータ/
+    );
+
+    // エラーケース 2: validationRules が欠落している場合
+    const missingValidationRulesMetadata = {
+      fields: [
+        {
+          columnName: "contact_date",
+          dataType: "DATE",
+          required: true,
+          validationRule: "YYYY-MM-DD",
+        },
+      ],
+    };
+
+    expect(() =>
+      validateSalesDataMetadata(missingValidationRulesMetadata)
+    ).toThrow(/バリデーションルール/);
+
+    // エラーケース 3: fields 内で必須フィールド(columnName)が欠落している場合
+    const missingColumnNameMetadata = {
+      fields: [
+        {
+          dataType: "DATE",
+          required: true,
+          validationRule: "YYYY-MM-DD",
+        },
+      ],
+      validationRules: [
+        {
+          ruleId: "rule_001",
+          fieldName: "contact_date",
+          condition: "NOT NULL",
+        },
+      ],
+    };
+
+    expect(() =>
+      validateSalesDataMetadata(missingColumnNameMetadata)
+    ).toThrow(/カラム名/);
+
+    // エラーケース 4: fields 内で必須フィールド(dataType)が欠落している場合
+    const missingDataTypeMetadata = {
+      fields: [
+        {
+          columnName: "contact_date",
+          required: true,
+          validationRule: "YYYY-MM-DD",
+        },
+      ],
+      validationRules: [
+        {
+          ruleId: "rule_001",
+          fieldName: "contact_date",
+          condition: "NOT NULL",
+        },
+      ],
+    };
+
+    expect(() => validateSalesDataMetadata(missingDataTypeMetadata)).toThrow(
+      /データ型/
+    );
+
+    // エラーケース 5: fields 内で必須フィールド(validationRule)が欠落している場合
+    const missingValidationRuleFieldMetadata = {
+      fields: [
+        {
+          columnName: "contact_date",
+          dataType: "DATE",
+          required: true,
+        },
+      ],
+      validationRules: [
+        {
+          ruleId: "rule_001",
+          fieldName: "contact_date",
+          condition: "NOT NULL",
+        },
+      ],
+    };
+
+    expect(() =>
+      validateSalesDataMetadata(missingValidationRuleFieldMetadata)
+    ).toThrow(/バリデーションルール/);
+
+    // エラーケース 6: fields 配列が空の場合
+    const emptyFieldsMetadata = {
+      fields: [],
+      validationRules: [
+        {
+          ruleId: "rule_001",
+          fieldName: "contact_date",
+          condition: "NOT NULL",
+        },
+      ],
+    };
+
+    expect(() => validateSalesDataMetadata(emptyFieldsMetadata)).toThrow(
+      /必須項目/
+    );
+
+    // エラーケース 7: validationRules 配列が空の場合
+    const emptyValidationRulesMetadata = {
+      fields: [
+        {
+          columnName: "contact_date",
+          dataType: "DATE",
+          required: true,
+          validationRule: "YYYY-MM-DD",
+        },
+      ],
+      validationRules: [],
+    };
+
+    expect(() =>
+      validateSalesDataMetadata(emptyValidationRulesMetadata)
+    ).toThrow(/バリデーションルール/);
+
+    // エラーケース 8: null が渡された場合
+    expect(() => validateSalesDataMetadata(null as any)).toThrow(
+      /メタデータ/
+    );
+
+    // エラーケース 9: undefined が渡された場合
+    expect(() => validateSalesDataMetadata(undefined as any)).toThrow(
+      /メタデータ/
+    );
+
+    // エラーケース 10: 複数の必須フィールドが欠落している場合（最初に検出したものでエラー）
+    const multiplesMissingMetadata = {
+      fields: [
+        {
+          dataType: "DATE",
+          required: true,
+        },
+      ],
+    };
+
+    expect(() =>
+      validateSalesDataMetadata(multiplesMissingMetadata)
+    ).toThrow(/メタデータ|カラム名|バリデーションルール/);
   });
 });

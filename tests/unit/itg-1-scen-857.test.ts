@@ -1,73 +1,62 @@
-import { recordDocumentViewLog } from '../../src/logic/it-1781935279444-1-1-1';
+import { validateContractChange } from "../../src/logic/it-1-1-1";
 
-describe('営業データ項目のメタデータ管理機能 - 操作ログ自動記録', () => {
-  // SCEN-857: [normal] 操作ログ自動記録機能 - 文書閲覧アクション実行時に対象文書ID・閲覧者・実行日時が自動記録される
-  test('文書閲覧アクション実行時に対象文書ID・閲覧者・実行日時が自動記録される', () => {
-    // 前提: テストユーザーがシステムにログイン済みで、営業データ品質管理・請求自動化システムの文書管理機能にアクセス可能な状態
-    // 発生条件: ユーザーが特定の文書を選択して開く（文書閲覧アクション実行）
-    // 期待結果: 操作ログに対象文書ID・閲覧者・実行日時が自動的に記録される
+describe("営業成果データの自動検証ルール定義と異常検出機能", () => {
+  // SCEN-857: [error] 契約変更妥当性判定機能 - 検証結果に誤りや不正が含まれる場合に却下判定が正確に出力される
+  test("検証結果に誤りや不正が含まれた契約変更リクエストの却下判定ロジックが正確に動作し、却下理由と検出内容が記録される", () => {
+    const contractChangeRequest = {
+      contractId: "CTR-2024-001",
+      customerId: "CUST-0001",
+      previousBillingAmount: 100000,
+      newBillingAmount: 50000,
+      changeReason: "割引適用",
+      effectiveDate: "2024-02-01",
+      validationResults: [
+        {
+          checkName: "金額差分検証",
+          status: "error",
+          discrepancy: 50000,
+          threshold: 20000,
+          errorDetails: "金額変更が閾値を超過している"
+        },
+        {
+          checkName: "契約履歴整合性検証",
+          status: "error",
+          previousContractVersion: "v2.1",
+          currentSystemVersion: "v2.0",
+          errorDetails: "システムの契約バージョンが古い"
+        },
+        {
+          checkName: "請求ルール整合性検証",
+          status: "success",
+          rulesMatched: true
+        }
+      ]
+    };
 
-    const userId = 'user-12345';
-    const userName = 'taro_yamada';
-    const documentId = 'doc-98765';
-    const documentTitle = '契約書_顧客A_2024';
-    const viewActionTimestamp = new Date('2024-01-15T14:30:00Z');
+    const result = validateContractChange(contractChangeRequest);
 
-    // 文書閲覧アクション実行
-    const logResult = recordDocumentViewLog({
-      userId: userId,
-      userName: userName,
-      documentId: documentId,
-      documentTitle: documentTitle,
-      actionType: 'view',
-      actionTimestamp: viewActionTimestamp,
+    expect(result.approvalStatus).toBe("rejected");
+    expect(result.rejectionReasons).toEqual([
+      {
+        reason: "金額差分が許容閾値を超過",
+        detectedError: "金額変更が閾値を超過している",
+        severity: "critical"
+      },
+      {
+        reason: "契約バージョンが不整合",
+        detectedError: "システムの契約バージョンが古い",
+        severity: "critical"
+      }
+    ]);
+    expect(result.rejectionCount).toBe(2);
+    expect(result.systemLog).toMatchObject({
+      eventType: "CONTRACT_CHANGE_REJECTED",
+      contractId: "CTR-2024-001",
+      customerId: "CUST-0001",
+      timestamp: expect.any(String),
+      rejectionReasonsCount: 2,
+      proceedToNextBillingCycle: false
     });
-
-    // 操作ログに記録される情報の検証
-    expect(logResult).toBeDefined();
-    expect(logResult.logId).toBeDefined();
-    expect(typeof logResult.logId).toBe('string');
-    expect(logResult.logId.length).toBeGreaterThan(0);
-
-    // 対象文書IDが正確に記録されていることを確認
-    expect(logResult.documentId).toBe('doc-98765');
-
-    // 閲覧者（ユーザーID）が正確に記録されていることを確認
-    expect(logResult.userId).toBe('user-12345');
-
-    // 閲覧者（ユーザー名）が正確に記録されていることを確認
-    expect(logResult.userName).toBe('taro_yamada');
-
-    // 実行日時が正確に記録されていることを確認（ISO 8601形式）
-    expect(logResult.actionTimestamp).toBe('2024-01-15T14:30:00Z');
-
-    // アクション種別が正確に記録されていることを確認
-    expect(logResult.actionType).toBe('view');
-
-    // 文書タイトルが正確に記録されていることを確認
-    expect(logResult.documentTitle).toBe('契約書_顧客A_2024');
-
-    // ログレコード全体の構造を検証
-    expect(logResult).toEqual({
-      logId: expect.any(String),
-      userId: 'user-12345',
-      userName: 'taro_yamada',
-      documentId: 'doc-98765',
-      documentTitle: '契約書_顧客A_2024',
-      actionType: 'view',
-      actionTimestamp: '2024-01-15T14:30:00Z',
-      recordedAt: expect.any(String),
-    });
-
-    // 記録日時（システムで自動生成）が存在し、有効なタイムスタンプであることを確認
-    expect(logResult.recordedAt).toBeDefined();
-    expect(typeof logResult.recordedAt).toBe('string');
-    const recordedAtDate = new Date(logResult.recordedAt);
-    expect(recordedAtDate.getTime()).toBeGreaterThan(0);
-
-    // 記録日時がアクション実行日時と同じか後ろの時刻であることを確認
-    const actionDate = new Date('2024-01-15T14:30:00Z').getTime();
-    const recordedDate = new Date(logResult.recordedAt).getTime();
-    expect(recordedDate).toBeGreaterThanOrEqual(actionDate);
+    expect(result.shouldProceedToPayment).toBe(false);
   });
 });

@@ -1,101 +1,60 @@
-import { extractContractAndBillingDataByDateRange } from '../../src/logic/it-1-1-1';
+import { describe, test, expect } from "@jest/globals";
+import { calculateVerificationDeadline } from "../../src/logic/it-1-1-1";
 
-describe('営業成果データの自動検証ルール定義と異常検出機能', () => {
-  // SCEN-866: [edge] 契約履歴と請求データの時系列抽出機能 - 期間指定で開始日と終了日が同一の場合でも該当データが正確に抽出される
-  test('開始日と終了日が同一の日付の場合、その日付のデータが漏れなく時系列順で抽出される', () => {
-    // Arrange: 契約履歴と請求データセット
-    const targetDate = '2024-01-15';
-    const contractAndBillingRecords = [
-      {
-        id: 'contract_001',
-        type: 'contract',
-        customerId: 'cust_A',
-        contractDate: '2024-01-14T10:00:00Z',
-        amount: 100000,
-      },
-      {
-        id: 'billing_001',
-        type: 'billing',
-        customerId: 'cust_B',
-        billingDate: '2024-01-15T08:30:00Z',
-        amount: 50000,
-      },
-      {
-        id: 'contract_002',
-        type: 'contract',
-        customerId: 'cust_A',
-        contractDate: '2024-01-15T09:00:00Z',
-        amount: 75000,
-      },
-      {
-        id: 'billing_002',
-        type: 'billing',
-        customerId: 'cust_C',
-        billingDate: '2024-01-15T14:30:00Z',
-        amount: 120000,
-      },
-      {
-        id: 'contract_003',
-        type: 'contract',
-        customerId: 'cust_B',
-        contractDate: '2024-01-15T11:45:00Z',
-        amount: 90000,
-      },
-      {
-        id: 'billing_003',
-        type: 'billing',
-        customerId: 'cust_A',
-        billingDate: '2024-01-16T10:00:00Z',
-        amount: 60000,
-      },
+describe("営業成果データの自動検証ルール定義と異常検出機能", () => {
+  test("SCEN-866: 契約変更検証期限自動計算機能 - 営業カレンダーの休場日が除外される", () => {
+    // 営業カレンダー: 2024-01-13(土), 2024-01-14(日), 2024-01-15(祝), 2024-01-22(臨時休場)
+    const businessCalendar = [
+      { date: "2024-01-13", isBusinessDay: false, reason: "Saturday" },
+      { date: "2024-01-14", isBusinessDay: false, reason: "Sunday" },
+      { date: "2024-01-15", isBusinessDay: false, reason: "Holiday" },
+      { date: "2024-01-22", isBusinessDay: false, reason: "TemporaryClosure" },
     ];
 
-    // Act: 開始日と終了日が同じ日付で抽出を実行
-    const result = extractContractAndBillingDataByDateRange(
-      contractAndBillingRecords,
-      targetDate,
-      targetDate
-    );
+    // 契約変更情報
+    const contractChangeData = {
+      contractChangeId: "CC-2024-001",
+      changeType: "PlanChange",
+      changeContent: "プラン変更",
+      verificationStartDate: "2024-01-12", // 金曜日（営業日）
+      standardVerificationDays: 5, // 標準検証期間: 5営業日
+    };
 
-    // Assert: 抽出結果の件数確認
-    expect(result.records.length).toBe(4);
+    // 期待される検証期限: 2024-01-12から5営業日後
+    // 2024-01-12(金) -> 2024-01-16(火) -> 2024-01-17(水) -> 2024-01-18(木) -> 2024-01-19(金) -> 2024-01-23(火)
+    // ※ 1/13(土), 1/14(日), 1/15(祝), 1/22(臨時休場)をスキップ
+    const expectedDeadlineDate = "2024-01-23";
 
-    // Assert: 抽出されたデータの日付が指定日付と完全に一致
-    result.records.forEach((record) => {
-      const recordDate =
-        record.type === 'contract'
-          ? record.contractDate.split('T')[0]
-          : record.billingDate.split('T')[0];
-      expect(recordDate).toBe(targetDate);
+    const result = calculateVerificationDeadline({
+      startDate: contractChangeData.verificationStartDate,
+      businessDays: contractChangeData.standardVerificationDays,
+      businessCalendar: businessCalendar,
     });
 
-    // Assert: 指定日付以外のデータが含まれていないことを検証
-    const hasInvalidDate = result.records.some((record) => {
-      const recordDate =
-        record.type === 'contract'
-          ? record.contractDate.split('T')[0]
-          : record.billingDate.split('T')[0];
-      return recordDate !== targetDate;
-    });
-    expect(hasInvalidDate).toBe(false);
+    // 検証期限が正確に計算されていることを確認
+    expect(result.deadlineDate).toBe(expectedDeadlineDate);
 
-    // Assert: 時系列順に整列されていることを確認
-    const timestamps = result.records.map((record) =>
-      record.type === 'contract'
-        ? new Date(record.contractDate).getTime()
-        : new Date(record.billingDate).getTime()
+    // 営業日カウントが正確であることを確認
+    expect(result.businessDayCount).toBe(5);
+
+    // スキップされた休場日が記録されていることを確認
+    expect(result.skippedNonBusinessDays).toContain("2024-01-13");
+    expect(result.skippedNonBusinessDays).toContain("2024-01-14");
+    expect(result.skippedNonBusinessDays).toContain("2024-01-15");
+    expect(result.skippedNonBusinessDays).toContain("2024-01-22");
+    expect(result.skippedNonBusinessDays.length).toBe(4);
+
+    // 実際の経過日数が営業日数よりも多いことを確認
+    // 2024-01-12から2024-01-23までは11日間だが、営業日は5日
+    expect(result.totalCalendarDays).toBe(11);
+    expect(result.businessDayCount).toBe(5);
+    expect(result.totalCalendarDays).toBeGreaterThan(
+      result.businessDayCount
     );
-    for (let i = 1; i < timestamps.length; i++) {
-      expect(timestamps[i]).toBeGreaterThanOrEqual(timestamps[i - 1]);
-    }
 
-    // Assert: 抽出されたレコードのIDが予期されたもの
-    const extractedIds = result.records.map((r) => r.id).sort();
-    const expectedIds = ['billing_001', 'billing_002', 'contract_002', 'contract_003'].sort();
-    expect(extractedIds).toEqual(expectedIds);
-
-    // Assert: 件数、日付精度、データ整合性がすべて正確
-    expect(result.totalCount).toBe(4);
-    expect(result.isCompleteAndAccurate).toBe(true);
+    // 計算ロジックの妥当性: 経過日数 = 営業日数 + 休場日数
+    expect(result.totalCalendarDays).toBe(
+      result.businessDayCount + result.skippedNonBusinessDays.length
+    );
   });
 });

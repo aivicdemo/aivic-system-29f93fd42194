@@ -1,100 +1,91 @@
-import { detectAnomalousExtractedBillingInfo } from '../../src/logic/it-1781935279444-2-2-1';
+import { describe, test, expect, beforeEach } from '@jest/globals';
+import { generateMonthlySummaryReport } from '../../src/logic/it-1-br-1781935279444-1-2-1';
 
-describe('請求対象項目の抽出・妥当性検証機能', () => {
+describe('月次サマリーテンプレートの定義・管理機能', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
   // SCEN-1281
-  test('抽出された請求情報が過去の請求パターンと矛盾し、異常値として検出される', () => {
-    // 過去の正常な請求パターン
-    const historicalPatterns = [
-      {
-        customerId: 'cust_001',
-        serviceId: 'svc_A',
-        month: '2024-01',
-        totalAmount: 100000,
-        itemCount: 3,
-        items: ['apo_count', 'contract_count', 'service_fee'],
+  test('営業成果データが0件の場合、空のレポートテンプレートが正常に生成される', () => {
+    // 前提：営業成果データが0件の状態を準備
+    const emptyBusinessData = [];
+    const templateConfig = {
+      templateId: 'MONTHLY_SUMMARY_001',
+      templateName: '月次営業成果サマリー',
+      reportMonth: '2024-01',
+      generatedDate: '2024-02-01T09:00:00Z',
+      generatedBy: 'system',
+      headerSection: {
+        title: '営業成果月次レポート',
+        period: '2024年1月',
+        organization: 'Sales Division',
       },
-      {
-        customerId: 'cust_001',
-        serviceId: 'svc_A',
-        month: '2024-02',
-        totalAmount: 102000,
-        itemCount: 3,
-        items: ['apo_count', 'contract_count', 'service_fee'],
+      footerSection: {
+        pageNumber: 1,
+        totalPages: 1,
+        generatedTimestamp: '2024-02-01T09:00:00Z',
+        confidentialLevel: 'internal',
       },
-      {
-        customerId: 'cust_001',
-        serviceId: 'svc_A',
-        month: '2024-03',
-        totalAmount: 101500,
-        itemCount: 3,
-        items: ['apo_count', 'contract_count', 'service_fee'],
+      dataSection: {
+        salesMetrics: [],
+        customerAchievements: [],
+        serviceBreakdown: [],
+        summaryStatistics: null,
       },
-    ];
-
-    // 現在の請求サイクルで抽出された請求情報（異常値を含む）
-    const currentExtractedBillingInfo = {
-      customerId: 'cust_001',
-      serviceId: 'svc_A',
-      month: '2024-04',
-      totalAmount: 520000, // 通常の5倍以上 → 異常値
-      itemCount: 4, // 通常は3項目だが4項目 → 異常
-      items: ['apo_count', 'contract_count', 'service_fee', 'unexpected_item'],
+      styleConfig: {
+        fontFamily: 'Arial',
+        fontSize: 11,
+        theme: 'standard',
+      },
     };
 
-    // 異常値検出を実行
-    const result = detectAnomalousExtractedBillingInfo(
-      currentExtractedBillingInfo,
-      historicalPatterns,
+    // 実行：営業成果レポート自動生成機能を実行
+    const generatedReport = generateMonthlySummaryReport(
+      emptyBusinessData,
+      templateConfig
     );
 
-    // 異常値が検出されることを確認
-    expect(result.hasAnomaly).toBe(true);
+    // 検証1：生成されたレポートファイルが存在することを確認
+    expect(generatedReport).toBeDefined();
+    expect(generatedReport).not.toBeNull();
 
-    // エラーフラグが設定されることを確認
-    expect(result.isAnomalous).toBe(true);
+    // 検証2：レポートテンプレート構造が保持されていることを確認
+    expect(generatedReport.templateId).toBe('MONTHLY_SUMMARY_001');
+    expect(generatedReport.templateName).toBe('月次営業成果サマリー');
+    expect(generatedReport.reportMonth).toBe('2024-01');
 
-    // 異常値の詳細情報がエラーログに記録されていることを確認
-    expect(result.errorLog).toBeDefined();
-    expect(result.errorLog.length).toBeGreaterThan(0);
+    // 検証3：ヘッダーセクションが正常に生成されていることを確認
+    expect(generatedReport.headerSection).toBeDefined();
+    expect(generatedReport.headerSection.title).toBe('営業成果月次レポート');
+    expect(generatedReport.headerSection.period).toBe('2024年1月');
+    expect(generatedReport.headerSection.organization).toBe('Sales Division');
 
-    // エラーログの詳細内容を検証
-    const amountAnomalyLog = result.errorLog.find(
-      (log) => log.itemName === 'totalAmount',
-    );
-    expect(amountAnomalyLog).toBeDefined();
-    expect(amountAnomalyLog?.itemName).toBe('totalAmount');
-    expect(amountAnomalyLog?.expectedRangeMin).toBe(95000); // 通常範囲下限
-    expect(amountAnomalyLog?.expectedRangeMax).toBe(107000); // 通常範囲上限
-    expect(amountAnomalyLog?.actualValue).toBe(520000);
-    expect(amountAnomalyLog?.anomalyType).toBe('AMOUNT_EXCEEDS_THRESHOLD');
-    expect(amountAnomalyLog?.deviationPercentage).toBe(414.67); // (520000-101500)/101500 * 100
+    // 検証4：フッターセクションが正常に生成されていることを確認
+    expect(generatedReport.footerSection).toBeDefined();
+    expect(generatedReport.footerSection.pageNumber).toBe(1);
+    expect(generatedReport.footerSection.totalPages).toBe(1);
+    expect(generatedReport.footerSection.confidentialLevel).toBe('internal');
 
-    // アイテムカウント異常もエラーログに記録されることを確認
-    const itemCountAnomalyLog = result.errorLog.find(
-      (log) => log.itemName === 'itemCount',
-    );
-    expect(itemCountAnomalyLog).toBeDefined();
-    expect(itemCountAnomalyLog?.itemName).toBe('itemCount');
-    expect(itemCountAnomalyLog?.expectedRangeMin).toBe(3);
-    expect(itemCountAnomalyLog?.expectedRangeMax).toBe(3);
-    expect(itemCountAnomalyLog?.actualValue).toBe(4);
-    expect(itemCountAnomalyLog?.anomalyType).toBe('ITEM_COUNT_MISMATCH');
+    // 検証5：スタイル設定が保持されていることを確認
+    expect(generatedReport.styleConfig).toBeDefined();
+    expect(generatedReport.styleConfig.fontFamily).toBe('Arial');
+    expect(generatedReport.styleConfig.fontSize).toBe(11);
+    expect(generatedReport.styleConfig.theme).toBe('standard');
 
-    // 予期しない項目の異常もエラーログに記録されることを確認
-    const unexpectedItemLog = result.errorLog.find(
-      (log) => log.itemName === 'unexpected_item',
-    );
-    expect(unexpectedItemLog).toBeDefined();
-    expect(unexpectedItemLog?.itemName).toBe('unexpected_item');
-    expect(unexpectedItemLog?.anomalyType).toBe('UNEXPECTED_ITEM');
+    // 検証6：データセクションが空の状態であることを確認
+    expect(generatedReport.dataSection).toBeDefined();
+    expect(generatedReport.dataSection.salesMetrics).toEqual([]);
+    expect(generatedReport.dataSection.customerAchievements).toEqual([]);
+    expect(generatedReport.dataSection.serviceBreakdown).toEqual([]);
+    expect(generatedReport.dataSection.summaryStatistics).toBeNull();
 
-    // 自動承認がスキップされることを確認
-    expect(result.autoApprovalSkipped).toBe(true);
+    // 検証7：レポートの生成メタデータが正確に設定されていることを確認
+    expect(generatedReport.generatedDate).toBe('2024-02-01T09:00:00Z');
+    expect(generatedReport.generatedBy).toBe('system');
 
-    // 手動レビュー対象として設定されることを確認
-    expect(result.requiresManualReview).toBe(true);
-
-    // ステータスが「要確認」に設定されることを確認
-    expect(result.status).toBe('REVIEW_REQUIRED');
+    // 検証8：レポートステータスが「正常」であることを確認
+    expect(generatedReport.status).toBe('success');
+    expect(generatedReport.dataRowCount).toBe(0);
   });
 });

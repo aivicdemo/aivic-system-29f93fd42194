@@ -1,133 +1,116 @@
-import { calculateBillingAmount } from '../../src/logic/it-1-2-1';
+import { describe, it, expect, beforeEach } from '@jest/globals';
+import {
+  determineRecalculationNeed,
+  applyModificationRule,
+  recordModificationHistory,
+} from '../../src/logic/it-1781935279444-2-1-1';
 
-describe('営業成果データから請求対象項目を自動抽出し、顧客ごと・サービスごとの請求額を集計する機能', () => {
-  // SCEN-971: [normal] 請求額自動計算・検証機能 - 請求対象期間内のすべての営業データが検証対象に含まれて計算される
-  test('請求対象期間内のすべての営業データが検証対象に含まれ、期間外データは除外されて請求額が正確に計算される', () => {
-    const billing_period_start = '2024-01-01';
-    const billing_period_end = '2024-01-31';
-
-    // 期間内のデータ: 3件以上、異なる日付・金額で作成
-    const sales_data_within_period = [
-      {
-        date: '2024-01-05',
-        customer_id: 'CUST001',
-        service_id: 'SVC_A',
-        amount: 100000,
-      },
-      {
-        date: '2024-01-15',
-        customer_id: 'CUST001',
-        service_id: 'SVC_A',
-        amount: 150000,
-      },
-      {
-        date: '2024-01-25',
-        customer_id: 'CUST001',
-        service_id: 'SVC_A',
-        amount: 200000,
-      },
-    ];
-
-    // 期間外のデータ: 開始日前
-    const sales_data_before_period = {
-      date: '2023-12-31',
-      customer_id: 'CUST001',
-      service_id: 'SVC_A',
-      amount: 50000,
+describe('顧客異議に基づく再計算・修正判定', () => {
+  it('SCEN-971: 顧客異議情報から再計算必要性を正しく判定し、修正ルール適用で新請求額を算出', () => {
+    // ========== Setup: テストデータ準備 ==========
+    const originalInvoiceAmount = 100000;
+    const customerObjectionData = {
+      objectionContent: 'アポ数の計上漏れが3件ある',
+      objectionAmount: 15000,
+      objectionReasonCategory: 'DATA_OMISSION',
+      invoiceId: 'INV-20240201-001',
+      customerId: 'CUST-A001',
+      contractId: 'CONTRACT-A001-001',
     };
 
-    // 期間外のデータ: 終了日後
-    const sales_data_after_period = {
-      date: '2024-02-01',
-      customer_id: 'CUST001',
-      service_id: 'SVC_A',
-      amount: 75000,
+    const modificationRuleSet = {
+      DATA_OMISSION: {
+        ruleId: 'RULE-DATA-OMIT-001',
+        recalculationRequired: true,
+        adjustmentMethod: 'MANUAL_ADD',
+        appliedAmount: 15000,
+        description: 'データ漏れによる成果数追加加算',
+      },
+      CALCULATION_ERROR: {
+        ruleId: 'RULE-CALC-ERR-001',
+        recalculationRequired: true,
+        adjustmentMethod: 'RECALCULATE',
+        appliedAmount: 0,
+        description: '計算ロジックエラー',
+      },
+      DISCOUNT_DISPUTE: {
+        ruleId: 'RULE-DISC-DISP-001',
+        recalculationRequired: false,
+        adjustmentMethod: 'REFUND_ONLY',
+        appliedAmount: customerObjectionData.objectionAmount,
+        description: '割引適用に対する異議',
+      },
     };
 
-    // 計算対象：期間内データのみ（3件の合計）
-    const expected_total_amount = 100000 + 150000 + 200000; // 450000
-
-    // 実行：請求額自動計算機能
-    const result = calculateBillingAmount({
-      billing_period_start,
-      billing_period_end,
-      sales_data: [
-        sales_data_before_period,
-        ...sales_data_within_period,
-        sales_data_after_period,
-      ],
+    // ========== Test 1: 再計算必要性の判定 ==========
+    const recalculationDecision = determineRecalculationNeed({
+      objectionReasonCategory: customerObjectionData.objectionReasonCategory,
+      objectionContent: customerObjectionData.objectionContent,
+      objectionAmount: customerObjectionData.objectionAmount,
     });
 
-    // 検証1: 計算結果の請求額が期間内データの合計額と一致すること
-    expect(result.total_billing_amount).toBe(expected_total_amount);
+    expect(recalculationDecision.isRecalculationRequired).toBe(true);
+    expect(recalculationDecision.appliedRuleId).toBe('RULE-DATA-OMIT-001');
+    expect(recalculationDecision.reasonCode).toBe('DATA_OMISSION');
 
-    // 検証2: 検証対象に含まれたデータレコード数が期間内データの件数と一致すること
-    expect(result.validated_records_count).toBe(3);
+    // ========== Test 2: 修正ルール適用ロジックの実行 ==========
+    const applicableRule = modificationRuleSet[customerObjectionData.objectionReasonCategory];
+    expect(applicableRule).toBeDefined();
+    expect(applicableRule.ruleId).toBe('RULE-DATA-OMIT-001');
+    expect(applicableRule.recalculationRequired).toBe(true);
 
-    // 検証3: 期間内のすべてのレコードが検証対象リストに含まれていることを確認
-    expect(result.validated_records).toHaveLength(3);
-    expect(result.validated_records).toContainEqual(
-      expect.objectContaining({
-        date: '2024-01-05',
-        customer_id: 'CUST001',
-        service_id: 'SVC_A',
-        amount: 100000,
-      })
-    );
-    expect(result.validated_records).toContainEqual(
-      expect.objectContaining({
-        date: '2024-01-15',
-        customer_id: 'CUST001',
-        service_id: 'SVC_A',
-        amount: 150000,
-      })
-    );
-    expect(result.validated_records).toContainEqual(
-      expect.objectContaining({
-        date: '2024-01-25',
-        customer_id: 'CUST001',
-        service_id: 'SVC_A',
-        amount: 200000,
-      })
-    );
+    // ========== Test 3: 新請求額の計算 ==========
+    const modificationInput = {
+      originalAmount: originalInvoiceAmount,
+      objectionAmount: customerObjectionData.objectionAmount,
+      adjustmentMethod: applicableRule.adjustmentMethod,
+      appliedAmount: applicableRule.appliedAmount,
+    };
 
-    // 検証4: 期間外のレコード（開始日前・終了日後）が除外されていることを確認
-    expect(result.excluded_records_count).toBe(2);
-    expect(result.excluded_records).toHaveLength(2);
-    expect(result.excluded_records).toContainEqual(
-      expect.objectContaining({
-        date: '2023-12-31',
-        amount: 50000,
-        reason: 'before_period',
-      })
-    );
-    expect(result.excluded_records).toContainEqual(
-      expect.objectContaining({
-        date: '2024-02-01',
-        amount: 75000,
-        reason: 'after_period',
-      })
-    );
+    const newInvoiceAmount = applyModificationRule(modificationInput);
 
-    // 検証5: 顧客ごとの請求額が正確に集計されること
-    expect(result.billing_by_customer).toEqual({
-      CUST001: expected_total_amount,
-    });
+    // DATA_OMISSION + MANUAL_ADD の場合、元の請求額 + 加算額 = 100000 + 15000 = 115000
+    expect(newInvoiceAmount).toBe(115000);
 
-    // 検証6: サービスごとの請求額が正確に集計されること
-    expect(result.billing_by_service).toEqual({
-      SVC_A: expected_total_amount,
-    });
+    // ========== Test 4: 修正前後の差分が正確に記録されている ==========
+    const difference = newInvoiceAmount - originalInvoiceAmount;
+    expect(difference).toBe(15000);
 
-    // 検証7: 顧客ごと・サービスごとの組み合わせ請求額が正確に集計されること
-    expect(result.billing_by_customer_service).toEqual({
-      'CUST001_SVC_A': expected_total_amount,
-    });
+    // ========== Test 5: 修正履歴にルール適用内容が記録される ==========
+    const modificationHistoryRecord = {
+      invoiceId: customerObjectionData.invoiceId,
+      customerId: customerObjectionData.customerId,
+      contractId: customerObjectionData.contractId,
+      originalAmount: originalInvoiceAmount,
+      newAmount: newInvoiceAmount,
+      differencAmount: difference,
+      appliedRuleId: applicableRule.ruleId,
+      adjustmentMethod: applicableRule.adjustmentMethod,
+      objectionReasonCategory: customerObjectionData.objectionReasonCategory,
+      objectionContent: customerObjectionData.objectionContent,
+      modificationTimestamp: '2024-02-15T09:30:00Z',
+      modifiedBy: 'OP-001',
+    };
 
-    // 検証8: 検証ステータスが「成功」であること
-    expect(result.validation_status).toBe('success');
+    const recordResult = recordModificationHistory(modificationHistoryRecord);
 
-    // 検証9: エラーが存在しないこと
-    expect(result.errors).toHaveLength(0);
+    expect(recordResult.recorded).toBe(true);
+    expect(recordResult.historyId).toBeDefined();
+    expect(recordResult.originalAmount).toBe(100000);
+    expect(recordResult.newAmount).toBe(115000);
+    expect(recordResult.appliedRuleId).toBe('RULE-DATA-OMIT-001');
+    expect(recordResult.differencAmount).toBe(15000);
+
+    // ========== Test 6: 修正内容の検証 ==========
+    const auditTrail = recordResult.auditTrail;
+    expect(auditTrail.before.invoiceAmount).toBe(100000);
+    expect(auditTrail.after.invoiceAmount).toBe(115000);
+    expect(auditTrail.reason).toBe('DATA_OMISSION');
+    expect(auditTrail.timestamp).toBe('2024-02-15T09:30:00Z');
+
+    // ========== Test 7: 異議内容に対応した正当な修正が実行されたことの確認 ==========
+    expect(newInvoiceAmount).toBeGreaterThan(originalInvoiceAmount);
+    expect(difference).toBe(customerObjectionData.objectionAmount);
+    expect(applicableRule.adjustmentMethod).toBe('MANUAL_ADD');
   });
 });

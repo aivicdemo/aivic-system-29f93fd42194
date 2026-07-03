@@ -1,44 +1,106 @@
-import { validateContractDataIntegrity } from "../../src/logic/it-1781935279444-2-2-1";
+import { describe, test, expect, beforeEach } from "@jest/globals";
+import { evaluateStaffCompetency } from "../../src/logic/it-1-br-1781935279444-1-2-1";
 
-describe("営業データの完全性・正確性を自動検証し、不足データ・誤りを検出・通知する機能", () => {
-  test("SCEN-922: 契約内容との整合性検証機能 - 契約書の納期が営業データの報告内容と異なる場合、修正指示フラグが立つ", () => {
-    // テストデータ: 契約情報（納期: 2024年3月31日）
-    const contract_id = "CONTRACT-001";
-    const contract_delivery_date = new Date("2024-03-31");
+describe("月次サマリーテンプレート定義・管理機能", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
 
-    // テストデータ: 営業データ（報告内容の納期: 2024年4月15日）
-    const report_delivery_date = new Date("2024-04-15");
-    const sales_data = {
-      contract_id: contract_id,
-      reported_delivery_date: report_delivery_date,
+  // SCEN-922
+  test("スタッフ情報が不完全または必須項目が欠落している場合、習熟度判定を実行せずエラーを返す", () => {
+    // 必須項目: staffId, staffName, department, hireDate, trainingStatus
+    // 習熟度判定に必要なすべての必須項目を含む正常系データ
+    const validStaffData = {
+      staffId: "STF001",
+      staffName: "山田太郎",
+      department: "営業部",
+      hireDate: "2024-01-15",
+      trainingStatus: "onboarding",
     };
 
-    // 契約内容との整合性検証機能を実行
-    const result = validateContractDataIntegrity({
-      contract_id: contract_id,
-      contract_delivery_date: contract_delivery_date,
-      sales_data: sales_data,
-    });
+    // 正常系: 習熟度判定が実行される
+    const result_valid = evaluateStaffCompetency(validStaffData);
+    expect(result_valid).toHaveProperty("competencyLevel");
+    expect(result_valid).toHaveProperty("evaluationDate");
+    expect(["beginner", "intermediate", "advanced"]).toContain(
+      result_valid.competencyLevel
+    );
 
-    // 修正指示フラグが立つことを確認
-    expect(result.correction_flag_raised).toBe(true);
+    // 欠落テスト1: staffId が null
+    const missing_staffId = {
+      staffId: null,
+      staffName: "山田太郎",
+      department: "営業部",
+      hireDate: "2024-01-15",
+      trainingStatus: "onboarding",
+    };
+    expect(() => evaluateStaffCompetency(missing_staffId)).toThrow(/staffId/);
 
-    // 不整合が検出されたことを確認
-    expect(result.has_discrepancy).toBe(true);
+    // 欠落テスト2: staffName が空文字
+    const missing_staffName = {
+      staffId: "STF001",
+      staffName: "",
+      department: "営業部",
+      hireDate: "2024-01-15",
+      trainingStatus: "onboarding",
+    };
+    expect(() => evaluateStaffCompetency(missing_staffName)).toThrow(
+      /staffName/
+    );
 
-    // 差分日数を計算（2024年4月15日 - 2024年3月31日 = 15日）
-    const expected_difference_days = 15;
-    expect(result.difference_days).toBe(expected_difference_days);
+    // 欠落テスト3: department が undefined
+    const missing_department = {
+      staffId: "STF001",
+      staffName: "山田太郎",
+      department: undefined,
+      hireDate: "2024-01-15",
+      trainingStatus: "onboarding",
+    };
+    expect(() => evaluateStaffCompetency(missing_department)).toThrow(
+      /department/
+    );
 
-    // エラーログに不整合の詳細情報が記録されることを確認
-    expect(result.error_log).toBeDefined();
-    expect(result.error_log.contract_id).toBe(contract_id);
-    expect(result.error_log.contract_delivery_date).toEqual(contract_delivery_date);
-    expect(result.error_log.reported_delivery_date).toEqual(report_delivery_date);
-    expect(result.error_log.difference_days).toBe(expected_difference_days);
+    // 欠落テスト4: hireDate が無効な形式
+    const invalid_hireDate = {
+      staffId: "STF001",
+      staffName: "山田太郎",
+      department: "営業部",
+      hireDate: "invalid-date",
+      trainingStatus: "onboarding",
+    };
+    expect(() => evaluateStaffCompetency(invalid_hireDate)).toThrow(/hireDate/);
 
-    // ログメッセージが納期不整合に関する内容を含むことを確認
-    expect(result.error_log.message).toMatch(/納期/);
-    expect(result.error_log.message).toMatch(/不整合/);
+    // 欠落テスト5: trainingStatus が無効な値
+    const invalid_trainingStatus = {
+      staffId: "STF001",
+      staffName: "山田太郎",
+      department: "営業部",
+      hireDate: "2024-01-15",
+      trainingStatus: "invalid_status",
+    };
+    expect(() => evaluateStaffCompetency(invalid_trainingStatus)).toThrow(
+      /trainingStatus/
+    );
+
+    // 複数項目欠落テスト: staffName と department が欠落
+    const multiple_missing = {
+      staffId: "STF001",
+      staffName: "",
+      department: null,
+      hireDate: "2024-01-15",
+      trainingStatus: "onboarding",
+    };
+    expect(() => evaluateStaffCompetency(multiple_missing)).toThrow(
+      /staffName|department/
+    );
+
+    // エラーオブジェクト形式の検証
+    try {
+      evaluateStaffCompetency(missing_staffId);
+      fail("Expected error was not thrown");
+    } catch (error) {
+      expect(error).toHaveProperty("message");
+      expect(error.message).toMatch(/staffId/);
+    }
   });
 });

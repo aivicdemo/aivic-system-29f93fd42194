@@ -1,80 +1,176 @@
-import { calculateSLADeadline, recordInquiryResponse, getSLAStatus } from "../../src/logic/it-1-1-1";
+import { describe, test, expect, beforeEach, afterEach } from "@jest/globals";
 
-describe("営業成果データの自動検証ルール定義と異常検出機能", () => {
-  test("SCEN-1214: 問い合わせ対応SLA管理機能 - 営業日の終業時刻直前に受領した問い合わせが翌営業日に回答完了した場合、SLA内として扱われる", () => {
-    // Arrange: 営業日設定（月〜金、営業時間 09:00-18:00）
-    const businessDayStart = 9 * 60; // 分単位
-    const businessDayEnd = 18 * 60; // 分単位
-    const slaDurationMinutes = 1440; // 営業日1日分（24時間）
+const fetchMock = require("jest-fetch-mock");
+fetchMock.enableMocks();
 
-    // 受領時刻: 月曜日 17:55（終業時刻5分前）
-    const inquiryReceivedTime = new Date("2024-01-15T17:55:00Z"); // 月曜日
-    const inquiryId = "inquiry_001";
+import {
+  approveContractChangeWithSignature,
+  verifySignatureRecord,
+  validateAuditLog,
+} from "../../src/logic/it-1781935279444-1-1-1";
 
-    // Act & Assert: SLA期限を計算
-    // 受領時刻が終業時刻の5分前のため、同営業日の終業時刻(18:00)までの5分と、
-    // 翌営業日(火曜日)の営業時間を含めた期限を計算
-    const slaDueTime = calculateSLADeadline({
-      inquiryId,
-      receivedAt: inquiryReceivedTime,
-      slaDurationMinutes,
-      businessDayStart,
-      businessDayEnd,
-    });
+describe("営業データ項目のメタデータ管理機能", () => {
+  beforeEach(() => {
+    fetchMock.resetMocks();
+  });
 
-    // 期待値: 翌営業日(火曜日)の18:00(営業日終業時刻)が期限
-    // 月曜日17:55受領 → 月曜日18:00まで5分 + 火曜日営業時間全日(9:00-18:00=480分)
-    // ただしSLA期限は営業時間ベースなので、翌営業日18:00が適切な期限
-    const expectedSlaDueTime = new Date("2024-01-16T18:00:00Z"); // 火曜日18:00
+  afterEach(() => {
+    fetchMock.resetMocks();
+  });
 
-    expect(slaDueTime.toISOString()).toBe(expectedSlaDueTime.toISOString());
+  // SCEN-1214: [normal] 契約変更内容の承認・署名・ログ生成
+  test("電子署名が必須の契約について、承認と同時に電子署名が生成されシステムに記録される", async () => {
+    // === Setup: 承認対象の契約変更データ ===
+    const contractChangeId = "CC-20240115-001";
+    const contractId = "CONT-2024-00123";
+    const userId = "USER-00456";
+    const changeContent = {
+      fieldName: "billing_unit_price",
+      previousValue: "50000",
+      newValue: "55000",
+      effectiveDate: "2024-02-01",
+      reason: "成約数増加に伴う価格改定",
+    };
+    const signatureRequired = true;
+    const timestampIso = "2024-01-15T11:00:00Z";
+    const signatureValue =
+      "sig_abc123def456ghi789jkl012mno345pqr678stu901";
 
-    // Act: システム時刻を翌営業日の営業開始時刻に進める
-    const responseRecordedTime = new Date("2024-01-16T09:30:00Z"); // 火曜日09:30
-
-    // Act: 問い合わせに対して回答を登録
-    const responseResult = recordInquiryResponse({
-      inquiryId,
-      responseAt: responseRecordedTime,
-      responseContent: "ご指摘ありがとうございます。対応いたしました。",
-    });
-
-    expect(responseResult).toEqual({
-      inquiryId,
-      responseAt: responseRecordedTime,
-      recorded: true,
-    });
-
-    // Act: 問い合わせのSLAステータスを確認
-    const slaStatus = getSLAStatus({
-      inquiryId,
-      receivedAt: inquiryReceivedTime,
-      respondedAt: responseRecordedTime,
-      slaDueTime,
-    });
-
-    // Assert: 回答完了時刻がSLA期限以内であり、SLAステータスが『SLA内』
-    expect(responseRecordedTime.getTime()).toBeLessThanOrEqual(
-      slaDueTime.getTime()
+    // === API mock: 署名データ取得エンドポイント ===
+    fetchMock.mockResponseOnce(
+      JSON.stringify({
+        signerId: userId,
+        timestamp: timestampIso,
+        contractChangeId: contractChangeId,
+        requiresSignature: true,
+      }),
+      { status: 200 }
     );
-    expect(slaStatus).toEqual({
-      status: "SLA内",
-      inquiryId,
-      receivedAt: inquiryReceivedTime,
-      respondedAt: responseRecordedTime,
-      slaDueTime,
-      isWithinSLA: true,
+
+    // === API mock: 署名実行エンドポイント ===
+    fetchMock.mockResponseOnce(
+      JSON.stringify({
+        signatureId: "SIG-20240115-001",
+        signatureValue: signatureValue,
+        timestamp: timestampIso,
+        signerId: userId,
+        status: "signed",
+      }),
+      { status: 200 }
+    );
+
+    // === API mock: 審査ログ記録エンドポイント ===
+    fetchMock.mockResponseOnce(
+      JSON.stringify({
+        auditLogId: "AUDIT-20240115-001",
+        events: [
+          {
+            eventType: "contract_change_approval",
+            timestamp: timestampIso,
+            userId: userId,
+            contractChangeId: contractChangeId,
+            status: "completed",
+          },
+          {
+            eventType: "electronic_signature_generation",
+            timestamp: timestampIso,
+            userId: userId,
+            signatureId: "SIG-20240115-001",
+            status: "completed",
+          },
+          {
+            eventType: "signature_record_saved",
+            timestamp: timestampIso,
+            userId: userId,
+            recordId: "REC-20240115-001",
+            status: "completed",
+          },
+        ],
+      }),
+      { status: 200 }
+    );
+
+    // === Test: 承認と署名の処理実行 ===
+    const approvalResult = await approveContractChangeWithSignature({
+      contractChangeId: contractChangeId,
+      contractId: contractId,
+      userId: userId,
+      changeContent: changeContent,
+      signatureRequired: signatureRequired,
+      timestamp: new Date(timestampIso),
     });
 
-    // Assert: SLA時間計算の詳細確認
-    // 受領時刻から回答時刻までの経過時間を営業時間ベースで検証
-    const elapsedMinutes =
-      (responseRecordedTime.getTime() - inquiryReceivedTime.getTime()) / 60000;
-    // 月曜日17:55〜18:00: 5分（営業時間内）
-    // 月曜日18:00〜火曜日09:00: 営業時間外（スキップ）
-    // 火曜日09:00〜09:30: 30分（営業時間内）
-    // 営業時間ベース合計: 5 + 30 = 35分 < 1440分（SLA期間）
-    const businessHoursElapsed = 5 + 30; // 35分
-    expect(businessHoursElapsed).toBeLessThan(slaDurationMinutes);
+    // === Assertion 1: 承認ステータスが『承認済み』に更新されている ===
+    expect(approvalResult.approvalStatus).toBe("approved");
+    expect(approvalResult.contractChangeId).toBe(contractChangeId);
+
+    // === Assertion 2: 電子署名データが契約変更履歴に記録されている ===
+    const signatureRecordVerification = await verifySignatureRecord({
+      contractChangeId: contractChangeId,
+      signatureId: "SIG-20240115-001",
+    });
+
+    expect(signatureRecordVerification.recordExists).toBe(true);
+    expect(signatureRecordVerification.signerId).toBe(userId);
+    expect(signatureRecordVerification.timestamp).toBe(timestampIso);
+    expect(signatureRecordVerification.signatureValue).toBe(signatureValue);
+    expect(signatureRecordVerification.contractChangeId).toBe(
+      contractChangeId
+    );
+
+    // === Assertion 3: 監査ログにおいて時系列順に3つのイベントが記録されている ===
+    const auditLogValidation = await validateAuditLog({
+      contractChangeId: contractChangeId,
+      userId: userId,
+      auditLogId: "AUDIT-20240115-001",
+    });
+
+    expect(auditLogValidation.isValid).toBe(true);
+    expect(auditLogValidation.eventCount).toBe(3);
+    expect(auditLogValidation.events[0].eventType).toBe(
+      "contract_change_approval"
+    );
+    expect(auditLogValidation.events[0].status).toBe("completed");
+    expect(auditLogValidation.events[1].eventType).toBe(
+      "electronic_signature_generation"
+    );
+    expect(auditLogValidation.events[1].status).toBe("completed");
+    expect(auditLogValidation.events[2].eventType).toBe(
+      "signature_record_saved"
+    );
+    expect(auditLogValidation.events[2].status).toBe("completed");
+
+    // === Assertion 4: イベント時系列順序の検証 ===
+    const event0Time = new Date(auditLogValidation.events[0].timestamp);
+    const event1Time = new Date(auditLogValidation.events[1].timestamp);
+    const event2Time = new Date(auditLogValidation.events[2].timestamp);
+
+    expect(event0Time.getTime()).toBeLessThanOrEqual(event1Time.getTime());
+    expect(event1Time.getTime()).toBeLessThanOrEqual(event2Time.getTime());
+
+    // === Assertion 5: すべてのデータが改ざん検知可能な形式で保存されている ===
+    expect(auditLogValidation.dataIntegrityChecksum).toBeDefined();
+    expect(auditLogValidation.dataIntegrityChecksum).toMatch(
+      /^[a-f0-9]{64}$/
+    );
+    expect(signatureRecordVerification.integrityHash).toBeDefined();
+    expect(signatureRecordVerification.integrityHash).toMatch(
+      /^[a-f0-9]{64}$/
+    );
+
+    // === Assertion 6: API呼び出しの検証 ===
+    expect(fetchMock.mock.calls.length).toBe(3);
+    expect(fetchMock.mock.calls[0][0]).toContain(
+      "/api/signature/get-signature-info"
+    );
+    expect(fetchMock.mock.calls[1][0]).toContain("/api/signature/execute");
+    expect(fetchMock.mock.calls[2][0]).toContain("/api/audit-log/record");
+
+    // === Assertion 7: 承認結果に含まれる署名情報の完全性 ===
+    expect(approvalResult.signature).toBeDefined();
+    expect(approvalResult.signature.signatureId).toBe("SIG-20240115-001");
+    expect(approvalResult.signature.timestamp).toBe(timestampIso);
+    expect(approvalResult.signature.signerId).toBe(userId);
+    expect(approvalResult.auditLogId).toBe("AUDIT-20240115-001");
   });
 });

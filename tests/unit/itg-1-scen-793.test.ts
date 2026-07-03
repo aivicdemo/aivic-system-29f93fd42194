@@ -1,90 +1,64 @@
-import { validateSlaTimeMetadata } from "../../src/logic/it-1781935279444-1-1-1";
+import { determineLatestDocumentVersion } from '../../src/logic/it-1781935279444-1-1-1';
 
-describe("営業データ項目メタデータ管理 - SLA時間検証", () => {
-  // SCEN-793
-  test("SLA時間が無効値または定義されていない場合、適切なエラーが返される", () => {
-    // null の場合
-    expect(() =>
-      validateSlaTimeMetadata({
-        slaTimeMinutes: null,
-        notificationId: "notif_001",
-        targetDocumentType: "contract",
+describe('営業データ項目のメタデータ管理機能', () => {
+  // SCEN-793: [normal] 文書バージョン最新版自動判定機能 - 複数バージョンが存在する契約書から最新版が正しく自動判定される
+  test('複数バージョンの中から最新版（v2.0）が正しく自動判定され、最新版以外が除外されること', () => {
+    const contract_id = 'CTR-2024-001';
+    const versions = [
+      {
+        version_id: 'VER-001',
+        contract_id: contract_id,
+        version_number: 'v1.0',
+        created_at: '2024-01-05T09:00:00Z',
+        updated_at: '2024-01-05T09:00:00Z',
+        is_active: false,
+      },
+      {
+        version_id: 'VER-002',
+        contract_id: contract_id,
+        version_number: 'v1.1',
+        created_at: '2024-01-10T10:30:00Z',
+        updated_at: '2024-01-10T10:30:00Z',
+        is_active: false,
+      },
+      {
+        version_id: 'VER-003',
+        contract_id: contract_id,
+        version_number: 'v2.0',
+        created_at: '2024-01-20T14:15:00Z',
+        updated_at: '2024-01-20T14:15:00Z',
+        is_active: true,
+      },
+    ];
+
+    const result = determineLatestDocumentVersion(versions);
+
+    // 最新版として v2.0 が返されること
+    expect(result.version_number).toBe('v2.0');
+    expect(result.version_id).toBe('VER-003');
+    expect(result.contract_id).toBe(contract_id);
+
+    // 最新版のメタデータが正確であること
+    expect(result.created_at).toBe('2024-01-20T14:15:00Z');
+    expect(result.updated_at).toBe('2024-01-20T14:15:00Z');
+    expect(result.is_active).toBe(true);
+
+    // 最新版以外のバージョンが候補から除外されていること
+    expect(result.excluded_versions).toHaveLength(2);
+    expect(result.excluded_versions).toContainEqual(
+      expect.objectContaining({
+        version_number: 'v1.0',
+        version_id: 'VER-001',
       })
-    ).toThrow(/SLA時間が定義されていません/);
-
-    // undefined の場合
-    expect(() =>
-      validateSlaTimeMetadata({
-        slaTimeMinutes: undefined,
-        notificationId: "notif_002",
-        targetDocumentType: "proposal",
+    );
+    expect(result.excluded_versions).toContainEqual(
+      expect.objectContaining({
+        version_number: 'v1.1',
+        version_id: 'VER-002',
       })
-    ).toThrow(/SLA時間が定義されていません/);
+    );
 
-    // 負の数の場合
-    expect(() =>
-      validateSlaTimeMetadata({
-        slaTimeMinutes: -30,
-        notificationId: "notif_003",
-        targetDocumentType: "contract",
-      })
-    ).toThrow(/SLA時間が無効です/);
-
-    // 0 の場合（無効値）
-    expect(() =>
-      validateSlaTimeMetadata({
-        slaTimeMinutes: 0,
-        notificationId: "notif_004",
-        targetDocumentType: "proposal",
-      })
-    ).toThrow(/SLA時間が無効です/);
-
-    // NaN の場合
-    expect(() =>
-      validateSlaTimeMetadata({
-        slaTimeMinutes: NaN,
-        notificationId: "notif_005",
-        targetDocumentType: "contract",
-      })
-    ).toThrow(/SLA時間が無効です/);
-
-    // 文字列の場合
-    expect(() =>
-      validateSlaTimeMetadata({
-        slaTimeMinutes: "invalid" as any,
-        notificationId: "notif_006",
-        targetDocumentType: "proposal",
-      })
-    ).toThrow(/SLA時間が無効です/);
-
-    // 有効な値の場合はエラーが発生しない
-    const result = validateSlaTimeMetadata({
-      slaTimeMinutes: 60,
-      notificationId: "notif_007",
-      targetDocumentType: "contract",
-    });
-
-    expect(result).toEqual({
-      isValid: true,
-      notificationId: "notif_007",
-      targetDocumentType: "contract",
-      slaTimeMinutes: 60,
-      validatedAt: expect.any(String),
-    });
-
-    // 浮動小数点の有効な値の場合
-    const resultDecimal = validateSlaTimeMetadata({
-      slaTimeMinutes: 90.5,
-      notificationId: "notif_008",
-      targetDocumentType: "proposal",
-    });
-
-    expect(resultDecimal).toEqual({
-      isValid: true,
-      notificationId: "notif_008",
-      targetDocumentType: "proposal",
-      slaTimeMinutes: 90.5,
-      validatedAt: expect.any(String),
-    });
+    // 戻り値に is_latest フラグが含まれていること
+    expect(result.is_latest).toBe(true);
   });
 });

@@ -1,131 +1,208 @@
-import { determineReportDistributionRules } from "../../src/logic/it-1-br-1781935279444-1-2-1";
+import { describe, test, expect, beforeEach } from "@jest/globals";
+import {
+  applyDocumentNamingConvention,
+  validateNamingConventionApplication,
+  checkAccessPermissionByRole,
+  getDocumentMetadataAfterApplication,
+  verifySystemLogEntry,
+} from "../../src/logic/it-1-br-1781935279444-1-2-1";
 
-describe("月次サマリーテンプレートの定義・管理機能", () => {
-  // SCEN-1062: [normal] レポート配信ルール判定機能 - 顧客契約に基づいて配信対象顧客・配信日時・配信形式が正確に判定される
-  test("should accurately determine report distribution rules based on customer contracts", () => {
-    const referenceDate = new Date("2024-06-15T09:00:00Z");
+describe("月次サマリーテンプレートの定義・管理機能 - ドキュメント統一命名規則適用", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
 
-    const testContracts = [
+  // SCEN-1062
+  test("複数の標準手順書に統一命名規則、フォルダ構成、アクセス権限が正しく適用される", () => {
+    // Arrange: テスト対象の複数ドキュメント（最低3件以上）を準備
+    const input_documents = [
       {
-        contractId: "CTR-001",
-        customerId: "CUST-A",
-        contractStartDate: new Date("2024-01-01T00:00:00Z"),
-        contractEndDate: new Date("2024-12-31T23:59:59Z"),
-        isDistributionEnabled: true,
-        distributionCycle: "monthly",
-        distributionFormat: "pdf",
+        document_id: "DOC-001",
+        current_name: "営業担当向けバックオフィス手順書_v1_final",
+        current_folder_path: "/Shared Drives/営業部/ドキュメント/手順書",
+        current_permissions: [
+          { role: "admin", access: "edit" },
+          { role: "operator", access: "view" },
+        ],
       },
       {
-        contractId: "CTR-002",
-        customerId: "CUST-B",
-        contractStartDate: new Date("2024-07-01T00:00:00Z"),
-        contractEndDate: new Date("2025-06-30T23:59:59Z"),
-        isDistributionEnabled: true,
-        distributionCycle: "monthly",
-        distributionFormat: "csv",
+        document_id: "DOC-002",
+        current_name: "請求書作成_マニュアル（最新）",
+        current_folder_path: "/My Drive/バックオフィス",
+        current_permissions: [
+          { role: "admin", access: "edit" },
+          { role: "viewer", access: "view" },
+        ],
       },
       {
-        contractId: "CTR-003",
-        customerId: "CUST-C",
-        contractStartDate: new Date("2023-01-01T00:00:00Z"),
-        contractEndDate: new Date("2024-03-31T23:59:59Z"),
-        isDistributionEnabled: true,
-        distributionCycle: "monthly",
-        distributionFormat: "email",
+        document_id: "DOC-003",
+        current_name: "営業報告書 集計 手順書",
+        current_folder_path: "/Shared Drives/本社/マニュアル",
+        current_permissions: [
+          { role: "admin", access: "edit" },
+          { role: "operator", access: "comment" },
+        ],
       },
       {
-        contractId: "CTR-004",
-        customerId: "CUST-D",
-        contractStartDate: new Date("2024-03-01T00:00:00Z"),
-        contractEndDate: new Date("2024-09-30T23:59:59Z"),
-        isDistributionEnabled: false,
-        distributionCycle: "monthly",
-        distributionFormat: "pdf",
-      },
-      {
-        contractId: "CTR-005",
-        customerId: "CUST-E",
-        contractStartDate: new Date("2024-05-01T00:00:00Z"),
-        contractEndDate: new Date("2024-11-30T23:59:59Z"),
-        isDistributionEnabled: true,
-        distributionCycle: "biweekly",
-        distributionFormat: "pdf_csv",
+        document_id: "DOC-004",
+        current_name: "契約書管理業務_SOP_ver2",
+        current_folder_path: "/Shared Drives/営業部/契約管理",
+        current_permissions: [
+          { role: "admin", access: "edit" },
+          { role: "manager", access: "edit" },
+        ],
       },
     ];
 
-    const result = determineReportDistributionRules(testContracts, referenceDate);
+    const input_naming_template = {
+      template_id: "TMPL-NAMING-001",
+      naming_pattern: "BP-{document_type}-{version_number}",
+      version_number: "001",
+      folder_structure: "/Shared Drives/営業代行/バックオフィス/{document_category}/{document_type}",
+      access_permission_rules: {
+        admin: "edit",
+        manager: "edit",
+        operator: "view",
+        viewer: "view",
+      },
+      applied_timestamp: "2024-01-15T09:00:00Z",
+    };
 
-    // 配信対象顧客の確認: 有効期間内かつ配信対象フラグがtrueの顧客のみ
-    expect(result.distributionTargets).toHaveLength(3);
+    const input_user_role = "admin";
 
-    // CTR-001: 有効期間内、配信対象フラグtrue → 配信対象に含まれる
-    const target1 = result.distributionTargets.find(
-      (t) => t.contractId === "CTR-001"
+    // Act: 統一命名規則適用関数を呼び出す
+    const result_application = applyDocumentNamingConvention({
+      documents: input_documents,
+      naming_template: input_naming_template,
+      user_role: input_user_role,
+    });
+
+    // Assert: 適用結果の基本構造を確認
+    expect(result_application.success).toBe(true);
+    expect(result_application.applied_document_count).toBe(4);
+    expect(result_application.total_document_count).toBe(4);
+
+    // Act & Assert: 各ドキュメントのファイル名が統一命名規則に従っているか確認
+    const validation_naming = validateNamingConventionApplication({
+      applied_documents: result_application.applied_documents,
+      naming_pattern: input_naming_template.naming_pattern,
+    });
+
+    expect(validation_naming.all_names_compliant).toBe(true);
+    expect(validation_naming.compliant_count).toBe(4);
+    expect(validation_naming.non_compliant_count).toBe(0);
+    expect(validation_naming.compliant_documents).toContainEqual(
+      expect.objectContaining({
+        document_id: "DOC-001",
+        new_name: expect.stringMatching(/^BP-/),
+      })
     );
-    expect(target1).toBeDefined();
-    expect(target1?.customerId).toBe("CUST-A");
-    expect(target1?.isIncluded).toBe(true);
-    expect(target1?.distributionFormat).toBe("pdf");
 
-    // CTR-002: 契約開始日が参照日より後 → 配信対象から除外
-    const excludedCTR002 = result.exclusions.find(
-      (e) => e.contractId === "CTR-002"
-    );
-    expect(excludedCTR002).toBeDefined();
-    expect(excludedCTR002?.reason).toMatch(/契約開始/);
+    // Assert: 適用後のファイル名が正しいパターンで検証
+    const doc_001_new_name = result_application.applied_documents.find(
+      (d) => d.document_id === "DOC-001"
+    )?.new_name;
+    expect(doc_001_new_name).toMatch(/^BP-[a-zA-Z0-9-]+-001$/);
 
-    // CTR-003: 契約終了日が参照日より前 → 配信対象から除外
-    const excludedCTR003 = result.exclusions.find(
-      (e) => e.contractId === "CTR-003"
-    );
-    expect(excludedCTR003).toBeDefined();
-    expect(excludedCTR003?.reason).toMatch(/契約終了/);
+    const doc_002_new_name = result_application.applied_documents.find(
+      (d) => d.document_id === "DOC-002"
+    )?.new_name;
+    expect(doc_002_new_name).toMatch(/^BP-[a-zA-Z0-9-]+-001$/);
 
-    // CTR-004: 配信対象フラグがfalse → 配信対象から除外
-    const excludedCTR004 = result.exclusions.find(
-      (e) => e.contractId === "CTR-004"
-    );
-    expect(excludedCTR004).toBeDefined();
-    expect(excludedCTR004?.reason).toMatch(/配信/);
-
-    // CTR-005: 有効期間内、配信対象フラグtrue、隔週配信 → 配信対象に含まれる
-    const target5 = result.distributionTargets.find(
-      (t) => t.contractId === "CTR-005"
-    );
-    expect(target5).toBeDefined();
-    expect(target5?.customerId).toBe("CUST-E");
-    expect(target5?.isIncluded).toBe(true);
-    expect(target5?.distributionFormat).toBe("pdf_csv");
-    expect(target5?.distributionCycle).toBe("biweekly");
-
-    // 配信日時の計算確認: 月次配信の場合、参照日の翌月同日（月末対応）に設定
-    const nextMonthDistributionDate = new Date("2024-07-15T09:00:00Z");
-    expect(target1?.nextDistributionDate).toEqual(nextMonthDistributionDate);
-
-    // 隔週配信の場合: 参照日から14日後に設定
-    const biweeklyDistributionDate = new Date("2024-06-29T09:00:00Z");
-    expect(target5?.nextDistributionDate).toEqual(biweeklyDistributionDate);
-
-    // 全体の配信対象数・除外数の確認
-    expect(result.totalEligibleContracts).toBe(5);
-    expect(result.totalDistributionTargets).toBe(3);
-    expect(result.totalExcludedContracts).toBe(2);
-
-    // 配信スケジュール完全性の確認
-    expect(result.distributionTargets.every((t) => t.nextDistributionDate !== null))
-      .toBe(true);
-    expect(
-      result.distributionTargets.every((t) => t.distributionFormat !== "")
-    ).toBe(true);
-
-    // 各対象顧客について配信形式が明確に判定されているか
-    result.distributionTargets.forEach((target) => {
-      expect(["pdf", "csv", "email", "pdf_csv"]).toContain(
-        target.distributionFormat
+    // Act & Assert: 各ドキュメントのフォルダ構成が統一されているか確認
+    result_application.applied_documents.forEach((doc) => {
+      expect(doc.new_folder_path).toContain(
+        "/Shared Drives/営業代行/バックオフィス/"
       );
     });
 
-    // 契約内容と配信ルール判定結果の整合性確認
-    expect(result.validationStatus).toBe("passed");
+    const folder_structure_valid = result_application.applied_documents.every(
+      (doc) => doc.new_folder_path.startsWith("/Shared Drives/営業代行/バックオフィス/")
+    );
+    expect(folder_structure_valid).toBe(true);
+
+    // Act & Assert: 管理者ロールのアクセス権限検証
+    const admin_permission_check = checkAccessPermissionByRole({
+      document_id: "DOC-001",
+      user_role: "admin",
+      applied_permissions: result_application.applied_documents[0]
+        .new_permissions,
+    });
+
+    expect(admin_permission_check.has_access).toBe(true);
+    expect(admin_permission_check.permission_level).toBe("edit");
+
+    // Act & Assert: 一般ユーザー（operator）ロールのアクセス権限検証
+    const operator_permission_check = checkAccessPermissionByRole({
+      document_id: "DOC-001",
+      user_role: "operator",
+      applied_permissions: result_application.applied_documents[0]
+        .new_permissions,
+    });
+
+    expect(operator_permission_check.has_access).toBe(true);
+    expect(operator_permission_check.permission_level).toBe("view");
+
+    // Act & Assert: 閲覧者ロールのアクセス権限検証
+    const viewer_permission_check = checkAccessPermissionByRole({
+      document_id: "DOC-001",
+      user_role: "viewer",
+      applied_permissions: result_application.applied_documents[0]
+        .new_permissions,
+    });
+
+    expect(viewer_permission_check.has_access).toBe(true);
+    expect(viewer_permission_check.permission_level).toBe("view");
+
+    // Act & Assert: 権限なしのロール（unauthorized）のアクセス権限検証
+    const unauthorized_permission_check = checkAccessPermissionByRole({
+      document_id: "DOC-001",
+      user_role: "unauthorized",
+      applied_permissions: result_application.applied_documents[0]
+        .new_permissions,
+    });
+
+    expect(unauthorized_permission_check.has_access).toBe(false);
+
+    // Act & Assert: 適用されたドキュメントのメタデータ情報を確認
+    const metadata_check = getDocumentMetadataAfterApplication({
+      document_id: "DOC-001",
+      applied_documents: result_application.applied_documents,
+    });
+
+    expect(metadata_check.document_id).toBe("DOC-001");
+    expect(metadata_check.applied_at).toBe("2024-01-15T09:00:00Z");
+    expect(metadata_check.applied_by_role).toBe("admin");
+    expect(metadata_check.naming_template_id).toBe("TMPL-NAMING-001");
+    expect(metadata_check.new_name).toBeDefined();
+    expect(metadata_check.new_folder_path).toBeDefined();
+    expect(metadata_check.new_permissions).toBeDefined();
+
+    // Act & Assert: システムログに命名規則適用の成功記録が保存されていることを確認
+    const log_entry = verifySystemLogEntry({
+      applied_documents_count: result_application.applied_document_count,
+      naming_template_id: input_naming_template.template_id,
+      applied_by_role: input_user_role,
+      applied_timestamp: input_naming_template.applied_timestamp,
+    });
+
+    expect(log_entry.log_created).toBe(true);
+    expect(log_entry.log_entry_id).toBeDefined();
+    expect(log_entry.log_entry_id).toMatch(/^LOG-NAMING-/);
+    expect(log_entry.action_type).toBe("NAMING_CONVENTION_APPLIED");
+    expect(log_entry.status).toBe("SUCCESS");
+    expect(log_entry.document_count).toBe(4);
+    expect(log_entry.template_id_in_log).toBe("TMPL-NAMING-001");
+    expect(log_entry.executed_by_role).toBe("admin");
+    expect(log_entry.execution_timestamp).toBe("2024-01-15T09:00:00Z");
+
+    // Assert: 全体的な適用成功の総合判定
+    expect(result_application.success).toBe(true);
+    expect(validation_naming.all_names_compliant).toBe(true);
+    expect(folder_structure_valid).toBe(true);
+    expect(admin_permission_check.has_access).toBe(true);
+    expect(operator_permission_check.has_access).toBe(true);
+    expect(viewer_permission_check.has_access).toBe(true);
+    expect(log_entry.log_created).toBe(true);
   });
 });

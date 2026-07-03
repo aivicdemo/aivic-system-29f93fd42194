@@ -1,69 +1,293 @@
-import { executeAccountingSystemAPIIntegration } from '../../src/logic/it-1-2-1';
+import { describe, it, expect, beforeEach } from '@jest/globals';
+import { extractBillingItems } from '../../src/logic/it-1-2-1';
 
-const fetchMock = require('jest-fetch-mock');
-
-describe('会計システムAPI連携実行機能', () => {
-  test('SCEN-1300: 検証済み請求情報が会計システムへのAPI連携に成功し、連携ログが記録される', async () => {
-    fetchMock.resetMocks();
-
-    const validatedBillingInfo = {
-      billingId: 'BILL-2024-001',
-      customerId: 'CUST-A001',
-      serviceId: 'SVC-001',
-      billingAmount: 150000,
-      billingDate: '2024-01-31',
-      validationStatus: '承認済み',
-      targetMonth: '2024-01',
+describe('請求対象項目自動抽出機能', () => {
+  it('SCEN-1300: 不正なルール定義でエラーが発生し抽出処理が中断される', () => {
+    // ハッピーパス: 正常なルール定義で抽出成功
+    const validRule = {
+      ruleId: 'rule_001',
+      ruleName: '基本サービス請求ルール',
+      targetField: 'serviceType',
+      operator: 'equals',
+      targetValue: 'basic_service',
+      billingItemField: 'billingAmount',
+      isActive: true,
     };
 
-    const accountingSystemResponse = {
-      accountingId: 'ACC-2024-001',
-      status: 'success',
-      message: '請求情報を正常に受領しました',
-      processedAt: '2024-01-31T15:30:45Z',
-    };
+    const salesData = [
+      {
+        salesDataId: 'sd_001',
+        customerId: 'cust_001',
+        serviceType: 'basic_service',
+        billingAmount: 50000,
+        appointmentCount: 5,
+        contractCount: 2,
+      },
+      {
+        salesDataId: 'sd_002',
+        customerId: 'cust_002',
+        serviceType: 'premium_service',
+        billingAmount: 100000,
+        appointmentCount: 10,
+        contractCount: 5,
+      },
+    ];
 
-    fetchMock.mockResponseOnce(JSON.stringify(accountingSystemResponse), {
-      status: 200,
+    const result = extractBillingItems(validRule, salesData);
+
+    expect(result).toEqual({
+      success: true,
+      extractedItems: [
+        {
+          salesDataId: 'sd_001',
+          customerId: 'cust_001',
+          billingAmount: 50000,
+        },
+      ],
+      totalAmount: 50000,
+      itemCount: 1,
+      errors: [],
     });
 
-    const result = await executeAccountingSystemAPIIntegration(
-      validatedBillingInfo
+    // エラーケース1: targetField が空白
+    const invalidRule1 = {
+      ruleId: 'rule_002',
+      ruleName: 'エラーテスト1',
+      targetField: '',
+      operator: 'equals',
+      targetValue: 'basic_service',
+      billingItemField: 'billingAmount',
+      isActive: true,
+    };
+
+    expect(() => extractBillingItems(invalidRule1, salesData)).toThrow(
+      /targetField/
     );
 
-    expect(fetchMock.mock.calls.length).toBe(1);
+    // エラーケース2: 無効な operator
+    const invalidRule2 = {
+      ruleId: 'rule_003',
+      ruleName: 'エラーテスト2',
+      targetField: 'serviceType',
+      operator: 'invalid_operator',
+      targetValue: 'basic_service',
+      billingItemField: 'billingAmount',
+      isActive: true,
+    };
 
-    const callArgs = fetchMock.mock.calls[0];
-    expect(callArgs[0]).toMatch(/accounting-system|api\/billing/i);
-    expect(callArgs[1].method).toBe('POST');
-
-    const requestBody = JSON.parse(callArgs[1].body);
-    expect(requestBody.billingId).toBe('BILL-2024-001');
-    expect(requestBody.customerId).toBe('CUST-A001');
-    expect(requestBody.billingAmount).toBe(150000);
-
-    expect(result.integrationStatus).toBe('成功');
-
-    expect(result.integrationLog).toBeDefined();
-    expect(result.integrationLog.billingId).toBe('BILL-2024-001');
-    expect(result.integrationLog.accountingSystemId).toBe('ACC-2024-001');
-    expect(result.integrationLog.status).toBe('成功');
-
-    expect(result.integrationLog.timestamp).toBeDefined();
-    const logTimestamp = new Date(result.integrationLog.timestamp);
-    expect(logTimestamp.getFullYear()).toBe(2024);
-    expect(logTimestamp.getMonth()).toBe(0);
-    expect(logTimestamp.getDate()).toBe(31);
-
-    expect(result.integrationLog.responseInfo).toBeDefined();
-    expect(result.integrationLog.responseInfo.accountingId).toBe(
-      'ACC-2024-001'
+    expect(() => extractBillingItems(invalidRule2, salesData)).toThrow(
+      /operator/
     );
-    expect(result.integrationLog.responseInfo.message).toBe(
-      '請求情報を正常に受領しました'
+
+    // エラーケース3: 存在しないフィールド参照
+    const invalidRule3 = {
+      ruleId: 'rule_004',
+      ruleName: 'エラーテスト3',
+      targetField: 'serviceType',
+      operator: 'equals',
+      targetValue: 'basic_service',
+      billingItemField: 'nonExistentField',
+      isActive: true,
+    };
+
+    expect(() => extractBillingItems(invalidRule3, salesData)).toThrow(
+      /billingItemField/
     );
-    expect(result.integrationLog.responseInfo.processedAt).toBe(
-      '2024-01-31T15:30:45Z'
+
+    // エラーケース4: targetValue が null/undefined
+    const invalidRule4 = {
+      ruleId: 'rule_005',
+      ruleName: 'エラーテスト4',
+      targetField: 'serviceType',
+      operator: 'equals',
+      targetValue: null,
+      billingItemField: 'billingAmount',
+      isActive: true,
+    };
+
+    expect(() => extractBillingItems(invalidRule4, salesData)).toThrow(
+      /targetValue/
     );
+
+    // エラーケース5: ruleName が空白
+    const invalidRule5 = {
+      ruleId: 'rule_006',
+      ruleName: '',
+      targetField: 'serviceType',
+      operator: 'equals',
+      targetValue: 'basic_service',
+      billingItemField: 'billingAmount',
+      isActive: true,
+    };
+
+    expect(() => extractBillingItems(invalidRule5, salesData)).toThrow(
+      /ruleName/
+    );
+
+    // ハッピーパス: 複数条件の AND 演算子での抽出
+    const validRuleWithAnd = {
+      ruleId: 'rule_007',
+      ruleName: '複合条件ルール',
+      conditions: [
+        {
+          targetField: 'serviceType',
+          operator: 'equals',
+          targetValue: 'basic_service',
+        },
+        {
+          targetField: 'appointmentCount',
+          operator: 'greaterThanOrEqual',
+          targetValue: 5,
+        },
+      ],
+      logicalOperator: 'AND',
+      billingItemField: 'billingAmount',
+      isActive: true,
+    };
+
+    const resultWithAnd = extractBillingItems(validRuleWithAnd, salesData);
+
+    expect(resultWithAnd).toEqual({
+      success: true,
+      extractedItems: [
+        {
+          salesDataId: 'sd_001',
+          customerId: 'cust_001',
+          billingAmount: 50000,
+        },
+      ],
+      totalAmount: 50000,
+      itemCount: 1,
+      errors: [],
+    });
+
+    // ハッピーパス: greaterThan operator での抽出
+    const validRuleWithGreaterThan = {
+      ruleId: 'rule_008',
+      ruleName: '金額閾値ルール',
+      targetField: 'billingAmount',
+      operator: 'greaterThan',
+      targetValue: 75000,
+      billingItemField: 'billingAmount',
+      isActive: true,
+    };
+
+    const resultWithGreaterThan = extractBillingItems(
+      validRuleWithGreaterThan,
+      salesData
+    );
+
+    expect(resultWithGreaterThan).toEqual({
+      success: true,
+      extractedItems: [
+        {
+          salesDataId: 'sd_002',
+          customerId: 'cust_002',
+          billingAmount: 100000,
+        },
+      ],
+      totalAmount: 100000,
+      itemCount: 1,
+      errors: [],
+    });
+
+    // エラーケース6: 複合条件で無効な logicalOperator
+    const invalidRule6 = {
+      ruleId: 'rule_009',
+      ruleName: 'エラーテスト6',
+      conditions: [
+        {
+          targetField: 'serviceType',
+          operator: 'equals',
+          targetValue: 'basic_service',
+        },
+      ],
+      logicalOperator: 'INVALID_LOGICAL_OP',
+      billingItemField: 'billingAmount',
+      isActive: true,
+    };
+
+    expect(() => extractBillingItems(invalidRule6, salesData)).toThrow(
+      /logicalOperator/
+    );
+
+    // ハッピーパス: in operator での複数値抽出
+    const validRuleWithIn = {
+      ruleId: 'rule_010',
+      ruleName: 'IN演算子ルール',
+      targetField: 'serviceType',
+      operator: 'in',
+      targetValue: ['basic_service', 'standard_service'],
+      billingItemField: 'billingAmount',
+      isActive: true,
+    };
+
+    const resultWithIn = extractBillingItems(validRuleWithIn, salesData);
+
+    expect(resultWithIn).toEqual({
+      success: true,
+      extractedItems: [
+        {
+          salesDataId: 'sd_001',
+          customerId: 'cust_001',
+          billingAmount: 50000,
+        },
+      ],
+      totalAmount: 50000,
+      itemCount: 1,
+      errors: [],
+    });
+
+    // ハッピーパス: isActive が false のルールは適用されない
+    const inactiveRule = {
+      ruleId: 'rule_011',
+      ruleName: '無効なルール',
+      targetField: 'serviceType',
+      operator: 'equals',
+      targetValue: 'basic_service',
+      billingItemField: 'billingAmount',
+      isActive: false,
+    };
+
+    const resultInactive = extractBillingItems(inactiveRule, salesData);
+
+    expect(resultInactive).toEqual({
+      success: true,
+      extractedItems: [],
+      totalAmount: 0,
+      itemCount: 0,
+      errors: [],
+    });
+
+    // エラーケース7: conditions が空配列
+    const invalidRule7 = {
+      ruleId: 'rule_012',
+      ruleName: 'エラーテスト7',
+      conditions: [],
+      logicalOperator: 'AND',
+      billingItemField: 'billingAmount',
+      isActive: true,
+    };
+
+    expect(() => extractBillingItems(invalidRule7, salesData)).toThrow(
+      /conditions/
+    );
+
+    // ハッピーパス: 空の営業データ配列での抽出
+    const emptyResult = extractBillingItems(validRule, []);
+
+    expect(emptyResult).toEqual({
+      success: true,
+      extractedItems: [],
+      totalAmount: 0,
+      itemCount: 0,
+      errors: [],
+    });
+
+    // エラーケース8: ruleId が重複する場合の警告
+    const duplicateRuleIdResult = extractBillingItems(validRule, salesData);
+
+    expect(duplicateRuleIdResult.success).toBe(true);
+    expect(Array.isArray(duplicateRuleIdResult.extractedItems)).toBe(true);
   });
 });

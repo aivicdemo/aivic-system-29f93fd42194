@@ -1,140 +1,167 @@
 import { describe, test, expect } from "@jest/globals";
-import { validateContractIdAndFetchReport } from "../../src/logic/it-1-2-1";
+import { validateAndAggregateByCustomerService } from "../../src/logic/it-1-2-1";
 
 describe("営業成果データから請求対象項目を自動抽出し、顧客ごと・サービスごとの請求額を集計する機能", () => {
-  test("SCEN-660: 割り当て契約IDが空の場合、レポートが表示されず、エラーメッセージが表示される", () => {
-    const emptyContractId = "";
-    const userId = "user_001";
+  test("SCEN-660: 複数顧客・複数サービスの場合でも、集計ルールに基づいて正確に分離される", () => {
+    // テストデータ: 3社以上の顧客と各顧客に対して2種類以上のサービス
+    const sales_data = [
+      {
+        customer_id: "CUST_A",
+        service_id: "SVC_1",
+        sales_amount: 100000,
+        appointment_count: 5,
+        contract_count: 2,
+      },
+      {
+        customer_id: "CUST_A",
+        service_id: "SVC_2",
+        sales_amount: 150000,
+        appointment_count: 8,
+        contract_count: 3,
+      },
+      {
+        customer_id: "CUST_B",
+        service_id: "SVC_1",
+        sales_amount: 200000,
+        appointment_count: 10,
+        contract_count: 4,
+      },
+      {
+        customer_id: "CUST_B",
+        service_id: "SVC_2",
+        sales_amount: 120000,
+        appointment_count: 6,
+        contract_count: 2,
+      },
+      {
+        customer_id: "CUST_C",
+        service_id: "SVC_1",
+        sales_amount: 180000,
+        appointment_count: 9,
+        contract_count: 3,
+      },
+    ];
 
-    expect(() =>
-      validateContractIdAndFetchReport({ contractId: emptyContractId, userId })
-    ).toThrow(/契約ID/);
-  });
+    const aggregation_rules = {
+      CUST_A: {
+        SVC_1: { sales_weight: 1.0, appointment_weight: 0.5, contract_weight: 2.0 },
+        SVC_2: { sales_weight: 1.0, appointment_weight: 0.5, contract_weight: 2.0 },
+      },
+      CUST_B: {
+        SVC_1: { sales_weight: 1.0, appointment_weight: 0.5, contract_weight: 2.0 },
+        SVC_2: { sales_weight: 1.0, appointment_weight: 0.5, contract_weight: 2.0 },
+      },
+      CUST_C: {
+        SVC_1: { sales_weight: 1.0, appointment_weight: 0.5, contract_weight: 2.0 },
+      },
+    };
 
-  test("SCEN-661: 有効な契約IDが提供される場合、レポートが正常に取得され、顧客ごと・サービスごとの請求額が返される", () => {
-    const contractId = "contract_12345";
-    const userId = "user_001";
-
-    const result = validateContractIdAndFetchReport({
-      contractId,
-      userId,
-    });
-
-    expect(result).toEqual({
-      contractId: "contract_12345",
-      customerId: "cust_abc",
-      serviceBillingAmounts: [
-        { serviceId: "svc_001", serviceName: "コンサルティング", amount: 150000 },
-        { serviceId: "svc_002", serviceName: "システム構築", amount: 250000 },
-      ],
-      totalAmount: 400000,
-      reportStatus: "available",
-    });
-  });
-
-  test("SCEN-662: ユーザーが契約IDに対するアクセス権限がない場合、エラーメッセージが表示される", () => {
-    const contractId = "contract_99999";
-    const userId = "user_unauthorized";
-
-    expect(() =>
-      validateContractIdAndFetchReport({ contractId, userId })
-    ).toThrow(/権限/);
-  });
-
-  test("SCEN-663: 契約IDが存在しない場合、エラーメッセージが表示される", () => {
-    const contractId = "contract_nonexistent";
-    const userId = "user_001";
-
-    expect(() =>
-      validateContractIdAndFetchReport({ contractId, userId })
-    ).toThrow(/契約/);
-  });
-
-  test("SCEN-664: 複数のサービスを持つ契約の場合、各サービスごとの請求額が正確に集計される", () => {
-    const contractId = "contract_multi_service";
-    const userId = "user_001";
-
-    const result = validateContractIdAndFetchReport({
-      contractId,
-      userId,
-    });
-
-    expect(result.serviceBillingAmounts).toHaveLength(3);
-    expect(result.serviceBillingAmounts[0].amount).toBe(100000);
-    expect(result.serviceBillingAmounts[1].amount).toBe(200000);
-    expect(result.serviceBillingAmounts[2].amount).toBe(300000);
-    expect(result.totalAmount).toBe(600000);
-  });
-
-  test("SCEN-665: 契約IDフィールドが null である場合、エラーメッセージが表示される", () => {
-    const contractId = null as any;
-    const userId = "user_001";
-
-    expect(() =>
-      validateContractIdAndFetchReport({ contractId, userId })
-    ).toThrow(/契約ID/);
-  });
-
-  test("SCEN-666: 複数顧客の契約を持つユーザーが特定の契約IDを指定した場合、その契約に紐付くデータのみが返される", () => {
-    const contractId = "contract_cust_001";
-    const userId = "user_multi_customer";
-
-    const result = validateContractIdAndFetchReport({
-      contractId,
-      userId,
-    });
-
-    expect(result.contractId).toBe("contract_cust_001");
-    expect(result.customerId).toBe("cust_001");
-    expect(result.serviceBillingAmounts).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ serviceId: "svc_001" }),
-      ])
+    // 集計ルール検証機能を実行
+    const aggregation_result = validateAndAggregateByCustomerService(
+      sales_data,
+      aggregation_rules
     );
-  });
 
-  test("SCEN-667: 請求対象項目が存在しない契約の場合、空のサービスリストが返される", () => {
-    const contractId = "contract_empty_billing";
-    const userId = "user_001";
-
-    const result = validateContractIdAndFetchReport({
-      contractId,
-      userId,
-    });
-
-    expect(result.serviceBillingAmounts).toEqual([]);
-    expect(result.totalAmount).toBe(0);
-  });
-
-  test("SCEN-668: 契約IDが特殊文字を含む場合でも、有効な契約IDであれば正常に処理される", () => {
-    const contractId = "contract_2024-01-15_abc";
-    const userId = "user_001";
-
-    const result = validateContractIdAndFetchReport({
-      contractId,
-      userId,
-    });
-
-    expect(result.contractId).toBe("contract_2024-01-15_abc");
-    expect(result.reportStatus).toBe("available");
-  });
-
-  test("SCEN-669: 割引が適用された請求の場合、割引後の金額が正確に計算される", () => {
-    const contractId = "contract_with_discount";
-    const userId = "user_001";
-
-    const result = validateContractIdAndFetchReport({
-      contractId,
-      userId,
-    });
-
-    expect(result.serviceBillingAmounts).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          serviceId: "svc_discount",
-          amount: 180000,
-        }),
-      ])
+    // 顧客A-サービス1の集計値を抽出
+    const cust_a_svc_1 = aggregation_result.find(
+      (item) => item.customer_id === "CUST_A" && item.service_id === "SVC_1"
     );
+
+    // 顧客A-サービス2の集計値を抽出
+    const cust_a_svc_2 = aggregation_result.find(
+      (item) => item.customer_id === "CUST_A" && item.service_id === "SVC_2"
+    );
+
+    // 顧客B-サービス1の集計値を抽出
+    const cust_b_svc_1 = aggregation_result.find(
+      (item) => item.customer_id === "CUST_B" && item.service_id === "SVC_1"
+    );
+
+    // 顧客B-サービス2の集計値を抽出
+    const cust_b_svc_2 = aggregation_result.find(
+      (item) => item.customer_id === "CUST_B" && item.service_id === "SVC_2"
+    );
+
+    // 顧客C-サービス1の集計値を抽出
+    const cust_c_svc_1 = aggregation_result.find(
+      (item) => item.customer_id === "CUST_C" && item.service_id === "SVC_1"
+    );
+
+    // 期待値の計算: aggregated_value = (sales_amount * sales_weight) + (appointment_count * appointment_weight) + (contract_count * contract_weight)
+    const expected_cust_a_svc_1 = 100000 * 1.0 + 5 * 0.5 + 2 * 2.0; // 100002.5
+    const expected_cust_a_svc_2 = 150000 * 1.0 + 8 * 0.5 + 3 * 2.0; // 150010
+    const expected_cust_b_svc_1 = 200000 * 1.0 + 10 * 0.5 + 4 * 2.0; // 200013
+    const expected_cust_b_svc_2 = 120000 * 1.0 + 6 * 0.5 + 2 * 2.0; // 120007
+    const expected_cust_c_svc_1 = 180000 * 1.0 + 9 * 0.5 + 3 * 2.0; // 180010.5
+
+    // 各顧客・サービス組み合わせの集計値が定義された集計ルールに従って計算されているか検証
+    expect(cust_a_svc_1).toBeDefined();
+    expect(cust_a_svc_1!.aggregated_value).toBe(expected_cust_a_svc_1);
+
+    expect(cust_a_svc_2).toBeDefined();
+    expect(cust_a_svc_2!.aggregated_value).toBe(expected_cust_a_svc_2);
+
+    expect(cust_b_svc_1).toBeDefined();
+    expect(cust_b_svc_1!.aggregated_value).toBe(expected_cust_b_svc_1);
+
+    expect(cust_b_svc_2).toBeDefined();
+    expect(cust_b_svc_2!.aggregated_value).toBe(expected_cust_b_svc_2);
+
+    expect(cust_c_svc_1).toBeDefined();
+    expect(cust_c_svc_1!.aggregated_value).toBe(expected_cust_c_svc_1);
+
+    // 異なる顧客間のデータが混在していないか確認
+    const cust_a_items = aggregation_result.filter(
+      (item) => item.customer_id === "CUST_A"
+    );
+    const cust_b_items = aggregation_result.filter(
+      (item) => item.customer_id === "CUST_B"
+    );
+    const cust_c_items = aggregation_result.filter(
+      (item) => item.customer_id === "CUST_C"
+    );
+
+    expect(cust_a_items.length).toBe(2);
+    expect(cust_b_items.length).toBe(2);
+    expect(cust_c_items.length).toBe(1);
+
+    expect(
+      cust_a_items.every((item) => item.customer_id === "CUST_A")
+    ).toBe(true);
+    expect(
+      cust_b_items.every((item) => item.customer_id === "CUST_B")
+    ).toBe(true);
+    expect(
+      cust_c_items.every((item) => item.customer_id === "CUST_C")
+    ).toBe(true);
+
+    // 異なるサービス間のデータが混在していないか確認
+    const svc_1_items = aggregation_result.filter(
+      (item) => item.service_id === "SVC_1"
+    );
+    const svc_2_items = aggregation_result.filter(
+      (item) => item.service_id === "SVC_2"
+    );
+
+    expect(svc_1_items.length).toBe(3);
+    expect(svc_2_items.length).toBe(2);
+
+    expect(
+      svc_1_items.every((item) => item.service_id === "SVC_1")
+    ).toBe(true);
+    expect(
+      svc_2_items.every((item) => item.service_id === "SVC_2")
+    ).toBe(true);
+
+    // 重複がないことを確認
+    const unique_combinations = new Set(
+      aggregation_result.map(
+        (item) => `${item.customer_id}_${item.service_id}`
+      )
+    );
+    expect(unique_combinations.size).toBe(aggregation_result.length);
+
+    // 全体の集計数が正確であることを確認
+    expect(aggregation_result.length).toBe(5);
   });
 });

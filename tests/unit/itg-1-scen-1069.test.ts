@@ -1,83 +1,47 @@
-import { describe, test, expect } from "@jest/globals";
-import {
-  validateSalesDataCompleteness,
-} from "../../src/logic/it-1781935279444-2-2-1";
+import { evaluateNewStaffCompetency } from "../../src/logic/it-1-2-1";
 
-describe("営業データの完全性・正確性を自動検証し、不足データ・誤りを検出・通知する機能", () => {
-  // SCEN-1069: [edge] 営業データ品質検証機能 - null または空文字列の営業データが欠落として正確に検出される
-  test("null値および空文字列を含むすべての営業データが欠落データとして正確に検出され、適切なエラーメッセージが返されること", () => {
-    // テストデータ: null値を持つ営業データレコード
-    const salesDataWithNull = {
-      customer_name: "顧客A",
-      contact_date: "2024-01-15",
-      sales_content: null, // 欠落: null値
-      appointment_status: "confirmed",
-      service_type: "service_01",
-      amount: 50000,
+describe("新入スタッフ到達度評価機能", () => {
+  // SCEN-1069
+  test("3業務のうち1つでも不合格基準に該当する場合に不合格判定される", () => {
+    const evaluation_input = {
+      staff_id: "STAFF_001",
+      staff_name: "田中太郎",
+      evaluation_date: "2024-02-15",
+      task_a_score: 85,
+      task_b_score: 82,
+      task_c_score: 75,
     };
 
-    // テストデータ: 空文字列を持つ営業データレコード
-    const salesDataWithEmptyString = {
-      customer_name: "顧客B",
-      contact_date: "2024-01-16",
-      sales_content: "", // 欠落: 空文字列
-      appointment_status: "confirmed",
-      service_type: "service_02",
-      amount: 75000,
-    };
+    const result = evaluateNewStaffCompetency(evaluation_input);
 
-    // テストデータ: 正常なデータ（全項目入力済み）
-    const validSalesData = {
-      customer_name: "顧客C",
-      contact_date: "2024-01-17",
-      sales_content: "サービス提案実施",
-      appointment_status: "confirmed",
-      service_type: "service_01",
-      amount: 100000,
-    };
+    expect(result.final_judgment).toBe("不合格");
+    expect(result.pass_threshold).toBe(80);
+    expect(result.task_evaluations).toHaveLength(3);
 
-    // null値を含むデータに対して検証関数を実行
-    const resultWithNull = validateSalesDataCompleteness(salesDataWithNull);
-    expect(resultWithNull.is_valid).toBe(false);
-    expect(resultWithNull.missing_fields).toContain("sales_content");
-    expect(resultWithNull.error_messages).toEqual(
-      expect.arrayContaining([
-        expect.stringMatching(/sales_content/),
-      ])
+    const task_c_eval = result.task_evaluations.find(
+      (t) => t.task_name === "業務C"
     );
-    expect(resultWithNull.missing_count).toBe(1);
+    expect(task_c_eval).toBeDefined();
+    expect(task_c_eval?.score).toBe(75);
+    expect(task_c_eval?.status).toBe("不合格");
+    expect(task_c_eval?.reason).toMatch(/80点未満/);
 
-    // 空文字列を含むデータに対して検証関数を実行
-    const resultWithEmptyString = validateSalesDataCompleteness(
-      salesDataWithEmptyString
+    const task_a_eval = result.task_evaluations.find(
+      (t) => t.task_name === "業務A"
     );
-    expect(resultWithEmptyString.is_valid).toBe(false);
-    expect(resultWithEmptyString.missing_fields).toContain("sales_content");
-    expect(resultWithEmptyString.error_messages).toEqual(
-      expect.arrayContaining([
-        expect.stringMatching(/sales_content/),
-      ])
-    );
-    expect(resultWithEmptyString.missing_count).toBe(1);
+    expect(task_a_eval?.status).toBe("合格");
 
-    // 検出された欠落データのエラーメッセージが正しい形式で返されることを確認
-    expect(resultWithNull.error_messages[0]).toMatch(/^sales_content.*欠落/);
-    expect(resultWithEmptyString.error_messages[0]).toMatch(/^sales_content.*欠落/);
-
-    // null と空文字列の両方が同じ欠落カテゴリに分類されることを確認
-    expect(resultWithNull.missing_fields).toEqual(
-      resultWithEmptyString.missing_fields
+    const task_b_eval = result.task_evaluations.find(
+      (t) => t.task_name === "業務B"
     );
-    expect(resultWithNull.error_category).toBe("MISSING_FIELD");
-    expect(resultWithEmptyString.error_category).toBe("MISSING_FIELD");
-    expect(resultWithNull.error_category).toEqual(
-      resultWithEmptyString.error_category
-    );
+    expect(task_b_eval?.status).toBe("合格");
 
-    // 正常なデータは検証を通過することを確認
-    const resultValid = validateSalesDataCompleteness(validSalesData);
-    expect(resultValid.is_valid).toBe(true);
-    expect(resultValid.missing_fields).toEqual([]);
-    expect(resultValid.missing_count).toBe(0);
+    expect(result.failure_reason).toContain("業務C");
+    expect(result.failure_reason).toMatch(/不合格基準/);
+
+    const summary = result.evaluation_summary;
+    expect(summary).toContain("田中太郎");
+    expect(summary).toContain("不合格");
+    expect(summary).toContain("業務C");
   });
 });

@@ -1,27 +1,77 @@
-import { validateSalesData } from "../../src/logic/it-1781935279444-2-1-1";
+import { validateSalesDataQuality } from '../../src/logic/it-1781935279444-2-2-1';
 
-describe("営業データ入力時の品質検証ルール定義・実行機能", () => {
-  test("SCEN-710: 金額が負数の場合に不正形式として検出される", () => {
-    const invalidSalesData = {
-      customerId: "CUST-001",
-      customerName: "テスト顧客",
-      serviceType: "basic",
-      contactDate: "2024-01-15",
+describe('営業データの完全性・正確性を自動検証し、不足データ・誤りを検出・通知する機能', () => {
+  // SCEN-710: [edge] 営業データ品質基準チェック判定機能 - 形式チェック（金額が999999999など上限値）で合格・不合格の境界が正確に判定される
+  test('金額フィールドの境界値チェック: 上限値999999999は合格、1000000000は不合格、負の値は不合格', () => {
+    // 金額フィールドに999999998を入力してチェック実行 → 合格
+    const result_999999998 = validateSalesDataQuality({
+      customerId: 'CUST001',
+      serviceName: 'Service_A',
       appointmentCount: 5,
-      contractCount: 2,
-      amount: -1000,
-      status: "completed",
-    };
+      contractCount: 3,
+      amount: 999999998,
+      transactionDate: '2024-01-15',
+      salesPerson: 'Sales_Rep_001'
+    });
+    expect(result_999999998.status).toBe('PASS');
 
-    const result = validateSalesData(invalidSalesData);
+    // 金額フィールドに999999999（上限値）を入力してチェック実行 → 合格
+    const result_999999999 = validateSalesDataQuality({
+      customerId: 'CUST001',
+      serviceName: 'Service_A',
+      appointmentCount: 5,
+      contractCount: 3,
+      amount: 999999999,
+      transactionDate: '2024-01-15',
+      salesPerson: 'Sales_Rep_001'
+    });
+    expect(result_999999999.status).toBe('PASS');
 
-    expect(result.isValid).toBe(false);
-    expect(result.errors).toHaveLength(1);
-    expect(result.errors[0]).toEqual(
+    // 金額フィールドに1000000000（上限値を超える値）を入力してチェック実行 → 不合格
+    const result_1000000000 = validateSalesDataQuality({
+      customerId: 'CUST001',
+      serviceName: 'Service_A',
+      appointmentCount: 5,
+      contractCount: 3,
+      amount: 1000000000,
+      transactionDate: '2024-01-15',
+      salesPerson: 'Sales_Rep_001'
+    });
+    expect(result_1000000000.status).toBe('FAIL');
+    expect(result_1000000000.errors).toContain(
       expect.objectContaining({
-        fieldName: "amount",
-        message: expect.stringMatching(/金額が負数|負数|金額/i),
-        level: "error",
+        field: 'amount',
+        message: expect.stringMatching(/上限値/)
+      })
+    );
+
+    // 金額フィールドに0を入力してチェック実行 → 合格
+    const result_zero = validateSalesDataQuality({
+      customerId: 'CUST001',
+      serviceName: 'Service_A',
+      appointmentCount: 5,
+      contractCount: 3,
+      amount: 0,
+      transactionDate: '2024-01-15',
+      salesPerson: 'Sales_Rep_001'
+    });
+    expect(result_zero.status).toBe('PASS');
+
+    // 金額フィールドに-1（負の値）を入力してチェック実行 → 不合格
+    const result_negative = validateSalesDataQuality({
+      customerId: 'CUST001',
+      serviceName: 'Service_A',
+      appointmentCount: 5,
+      contractCount: 3,
+      amount: -1,
+      transactionDate: '2024-01-15',
+      salesPerson: 'Sales_Rep_001'
+    });
+    expect(result_negative.status).toBe('FAIL');
+    expect(result_negative.errors).toContain(
+      expect.objectContaining({
+        field: 'amount',
+        message: expect.stringMatching(/負の値/)
       })
     );
   });

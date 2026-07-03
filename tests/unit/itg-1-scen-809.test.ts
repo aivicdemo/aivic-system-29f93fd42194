@@ -1,44 +1,60 @@
-import { searchMailHistory } from "../../src/logic/it-1781935279444-1-1-1";
+import { validateSalesDataCompleteness } from '../../src/logic/it-1781935279444-2-2-1';
 
-describe("営業データ項目のメタデータ管理機能", () => {
-  test("SCEN-809: メール履歴検索・フィルタリング機能 - 指定条件に合致するメール履歴が存在しない場合に空結果が返却される", async () => {
-    const fetchMock = require("jest-fetch-mock");
-    fetchMock.enableMocks();
-    fetchMock.resetMocks();
+describe('営業データの完全性・正確性を自動検証し、不足データ・誤りを検出・通知する機能', () => {
+  // SCEN-809: [edge] 請求データ妥当性自動検証機能 - 営業成果データの一部が不足している場合、部分的な妥当性検証を実施し警告が表示される
+  test('営業成果データの必須項目は存在するがオプション項目が不足する場合、警告ステータスで部分的に有効と判定され、検証が継続される', () => {
+    // 必須項目は含むが、オプション項目（プロジェクトコード、部門コード）を除外した営業成果データ
+    const salesDataWithMissingOptional = {
+      customerId: 'CUST-001',
+      customerName: '株式会社テスト',
+      transactionDate: '2024-01-15',
+      appointmentCount: 5,
+      closureCount: 2,
+      serviceType: 'consulting',
+      // オプション項目を意図的に除外
+      // projectCode: undefined,
+      // departmentCode: undefined,
+    };
 
-    // 検索条件: 存在しないメールアドレスと過去のいかなるメールも該当しない日付範囲
-    const searchEmail = "nonexistent@example.com";
-    const startDate = "2099-01-01";
-    const endDate = "2099-12-31";
+    const result = validateSalesDataCompleteness(salesDataWithMissingOptional);
 
-    // APIレスポンス: 空配列を返却
-    fetchMock.mockResponseOnce(JSON.stringify([]), { status: 200 });
+    // 検証結果の確認
+    expect(result.isValid).toBe(true);
+    expect(result.status).toBe('PARTIAL_VALID');
+    expect(result.warnings).toHaveLength(2);
 
-    // 関数実行
-    const result = await searchMailHistory({
-      email: searchEmail,
-      startDate: startDate,
-      endDate: endDate,
-    });
+    // 不足項目の詳細確認
+    const missingProjectCodeWarning = result.warnings.find(
+      (w) => w.fieldName === 'projectCode'
+    );
+    expect(missingProjectCodeWarning).toBeDefined();
+    expect(missingProjectCodeWarning?.message).toMatch(/プロジェクトコード/);
+    expect(missingProjectCodeWarning?.severity).toBe('WARNING');
 
-    // HTTP ステータスコードが200であることを確認
-    expect(fetchMock.mock.calls.length).toBe(1);
-    const lastCall = fetchMock.mock.calls[0];
-    expect(lastCall[1]?.method || "GET").toBeDefined();
+    const missingDepartmentCodeWarning = result.warnings.find(
+      (w) => w.fieldName === 'departmentCode'
+    );
+    expect(missingDepartmentCodeWarning).toBeDefined();
+    expect(missingDepartmentCodeWarning?.message).toMatch(/部門コード/);
+    expect(missingDepartmentCodeWarning?.severity).toBe('WARNING');
 
-    // 検索結果が空配列であることを確認
-    expect(Array.isArray(result)).toBe(true);
-    expect(result.length).toBe(0);
+    // 警告メッセージの確認
+    expect(result.uiMessage).toMatch(/警告/);
+    expect(result.uiMessage).toContain('プロジェクトコード');
+    expect(result.uiMessage).toContain('部門コード');
 
-    // 検索結果が空であることの確認
-    expect(result).toEqual([]);
+    // 処理継続の確認
+    expect(result.shouldContinueProcessing).toBe(true);
 
-    // APIが正常に呼び出されたことを確認
-    const requestUrl = lastCall[0] as string;
-    expect(requestUrl).toContain("nonexistent@example.com");
-    expect(requestUrl).toContain("2099-01-01");
-    expect(requestUrl).toContain("2099-12-31");
+    // レコードのステータス確認
+    expect(result.recordStatus).toBe('PARTIAL_VALID');
 
-    fetchMock.disableMocks();
+    // 検証対象が処理されていることを確認
+    expect(result.processedFields).toContain('customerId');
+    expect(result.processedFields).toContain('customerName');
+    expect(result.processedFields).toContain('transactionDate');
+    expect(result.processedFields).toContain('appointmentCount');
+    expect(result.processedFields).toContain('closureCount');
+    expect(result.processedFields).toContain('serviceType');
   });
 });

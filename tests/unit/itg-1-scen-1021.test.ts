@@ -1,212 +1,102 @@
-import { describe, it, expect } from "@jest/globals";
-import { extractAndAggregateBillingItems } from "../../src/logic/it-1-2-1";
+import { describe, test, expect } from "@jest/globals";
+import {
+  confirmMonthlyReportPeriod,
+} from "../../src/logic/it-1-br-1781935279444-1-2-1";
 
-describe("営業成果データから請求対象項目を自動抽出し顧客ごと・サービスごとの請求額を集計", () => {
-  it("SCEN-1021: 請求対象項目が存在しない営業データからは空の集計結果が返却される", () => {
-    const salesDataWithNoBillingItems = [
+describe("月次サマリーテンプレートの定義・管理機能", () => {
+  test("SCEN-1021: 月次レポート作成期間確定・集計開始機能 - 月次レポート作成開始日時が確定され、その期間内のデータのみが集計対象として自動抽出される", () => {
+    const period_start_dt = new Date("2024-01-01T00:00:00Z");
+    const period_end_dt = new Date("2024-01-31T23:59:59Z");
+    const user_id = "USR001";
+    const organization_id = "ORG001";
+
+    const sales_data_in_period = [
       {
-        sales_id: "S001",
-        customer_id: "C001",
-        service_id: "SVC001",
-        billing_item: null,
+        sales_data_id: "SD001",
+        customer_id: "CUST001",
+        transaction_dt: new Date("2024-01-15T10:30:00Z"),
+        amount: 100000,
+        service_type: "serviceA",
+        status: "completed",
+      },
+      {
+        sales_data_id: "SD002",
+        customer_id: "CUST002",
+        transaction_dt: new Date("2024-01-20T14:00:00Z"),
         amount: 50000,
-        transaction_date: "2024-01-15",
-      },
-      {
-        sales_id: "S002",
-        customer_id: "C001",
-        service_id: "SVC001",
-        billing_item: undefined,
-        amount: 30000,
-        transaction_date: "2024-01-16",
-      },
-      {
-        sales_id: "S003",
-        customer_id: "C002",
-        service_id: "SVC002",
-        billing_item: "",
-        amount: 20000,
-        transaction_date: "2024-01-17",
-      },
-      {
-        sales_id: "S004",
-        customer_id: "C002",
-        service_id: "SVC002",
-        billing_item: null,
-        amount: 15000,
-        transaction_date: "2024-01-18",
+        service_type: "serviceB",
+        status: "completed",
       },
     ];
 
-    const result = extractAndAggregateBillingItems(salesDataWithNoBillingItems);
-
-    expect(result).toEqual({});
-  });
-
-  it("SCEN-1021: 請求対象項目が存在しない営業データと存在する営業データが混在する場合、存在しるデータのみ集計される", () => {
-    const mixedSalesData = [
+    const sales_data_out_of_period = [
       {
-        sales_id: "S001",
-        customer_id: "C001",
-        service_id: "SVC001",
-        billing_item: null,
-        amount: 50000,
-        transaction_date: "2024-01-15",
+        sales_data_id: "SD003",
+        customer_id: "CUST003",
+        transaction_dt: new Date("2023-12-31T23:59:59Z"),
+        amount: 75000,
+        service_type: "serviceA",
+        status: "completed",
       },
       {
-        sales_id: "S002",
-        customer_id: "C001",
-        service_id: "SVC001",
-        billing_item: "appointment",
-        amount: 30000,
-        transaction_date: "2024-01-16",
-      },
-      {
-        sales_id: "S003",
-        customer_id: "C002",
-        service_id: "SVC002",
-        billing_item: "",
-        amount: 20000,
-        transaction_date: "2024-01-17",
-      },
-      {
-        sales_id: "S004",
-        customer_id: "C002",
-        service_id: "SVC002",
-        billing_item: "contract",
-        amount: 15000,
-        transaction_date: "2024-01-18",
+        sales_data_id: "SD004",
+        customer_id: "CUST004",
+        transaction_dt: new Date("2024-02-01T00:00:00Z"),
+        amount: 25000,
+        service_type: "serviceC",
+        status: "completed",
       },
     ];
 
-    const result = extractAndAggregateBillingItems(mixedSalesData);
+    const all_sales_data = [
+      ...sales_data_in_period,
+      ...sales_data_out_of_period,
+    ];
 
-    expect(result).toEqual({
-      "C001-SVC001": {
-        customer_id: "C001",
-        service_id: "SVC001",
-        billing_items: {
-          appointment: 30000,
-        },
-        total_amount: 30000,
-      },
-      "C002-SVC002": {
-        customer_id: "C002",
-        service_id: "SVC002",
-        billing_items: {
-          contract: 15000,
-        },
-        total_amount: 15000,
-      },
+    const result = confirmMonthlyReportPeriod({
+      period_start_dt,
+      period_end_dt,
+      user_id,
+      organization_id,
+      all_sales_data,
     });
-  });
-
-  it("SCEN-1021: 複数の有効な請求対象項目が同じ顧客・サービスで集計される", () => {
-    const validSalesData = [
-      {
-        sales_id: "S001",
-        customer_id: "C001",
-        service_id: "SVC001",
-        billing_item: "appointment",
-        amount: 50000,
-        transaction_date: "2024-01-15",
-      },
-      {
-        sales_id: "S002",
-        customer_id: "C001",
-        service_id: "SVC001",
-        billing_item: "appointment",
-        amount: 30000,
-        transaction_date: "2024-01-16",
-      },
-      {
-        sales_id: "S003",
-        customer_id: "C001",
-        service_id: "SVC001",
-        billing_item: "contract",
-        amount: 20000,
-        transaction_date: "2024-01-17",
-      },
-      {
-        sales_id: "S004",
-        customer_id: "C002",
-        service_id: "SVC002",
-        billing_item: "contract",
-        amount: 15000,
-        transaction_date: "2024-01-18",
-      },
-    ];
-
-    const result = extractAndAggregateBillingItems(validSalesData);
 
     expect(result).toEqual({
-      "C001-SVC001": {
-        customer_id: "C001",
-        service_id: "SVC001",
-        billing_items: {
-          appointment: 80000,
-          contract: 20000,
-        },
-        total_amount: 100000,
-      },
-      "C002-SVC002": {
-        customer_id: "C002",
-        service_id: "SVC002",
-        billing_items: {
-          contract: 15000,
-        },
-        total_amount: 15000,
-      },
+      period_confirmed: true,
+      period_start_dt: new Date("2024-01-01T00:00:00Z"),
+      period_end_dt: new Date("2024-01-31T23:59:59Z"),
+      extracted_data_count: 2,
+      extracted_sales_data: expect.arrayContaining([
+        expect.objectContaining({
+          sales_data_id: "SD001",
+          transaction_dt: new Date("2024-01-15T10:30:00Z"),
+        }),
+        expect.objectContaining({
+          sales_data_id: "SD002",
+          transaction_dt: new Date("2024-01-20T14:00:00Z"),
+        }),
+      ]),
+      filtered_out_count: 2,
+      aggregation_started: true,
+      system_message: expect.stringMatching(/期間確定|集計処理開始|データ抽出/),
+      confirmation_timestamp: expect.any(Date),
+      status: "aggregation_in_progress",
     });
-  });
 
-  it("SCEN-1021: 空の営業データ配列が入力された場合、空のオブジェクトが返却される", () => {
-    const emptySalesData: any[] = [];
+    expect(result.extracted_data_count).toBe(2);
+    expect(result.filtered_out_count).toBe(2);
+    expect(result.period_confirmed).toBe(true);
+    expect(result.aggregation_started).toBe(true);
+    expect(result.status).toBe("aggregation_in_progress");
+    expect(result.extracted_sales_data.length).toBe(2);
 
-    const result = extractAndAggregateBillingItems(emptySalesData);
-
-    expect(result).toEqual({});
-  });
-
-  it("SCEN-1021: 請求対象項目が whitespace のみの場合は請求対象外として扱われる", () => {
-    const salesDataWithWhitespace = [
-      {
-        sales_id: "S001",
-        customer_id: "C001",
-        service_id: "SVC001",
-        billing_item: "   ",
-        amount: 50000,
-        transaction_date: "2024-01-15",
-      },
-      {
-        sales_id: "S002",
-        customer_id: "C001",
-        service_id: "SVC001",
-        billing_item: "\t",
-        amount: 30000,
-        transaction_date: "2024-01-16",
-      },
-      {
-        sales_id: "S003",
-        customer_id: "C002",
-        service_id: "SVC002",
-        billing_item: "appointment",
-        amount: 20000,
-        transaction_date: "2024-01-17",
-      },
-    ];
-
-    const result = extractAndAggregateBillingItems(salesDataWithWhitespace);
-
-    expect(result).toEqual({
-      "C002-SVC002": {
-        customer_id: "C002",
-        service_id: "SVC002",
-        billing_items: {
-          appointment: 20000,
-        },
-        total_amount: 20000,
-      },
+    result.extracted_sales_data.forEach((data: any) => {
+      expect(data.transaction_dt.getTime()).toBeGreaterThanOrEqual(
+        period_start_dt.getTime()
+      );
+      expect(data.transaction_dt.getTime()).toBeLessThanOrEqual(
+        period_end_dt.getTime()
+      );
     });
   });
 });

@@ -1,73 +1,63 @@
-import { validateBillingDataAccuracy } from '../../src/logic/it-1781935279444-2-2-1';
+import { recordConsultationResponse } from "../../src/logic/it-1781935279444-2-1-1";
 
-describe('営業データの完全性・正確性を自動検証し、不足データ・誤りを検出・通知する機能', () => {
-  test('SCEN-817: 請求データが営業成果データと完全に一致する場合に検証成功と判定される', () => {
-    // 営業成果データの事前登録
-    const salesData = {
-      sales_data_id: 'SD001',
-      customer_id: 'CUST001',
-      product_id: 'PROD001',
-      quantity: 10,
-      unit_price: 5000,
-      sales_amount: 50000,
-      sales_date: '2024-01-15',
-      service_type: 'service_A',
-      status: 'completed'
-    };
+describe("営業データ入力時の品質検証ルール定義・実行機能", () => {
+  test("SCEN-817: 代表への相談受領・履歴管理機能 - 代表が営業責任者からの相談を受け取り、対応方針がタイムスタンプと対応者情報付きで履歴に記録される", () => {
+    // Precondition: 営業責任者が相談内容を送信し、代表が相談を受領可能な状態
+    // Trigger: 代表が受領した相談に対して対応方針を入力・保存した時点
+    // Expected Outcome: 対応方針がタイムスタンプ・対応者情報付きで履歴に記録される
 
-    // 請求データ作成（営業成果データと完全一致）
-    const billingData = {
-      billing_id: 'BILL001',
-      customer_id: 'CUST001',
-      product_id: 'PROD001',
-      quantity: 10,
-      unit_price: 5000,
-      billing_amount: 50000,
-      billing_date: '2024-01-15',
-      service_type: 'service_A',
-      related_sales_data_id: 'SD001'
-    };
+    const consultationId = "CONS-2024-001";
+    const consultationContent =
+      "契約内容の変更に関する確認のお願い：新規サービスの請求開始時期について";
+    const consultantUserId = "USER-SALES-REP-001";
+    const consultantName = "営業責任者 太郎";
+    const respondentUserId = "USER-ADMIN-001";
+    const respondentName = "代表 花子";
+    const responsePolicy = "契約変更申請書を確認の上、2営業日以内に返答予定";
 
-    // 検証関数を実行
-    const validationResult = validateBillingDataAccuracy(
-      billingData,
-      salesData
-    );
+    // 対応方針記録時刻（固定タイムスタンプ）
+    const recordedAt = new Date("2024-06-15T10:30:00Z");
 
-    // 検証ステータスが『成功』と判定されることを確認
-    expect(validationResult.validation_status).toBe('success');
-
-    // 検証ログに検証成功メッセージが記録されることを確認
-    expect(validationResult.validation_log).toContain('検証成功');
-
-    // 検証完了フラグが立つことを確認
-    expect(validationResult.validation_completed_flag).toBe(true);
-
-    // 請求データが承認可能な状態になることを確認
-    expect(validationResult.approvable_status).toBe(true);
-
-    // 検証ログの詳細情報を確認
-    expect(validationResult.validation_details).toEqual({
-      customer_match: true,
-      product_match: true,
-      quantity_match: true,
-      unit_price_match: true,
-      amount_match: true,
-      date_match: true,
-      service_type_match: true
+    // 相談受領・対応方針記録
+    const result = recordConsultationResponse({
+      consultationId,
+      consultationContent,
+      consultantUserId,
+      consultantName,
+      respondentUserId,
+      respondentName,
+      responsePolicy,
+      recordedAt,
     });
 
-    // 検証時刻が記録されることを確認
-    expect(validationResult.validation_timestamp).toBeDefined();
-    expect(typeof validationResult.validation_timestamp).toBe('string');
+    // Assertion 1: 対応方針の内容が完全に保存されている
+    expect(result.responsePolicy).toBe(
+      "契約変更申請書を確認の上、2営業日以内に返答予定"
+    );
 
-    // 検証スコア（一致度）が 100% であることを確認
-    expect(validationResult.validation_score).toBe(100);
+    // Assertion 2: 対応日時が正確なタイムスタンプ付きで記録されている
+    expect(result.recordedAt).toEqual(new Date("2024-06-15T10:30:00Z"));
 
-    // エラーメッセージが空であることを確認
-    expect(validationResult.error_messages).toEqual([]);
+    // Assertion 3: 対応者（代表）の名前とユーザーIDが明確に記録されている
+    expect(result.respondentUserId).toBe("USER-ADMIN-001");
+    expect(result.respondentName).toBe("代表 花子");
 
-    // 警告メッセージが空であることを確認
-    expect(validationResult.warning_messages).toEqual([]);
+    // Assertion 4: 履歴一覧から該当レコードを検索・表示できる
+    expect(result.consultationId).toBe("CONS-2024-001");
+    expect(result.consultantUserId).toBe("USER-SALES-REP-001");
+    expect(result.consultantName).toBe("営業責任者 太郎");
+
+    // Assertion 5: 履歴レコードが構造化されて返されている
+    expect(result).toHaveProperty("consultationId");
+    expect(result).toHaveProperty("consultationContent");
+    expect(result).toHaveProperty("responsePolicy");
+    expect(result).toHaveProperty("recordedAt");
+    expect(result).toHaveProperty("respondentUserId");
+    expect(result).toHaveProperty("respondentName");
+
+    // Assertion 6: 相談内容も履歴に含まれている
+    expect(result.consultationContent).toBe(
+      "契約内容の変更に関する確認のお願い：新規サービスの請求開始時期について"
+    );
   });
 });

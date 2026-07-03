@@ -1,114 +1,45 @@
-import { detectDeprecatedVersions } from '../../src/logic/it-1781935279444-1-1-1';
+import { describe, test, expect, beforeEach, jest } from '@jest/globals';
+import { checkSlaExceeded } from '../../src/logic/it-1781935279444-1-1-1';
 
-describe('営業データ項目のメタデータ管理機能 - 非推奨版資料の自動検出・警告機能', () => {
-  // SCEN-785
-  test('複数の旧バージョンが存在する場合、すべての旧バージョンに対して警告が適用される', () => {
-    const deprecated_versions_input = [
-      {
-        version_id: 'v1_0_doc_001',
-        document_name: 'proposal_template',
-        version_number: '1.0',
-        created_at: new Date('2024-01-15T10:00:00Z'),
-        status: 'deprecated',
-        deprecation_reason: 'Superseded by v1.5'
-      },
-      {
-        version_id: 'v1_5_doc_001',
-        document_name: 'proposal_template',
-        version_number: '1.5',
-        created_at: new Date('2024-02-20T14:30:00Z'),
-        status: 'deprecated',
-        deprecation_reason: 'Superseded by v2.0'
-      },
-      {
-        version_id: 'v2_0_doc_001',
-        document_name: 'proposal_template',
-        version_number: '2.0',
-        created_at: new Date('2024-03-10T09:15:00Z'),
-        status: 'deprecated',
-        deprecation_reason: 'Superseded by v3.0'
-      },
-      {
-        version_id: 'v3_0_doc_001',
-        document_name: 'proposal_template',
-        version_number: '3.0',
-        created_at: new Date('2024-04-05T16:45:00Z'),
-        status: 'active',
-        deprecation_reason: null
-      }
-    ];
+describe('営業データ項目のメタデータ管理機能 - SLA監視', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
 
-    const current_recommended_version = {
-      version_id: 'v3_0_doc_001',
-      document_name: 'proposal_template',
-      version_number: '3.0',
-      created_at: new Date('2024-04-05T16:45:00Z'),
-      status: 'active',
-      deprecation_reason: null
-    };
+  // SCEN-785: [edge] 資料リリース通知から確認完了までのSLA監視機能 - SLA期限を1秒超過した場合、アラート対象として判定する
+  test('SLA期限を1秒超過した場合、アラート対象として判定し、アラート通知が発火される', () => {
+    // テスト環境でのタイムスタンプを固定
+    const release_timestamp = new Date('2024-12-15T09:00:00Z');
+    const sla_limit_seconds = 86400; // 24時間 (秒)
+    const sla_deadline = new Date(release_timestamp.getTime() + sla_limit_seconds * 1000);
+    
+    // SLA期限を1秒超過した時刻
+    const exceeded_check_timestamp = new Date(sla_deadline.getTime() + 1000); // +1秒
+    
+    // 入力: 資料リリース通知時刻、SLA期限秒、現在時刻
+    const sla_result = checkSlaExceeded({
+      release_timestamp: release_timestamp.toISOString(),
+      sla_limit_seconds: sla_limit_seconds,
+      current_timestamp: exceeded_check_timestamp.toISOString()
+    });
 
-    const result = detectDeprecatedVersions(deprecated_versions_input, current_recommended_version);
+    // 期待結果1: SLA超過フラグが true
+    expect(sla_result.is_exceeded).toBe(true);
 
-    expect(result.deprecated_count).toBe(3);
-    expect(result.current_version_id).toBe('v3_0_doc_001');
-    expect(result.detected_deprecated_versions).toHaveLength(3);
+    // 期待結果2: 超過時間が1秒として正確に記録
+    expect(sla_result.exceeded_seconds).toBe(1);
 
-    expect(result.detected_deprecated_versions).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          version_id: 'v1_0_doc_001',
-          version_number: '1.0',
-          warning_flag: true,
-          warning_message: expect.stringContaining('1.0')
-        }),
-        expect.objectContaining({
-          version_id: 'v1_5_doc_001',
-          version_number: '1.5',
-          warning_flag: true,
-          warning_message: expect.stringContaining('1.5')
-        }),
-        expect.objectContaining({
-          version_id: 'v2_0_doc_001',
-          version_number: '2.0',
-          warning_flag: true,
-          warning_message: expect.stringContaining('2.0')
-        })
-      ])
-    );
+    // 期待結果3: アラート判定ステータスが 'alert' または true
+    expect(sla_result.alert_status).toBe('alert');
 
-    const all_warnings_have_flag = result.detected_deprecated_versions.every(
-      (deprecated_item: any) => deprecated_item.warning_flag === true
-    );
-    expect(all_warnings_have_flag).toBe(true);
+    // 期待結果4: アラート通知フラグが発火
+    expect(sla_result.alert_fired).toBe(true);
 
-    const all_warnings_include_metadata = result.detected_deprecated_versions.every(
-      (deprecated_item: any) =>
-        deprecated_item.version_number &&
-        deprecated_item.deprecation_reason &&
-        deprecated_item.warning_message
-    );
-    expect(all_warnings_include_metadata).toBe(true);
+    // 期待結果5: 監視ログに超過時間が記録されている
+    expect(sla_result.monitoring_log).toBeDefined();
+    expect(sla_result.monitoring_log.exceeded_duration_ms).toBe(1000);
 
-    const v1_0_warning = result.detected_deprecated_versions.find(
-      (item: any) => item.version_id === 'v1_0_doc_001'
-    );
-    expect(v1_0_warning.warning_message).toMatch(/旧バージョン/);
-    expect(v1_0_warning.deprecation_reason).toBe('Superseded by v1.5');
-
-    const v1_5_warning = result.detected_deprecated_versions.find(
-      (item: any) => item.version_id === 'v1_5_doc_001'
-    );
-    expect(v1_5_warning.warning_message).toMatch(/旧バージョン/);
-    expect(v1_5_warning.deprecation_reason).toBe('Superseded by v2.0');
-
-    const v2_0_warning = result.detected_deprecated_versions.find(
-      (item: any) => item.version_id === 'v2_0_doc_001'
-    );
-    expect(v2_0_warning.warning_message).toMatch(/旧バージョン/);
-    expect(v2_0_warning.deprecation_reason).toBe('Superseded by v3.0');
-
-    expect(result.billing_automation_filter_status).toBe('pending_confirmation');
-    expect(result.all_deprecated_versions_filtered).toBe(true);
-    expect(result.filter_applied_timestamp).toBeDefined();
+    // 期待結果6: 監視ログのタイムスタンプが現在時刻として記録
+    expect(sla_result.monitoring_log.check_timestamp).toBe(exceeded_check_timestamp.toISOString());
   });
 });

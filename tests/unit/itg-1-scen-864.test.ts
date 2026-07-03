@@ -1,164 +1,121 @@
-import { extractContractAndBillingHistory } from "../../src/logic/it-1-2-1";
+import { generateContractChangeValidationReports } from '../../src/logic/it-1-br-1781935279444-1-2-1';
 
-describe("営業成果データから請求対象項目を自動抽出し、顧客ごと・サービスごとの請求額を集計する機能", () => {
-  // SCEN-864: [normal] 契約履歴と請求データの時系列抽出機能 - 指定顧客・契約・期間に基づき過去の契約条件と請求パターンが時系列で正確に抽出される
-  test("指定された顧客ID、契約ID、期間に該当するすべての契約履歴と請求データが時系列で正確に抽出される", () => {
-    // 入力: 顧客ID、契約ID、抽出期間開始日、抽出期間終了日
-    const customerId = "CUST-001";
-    const contractId = "CONTRACT-001";
-    const periodStartDate = new Date("2023-01-01T00:00:00Z");
-    const periodEndDate = new Date("2024-12-31T23:59:59Z");
+describe('月次サマリーテンプレートの定義・管理機能', () => {
+  test('SCEN-864: 複数の契約変更が同時に進行する場合に各レポートが正確に区分・生成される', () => {
+    // 準備: テストデータとして異なる契約ID、変更種別を持つ3件の契約変更リクエストを生成
+    const contractChangeRequests = [
+      {
+        contractId: 'A001',
+        changeType: 'プラン変更',
+        changeDetail: 'スタンダードプランからプレミアムプランへ変更',
+        changedAt: new Date('2024-06-15T09:30:00Z'),
+        previousValue: 'スタンダードプラン',
+        newValue: 'プレミアムプラン',
+        appliedDate: new Date('2024-07-01T00:00:00Z'),
+      },
+      {
+        contractId: 'A002',
+        changeType: '数量変更',
+        changeDetail: 'ユーザー数を50から80へ変更',
+        changedAt: new Date('2024-06-15T10:15:00Z'),
+        previousValue: '50',
+        newValue: '80',
+        appliedDate: new Date('2024-07-01T00:00:00Z'),
+      },
+      {
+        contractId: 'A003',
+        changeType: '価格改定',
+        changeDetail: '年間契約料金を1000万円から1200万円へ改定',
+        changedAt: new Date('2024-06-15T11:45:00Z'),
+        previousValue: '10000000',
+        newValue: '12000000',
+        appliedDate: new Date('2024-07-01T00:00:00Z'),
+      },
+    ];
 
-    // 期待される契約履歴データ
-    // 過去の契約条件: 契約金額300,000円、契約期間2023年1月1日〜2023年6月30日、割引率0%
-    // その後変更: 契約金額350,000円、契約期間2023年7月1日〜2024年6月30日、割引率5%
-    // さらに変更: 契約金額400,000円、契約期間2024年7月1日〜2024年12月31日、割引率10%
-    
-    const result = extractContractAndBillingHistory({
-      customerId: customerId,
-      contractId: contractId,
-      periodStartDate: periodStartDate,
-      periodEndDate: periodEndDate,
-    });
+    // 実行: 3件のリクエストを同時にシステムに投入し契約変更検証レポート自動生成機能を実行
+    const generatedReports = generateContractChangeValidationReports(contractChangeRequests);
 
-    // 期待される抽出結果の検証
-    expect(result).toBeDefined();
-    expect(result.customerId).toBe("CUST-001");
-    expect(result.contractId).toBe("CONTRACT-001");
-    expect(result.extractedRecordsCount).toBe(9); // 9件の履歴・請求レコード
-    expect(result.hasDuplicates).toBe(false); // 重複なし
-    expect(result.allRecordsInPeriod).toBe(true); // すべてのレコードが指定期間内
+    // 検証1: 生成されたレポートの件数が3件であることを確認
+    expect(generatedReports.length).toBe(3);
 
-    // 時系列順序の検証（古い順）
-    expect(result.records).toHaveLength(9);
-    
-    // 第1契約期間（2023/1/1〜2023/6/30）の履歴と請求
-    expect(result.records[0]).toEqual({
-      recordId: "HIST-001",
-      recordType: "contract_history", // 契約履歴
-      contractAmount: 300000,
-      contractStartDate: new Date("2023-01-01T00:00:00Z"),
-      contractEndDate: new Date("2023-06-30T23:59:59Z"),
-      discountRate: 0,
-      changeDate: new Date("2023-01-01T00:00:00Z"),
-      changeReason: "契約開始",
-    });
-    expect(result.records[1]).toEqual({
-      recordId: "BILL-001",
-      recordType: "billing", // 請求データ
-      billingDate: new Date("2023-01-15T00:00:00Z"),
-      billingAmount: 300000,
-      billingPeriodStart: new Date("2023-01-01T00:00:00Z"),
-      billingPeriodEnd: new Date("2023-01-31T23:59:59Z"),
-      paymentStatus: "完了",
-      paymentDate: new Date("2023-01-25T00:00:00Z"),
-    });
-    expect(result.records[2]).toEqual({
-      recordId: "BILL-002",
-      recordType: "billing",
-      billingDate: new Date("2023-02-15T00:00:00Z"),
-      billingAmount: 300000,
-      billingPeriodStart: new Date("2023-02-01T00:00:00Z"),
-      billingPeriodEnd: new Date("2023-02-28T23:59:59Z"),
-      paymentStatus: "完了",
-      paymentDate: new Date("2023-02-25T00:00:00Z"),
-    });
-    
-    // 第1契約期間最後の月と変更前のデータ
-    expect(result.records[3]).toEqual({
-      recordId: "BILL-003",
-      recordType: "billing",
-      billingDate: new Date("2023-06-15T00:00:00Z"),
-      billingAmount: 300000,
-      billingPeriodStart: new Date("2023-06-01T00:00:00Z"),
-      billingPeriodEnd: new Date("2023-06-30T23:59:59Z"),
-      paymentStatus: "完了",
-      paymentDate: new Date("2023-06-25T00:00:00Z"),
-    });
+    // 検証2: 各レポートが対応する契約IDで正確に区分されているか確認
+    expect(generatedReports[0].contractId).toBe('A001');
+    expect(generatedReports[1].contractId).toBe('A002');
+    expect(generatedReports[2].contractId).toBe('A003');
 
-    // 契約変更: 契約金額350,000円、割引率5%（2023/7/1〜2024/6/30）
-    expect(result.records[4]).toEqual({
-      recordId: "HIST-002",
-      recordType: "contract_history",
-      contractAmount: 350000,
-      contractStartDate: new Date("2023-07-01T00:00:00Z"),
-      contractEndDate: new Date("2024-06-30T23:59:59Z"),
-      discountRate: 5,
-      changeDate: new Date("2023-07-01T00:00:00Z"),
-      changeReason: "契約更新・金額変更",
-    });
-    expect(result.records[5]).toEqual({
-      recordId: "BILL-004",
-      recordType: "billing",
-      billingDate: new Date("2023-07-15T00:00:00Z"),
-      billingAmount: 332500, // 350000 * (1 - 0.05) = 332500
-      billingPeriodStart: new Date("2023-07-01T00:00:00Z"),
-      billingPeriodEnd: new Date("2023-07-31T23:59:59Z"),
-      paymentStatus: "完了",
-      paymentDate: new Date("2023-07-25T00:00:00Z"),
-    });
-    
-    // 第2契約期間の別月請求データ
-    expect(result.records[6]).toEqual({
-      recordId: "BILL-005",
-      recordType: "billing",
-      billingDate: new Date("2024-06-15T00:00:00Z"),
-      billingAmount: 332500, // 350000 * (1 - 0.05) = 332500
-      billingPeriodStart: new Date("2024-06-01T00:00:00Z"),
-      billingPeriodEnd: new Date("2024-06-30T23:59:59Z"),
-      paymentStatus: "完了",
-      paymentDate: new Date("2024-06-25T00:00:00Z"),
+    // 検証3: 各レポートに含まれる変更内容が投入したリクエストと一致しているか検証
+    expect(generatedReports[0].changeType).toBe('プラン変更');
+    expect(generatedReports[0].changeDetail).toBe('スタンダードプランからプレミアムプランへ変更');
+    expect(generatedReports[0].previousValue).toBe('スタンダードプラン');
+    expect(generatedReports[0].newValue).toBe('プレミアムプラン');
+
+    expect(generatedReports[1].changeType).toBe('数量変更');
+    expect(generatedReports[1].changeDetail).toBe('ユーザー数を50から80へ変更');
+    expect(generatedReports[1].previousValue).toBe('50');
+    expect(generatedReports[1].newValue).toBe('80');
+
+    expect(generatedReports[2].changeType).toBe('価格改定');
+    expect(generatedReports[2].changeDetail).toBe('年間契約料金を1000万円から1200万円へ改定');
+    expect(generatedReports[2].previousValue).toBe('10000000');
+    expect(generatedReports[2].newValue).toBe('12000000');
+
+    // 検証4: 各レポートのタイムスタンプが生成順序と矛盾していないか確認
+    const report1Time = new Date(generatedReports[0].generatedAt).getTime();
+    const report2Time = new Date(generatedReports[1].generatedAt).getTime();
+    const report3Time = new Date(generatedReports[2].generatedAt).getTime();
+    expect(report1Time <= report2Time).toBe(true);
+    expect(report2Time <= report3Time).toBe(true);
+
+    // 検証5: レポート間でデータの重複や漏落がないか検証
+    const contractIds = new Set(generatedReports.map((r) => r.contractId));
+    expect(contractIds.size).toBe(3); // 重複なし
+    expect(contractIds.has('A001')).toBe(true);
+    expect(contractIds.has('A002')).toBe(true);
+    expect(contractIds.has('A003')).toBe(true);
+
+    // 検証6: レポートの整合性チェック（スキーマ、必須フィールド）を実行
+    generatedReports.forEach((report) => {
+      expect(report).toHaveProperty('contractId');
+      expect(report).toHaveProperty('changeType');
+      expect(report).toHaveProperty('changeDetail');
+      expect(report).toHaveProperty('previousValue');
+      expect(report).toHaveProperty('newValue');
+      expect(report).toHaveProperty('appliedDate');
+      expect(report).toHaveProperty('generatedAt');
+      expect(report).toHaveProperty('reportId');
+
+      // 必須フィールドが空でないことを確認
+      expect(report.contractId).toBeTruthy();
+      expect(report.changeType).toBeTruthy();
+      expect(report.changeDetail).toBeTruthy();
+      expect(report.reportId).toBeTruthy();
+      expect(report.generatedAt).toBeTruthy();
+
+      // 型チェック
+      expect(typeof report.contractId).toBe('string');
+      expect(typeof report.changeType).toBe('string');
+      expect(typeof report.changeDetail).toBe('string');
+      expect(typeof report.reportId).toBe('string');
     });
 
-    // 契約変更: 契約金額400,000円、割引率10%（2024/7/1〜2024/12/31）
-    expect(result.records[7]).toEqual({
-      recordId: "HIST-003",
-      recordType: "contract_history",
-      contractAmount: 400000,
-      contractStartDate: new Date("2024-07-01T00:00:00Z"),
-      contractEndDate: new Date("2024-12-31T23:59:59Z"),
-      discountRate: 10,
-      changeDate: new Date("2024-07-01T00:00:00Z"),
-      changeReason: "契約更新・金額変更",
-    });
-    expect(result.records[8]).toEqual({
-      recordId: "BILL-006",
-      recordType: "billing",
-      billingDate: new Date("2024-07-15T00:00:00Z"),
-      billingAmount: 360000, // 400000 * (1 - 0.10) = 360000
-      billingPeriodStart: new Date("2024-07-01T00:00:00Z"),
-      billingPeriodEnd: new Date("2024-07-31T23:59:59Z"),
-      paymentStatus: "完了",
-      paymentDate: new Date("2024-07-25T00:00:00Z"),
-    });
+    // 検証7: 各レポートが独立した reportId を保有していることを確認（重複なし）
+    const reportIds = new Set(generatedReports.map((r) => r.reportId));
+    expect(reportIds.size).toBe(3);
 
-    // 時系列の順序検証（日付が昇順）
-    for (let i = 1; i < result.records.length; i++) {
-      const prevDate = result.records[i - 1].changeDate || result.records[i - 1].billingDate;
-      const currDate = result.records[i].changeDate || result.records[i].billingDate;
-      expect(prevDate.getTime()).toBeLessThanOrEqual(currDate.getTime());
-    }
+    // 検証8: 適用日が正確に反映されているか確認
+    expect(new Date(generatedReports[0].appliedDate).toISOString()).toBe('2024-07-01T00:00:00.000Z');
+    expect(new Date(generatedReports[1].appliedDate).toISOString()).toBe('2024-07-01T00:00:00.000Z');
+    expect(new Date(generatedReports[2].appliedDate).toISOString()).toBe('2024-07-01T00:00:00.000Z');
 
-    // 期間外のデータが含まれていないことを確認
-    for (const record of result.records) {
-      const recordDate = record.changeDate || record.billingDate;
-      expect(recordDate.getTime()).toBeGreaterThanOrEqual(periodStartDate.getTime());
-      expect(recordDate.getTime()).toBeLessThanOrEqual(periodEndDate.getTime());
-    }
+    // 検証9: 変更前後の値が正確に区分されているか確認
+    const reportA001 = generatedReports.find((r) => r.contractId === 'A001');
+    expect(reportA001?.previousValue).not.toBe(reportA001?.newValue);
 
-    // 抽出結果のデータ品質検証
-    expect(result.dataQualityCheck).toEqual({
-      missingFieldsCount: 0,
-      inconsistenciesDetected: 0,
-      outOfPeriodRecordsCount: 0,
-      duplicateRecordsCount: 0,
-    });
+    const reportA002 = generatedReports.find((r) => r.contractId === 'A002');
+    expect(reportA002?.previousValue).not.toBe(reportA002?.newValue);
 
-    // CSV形式ダウンロード用データの検証
-    expect(result.csvData).toBeDefined();
-    expect(result.csvData).toContain("recordId,recordType,contractAmount,billingAmount");
-    expect(result.csvData).toContain("HIST-001");
-    expect(result.csvData).toContain("BILL-001");
-    expect(result.csvData).toContain("HIST-002");
+    const reportA003 = generatedReports.find((r) => r.contractId === 'A003');
+    expect(reportA003?.previousValue).not.toBe(reportA003?.newValue);
   });
 });

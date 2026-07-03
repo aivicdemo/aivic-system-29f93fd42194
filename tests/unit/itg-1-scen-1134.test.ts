@@ -1,185 +1,53 @@
-import { detectDataQualityIssues } from "../../src/logic/it-1781935279444-2-2-1";
+import { extractBillingItemsForCustomersAndServices } from '../../src/logic/it-1-2-1';
 
-describe("営業データの完全性・正確性を自動検証し、不足データ・誤りを検出・通知する機能", () => {
-  // SCEN-1134: [normal] 異常値・欠落データ自動検出 - 複数の異常値と欠落データが混在する場合、全て検出され修正対象として通知される
-  test("複数の異常値と欠落データが混在する場合、全て検出され修正対象として通知される", () => {
-    const input_sales_data = [
+describe('営業成果データから請求対象項目を自動抽出し、顧客ごと・サービスごとの請求額を集計する機能', () => {
+  // SCEN-1134: [edge] 配信リスト妥当性確認 - 配信対象顧客が0件の場合も正常に処理され、配信不可と判定される
+  test('配信対象顧客が0件の場合、配信不可と判定され、理由が正しく記録される', () => {
+    // 配信対象顧客が0件になる条件を設定
+    const salesData = [];
+    const contractRules = [
       {
-        record_id: "REC-001",
-        customer_name: "A社",
-        sales_amount: -50000,
-        sales_date: "2024-13-45",
-        discount_rate: 150,
-        billing_amount: 100000,
-        delivery_date: "2024-01-31",
+        customerId: 'CUST001',
+        serviceId: 'SVC001',
+        unitPrice: 10000,
+        discountRate: 0.1,
       },
       {
-        record_id: "REC-002",
-        customer_name: "",
-        sales_amount: 75000,
-        sales_date: "2024-01-15",
-        discount_rate: 20,
-        billing_amount: 60000,
-        delivery_date: "2024-02-28",
-      },
-      {
-        record_id: "REC-003",
-        customer_name: "B社",
-        sales_amount: 120000,
-        sales_date: "2024-01-20",
-        discount_rate: 35,
-        billing_amount: undefined,
-        delivery_date: "2024-03-15",
-      },
-      {
-        record_id: "REC-004",
-        customer_name: "C社",
-        sales_amount: 90000,
-        sales_date: "2024-02-10",
-        discount_rate: 10,
-        billing_amount: 81000,
-        delivery_date: undefined,
+        customerId: 'CUST002',
+        serviceId: 'SVC002',
+        unitPrice: 5000,
+        discountRate: 0,
       },
     ];
 
-    const result = detectDataQualityIssues(input_sales_data);
+    const result = extractBillingItemsForCustomersAndServices({
+      salesData,
+      contractRules,
+    });
 
-    expect(result.detection_status).toBe("COMPLETED");
-    expect(result.total_records_processed).toBe(4);
-    expect(result.records_with_issues).toBe(4);
+    // システムが正常に処理を完了していることを確認
+    expect(result).toBeDefined();
+    expect(result).not.toBeNull();
 
-    // 異常値検出: 負の売上額
-    expect(result.abnormal_values).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          record_id: "REC-001",
-          field_name: "sales_amount",
-          detected_value: -50000,
-          issue_type: "NEGATIVE_VALUE",
-        }),
-      ])
-    );
+    // 配信判定結果が「配信不可」と判定される
+    expect(result.canDeliver).toBe(false);
 
-    // 異常値検出: 不正な日付形式
-    expect(result.abnormal_values).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          record_id: "REC-001",
-          field_name: "sales_date",
-          detected_value: "2024-13-45",
-          issue_type: "INVALID_DATE_FORMAT",
-        }),
-      ])
-    );
+    // 配信不可の理由が「対象顧客なし」と正しく記録されている
+    expect(result.reason).toBe('対象顧客なし');
 
-    // 異常値検出: 範囲外の割引率
-    expect(result.abnormal_values).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          record_id: "REC-001",
-          field_name: "discount_rate",
-          detected_value: 150,
-          issue_type: "OUT_OF_RANGE",
-        }),
-      ])
-    );
+    // エラーフラグが設定されていない（正常処理）
+    expect(result.hasError).toBe(false);
 
-    expect(result.abnormal_values).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          record_id: "REC-003",
-          field_name: "discount_rate",
-          detected_value: 35,
-          issue_type: "OUT_OF_RANGE",
-        }),
-      ])
-    );
+    // 請求対象項目リストが空配列
+    expect(result.billingItems).toEqual([]);
 
-    // 欠落データ検出: 顧客名の欠落
-    expect(result.missing_data).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          record_id: "REC-002",
-          field_name: "customer_name",
-          issue_type: "MISSING_REQUIRED_FIELD",
-        }),
-      ])
-    );
+    // 顧客ごと集計が空オブジェクト
+    expect(result.summaryByCustomer).toEqual({});
 
-    // 欠落データ検出: 請求金額の欠落
-    expect(result.missing_data).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          record_id: "REC-003",
-          field_name: "billing_amount",
-          issue_type: "MISSING_REQUIRED_FIELD",
-        }),
-      ])
-    );
+    // サービスごと集計が空オブジェクト
+    expect(result.summaryByService).toEqual({});
 
-    // 欠落データ検出: 納期の欠落
-    expect(result.missing_data).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          record_id: "REC-004",
-          field_name: "delivery_date",
-          issue_type: "MISSING_REQUIRED_FIELD",
-        }),
-      ])
-    );
-
-    // 検出された全ての異常値・欠落データが修正対象として通知されている
-    expect(result.correction_required_records).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          record_id: "REC-001",
-          correction_items: expect.arrayContaining([
-            "sales_amount",
-            "sales_date",
-            "discount_rate",
-          ]),
-          severity: "HIGH",
-        }),
-        expect.objectContaining({
-          record_id: "REC-002",
-          correction_items: expect.arrayContaining(["customer_name"]),
-          severity: "HIGH",
-        }),
-        expect.objectContaining({
-          record_id: "REC-003",
-          correction_items: expect.arrayContaining([
-            "discount_rate",
-            "billing_amount",
-          ]),
-          severity: "HIGH",
-        }),
-        expect.objectContaining({
-          record_id: "REC-004",
-          correction_items: expect.arrayContaining(["delivery_date"]),
-          severity: "MEDIUM",
-        }),
-      ])
-    );
-
-    // 通知内容にレコード特定情報と修正が必要な項目が明記されている
-    expect(result.notification_message).toContain("REC-001");
-    expect(result.notification_message).toContain("REC-002");
-    expect(result.notification_message).toContain("REC-003");
-    expect(result.notification_message).toContain("REC-004");
-    expect(result.notification_message).toContain("sales_amount");
-    expect(result.notification_message).toContain("sales_date");
-    expect(result.notification_message).toContain("discount_rate");
-    expect(result.notification_message).toContain("customer_name");
-    expect(result.notification_message).toContain("billing_amount");
-    expect(result.notification_message).toContain("delivery_date");
-
-    // 修正対象の件数が正確に計算されている
-    expect(result.correction_required_records.length).toBe(4);
-
-    // 異常値の総数が正確である
-    expect(result.abnormal_values.length).toBeGreaterThanOrEqual(4);
-
-    // 欠落データの総数が正確である
-    expect(result.missing_data.length).toBeGreaterThanOrEqual(3);
+    // メッセージが適切に設定されている
+    expect(result.message).toMatch(/対象顧客/);
   });
 });

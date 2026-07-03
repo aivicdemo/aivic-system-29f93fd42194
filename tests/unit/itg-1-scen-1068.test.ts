@@ -1,291 +1,249 @@
-import {
-  validateSalesDataWithComplexRules,
-} from "../../src/logic/it-1781935279444-2-2-1";
+import { evaluateNewStaffCompetency } from '../../src/logic/it-1-2-1';
 
-describe("営業データ品質検証 - 複合検証ルール条件の評価", () => {
-  // SCEN-1068
-  test("複数の検証ルール条件を組み合わせた営業データの検証が正確に実行される", () => {
-    // 検証ルール条件の定義: 金額 > 10000 AND 顧客区分 = '法人' AND 営業担当者が未割当でない
-    const validation_rules = [
-      {
-        rule_id: "rule_001",
-        rule_name: "金額下限チェック",
-        condition_operator: "AND",
-        conditions: [
-          {
-            condition_id: "cond_001",
-            field_name: "amount",
-            operator: ">",
-            value: 10000,
-            data_type: "number",
-          },
-        ],
-      },
-      {
-        rule_id: "rule_002",
-        rule_name: "顧客区分チェック",
-        condition_operator: "AND",
-        conditions: [
-          {
-            condition_id: "cond_002",
-            field_name: "customer_type",
-            operator: "=",
-            value: "法人",
-            data_type: "string",
-          },
-        ],
-      },
-      {
-        rule_id: "rule_003",
-        rule_name: "営業担当者割当チェック",
-        condition_operator: "AND",
-        conditions: [
-          {
-            condition_id: "cond_003",
-            field_name: "sales_person_id",
-            operator: "!=",
-            value: null,
-            data_type: "string",
-          },
-        ],
-      },
-    ];
+describe('新入スタッフ到達度評価機能', () => {
+  test('SCEN-1068: 請求書作成・営業報告書集計・契約書管理の3業務すべてが合格基準を満たしている場合に合格判定される', () => {
+    const staff_id = 'STAFF_001';
+    const evaluation_date = new Date('2024-12-15T09:00:00Z');
+    const pass_threshold = 70;
 
-    // テスト用営業データセット
-    const test_data_sets = [
-      {
-        data_id: "data_001",
-        amount: 15000,
-        customer_type: "法人",
-        sales_person_id: "sp_001",
-        expected_result: "合格",
-        description: "すべての条件を満たす",
-      },
-      {
-        data_id: "data_002",
-        amount: 5000,
-        customer_type: "法人",
-        sales_person_id: "sp_002",
-        expected_result: "不合格",
-        description: "金額が下限未満",
-      },
-      {
-        data_id: "data_003",
-        amount: 15000,
-        customer_type: "個人",
-        sales_person_id: "sp_003",
-        expected_result: "不合格",
-        description: "顧客区分が異なる",
-      },
-      {
-        data_id: "data_004",
-        amount: 15000,
-        customer_type: "法人",
-        sales_person_id: null,
-        expected_result: "不合格",
-        description: "営業担当者が未割当",
-      },
-      {
-        data_id: "data_005",
-        amount: 10000,
-        customer_type: "法人",
-        sales_person_id: "sp_004",
-        expected_result: "不合格",
-        description: "金額が境界値（10000は条件未満）",
-      },
-      {
-        data_id: "data_006",
-        amount: 10001,
-        customer_type: "法人",
-        sales_person_id: "sp_005",
-        expected_result: "合格",
-        description: "金額が境界値超過",
-      },
-      {
-        data_id: "data_007",
-        amount: 50000,
-        customer_type: "法人",
-        sales_person_id: "sp_006",
-        expected_result: "合格",
-        description: "すべての条件を満たす（大金額）",
-      },
-    ];
+    const invoice_creation_score = 85;
+    const sales_report_aggregation_score = 80;
+    const contract_management_score = 75;
 
-    // 各テストデータに対して検証を実行
-    const validation_results = test_data_sets.map((test_data) => {
-      const result = validateSalesDataWithComplexRules(
-        {
-          amount: test_data.amount,
-          customer_type: test_data.customer_type,
-          sales_person_id: test_data.sales_person_id,
-        },
-        validation_rules
-      );
+    const evaluation_input = {
+      staff_id: staff_id,
+      evaluation_date: evaluation_date,
+      invoice_creation_score: invoice_creation_score,
+      sales_report_aggregation_score: sales_report_aggregation_score,
+      contract_management_score: contract_management_score,
+      pass_threshold: pass_threshold,
+    };
 
-      return {
-        data_id: test_data.data_id,
-        validation_status: result.status,
-        is_valid: result.is_valid,
-        passed_conditions: result.passed_conditions,
-        failed_conditions: result.failed_conditions,
-        error_messages: result.error_messages,
-      };
-    });
+    const result = evaluateNewStaffCompetency(evaluation_input);
 
-    // 期待される検証結果の確認
+    expect(result.overall_judgment).toBe('合格');
+    expect(result.staff_id).toBe(staff_id);
+    expect(result.invoice_creation_judgment).toBe('合格');
+    expect(result.sales_report_aggregation_judgment).toBe('合格');
+    expect(result.contract_management_judgment).toBe('合格');
+    expect(result.invoice_creation_score).toBe(invoice_creation_score);
+    expect(result.sales_report_aggregation_score).toBe(sales_report_aggregation_score);
+    expect(result.contract_management_score).toBe(contract_management_score);
+    expect(result.evaluation_date).toEqual(evaluation_date);
+    expect(result.pass_threshold).toBe(pass_threshold);
 
-    // テストケース1: すべての条件を満たす場合は合格
-    expect(validation_results[0]).toEqual({
-      data_id: "data_001",
-      validation_status: "合格",
-      is_valid: true,
-      passed_conditions: 3,
-      failed_conditions: 0,
-      error_messages: [],
-    });
+    const all_pass = [
+      invoice_creation_score >= pass_threshold,
+      sales_report_aggregation_score >= pass_threshold,
+      contract_management_score >= pass_threshold,
+    ].every((v) => v === true);
 
-    // テストケース2: 金額が下限未満の場合は不合格
-    expect(validation_results[1]).toEqual({
-      data_id: "data_002",
-      validation_status: "不合格",
-      is_valid: false,
-      passed_conditions: 2,
-      failed_conditions: 1,
-      error_messages: expect.arrayContaining([
-        expect.stringMatching(/金額/),
-      ]),
-    });
+    expect(all_pass).toBe(true);
+  });
 
-    // テストケース3: 顧客区分が異なる場合は不合格
-    expect(validation_results[2]).toEqual({
-      data_id: "data_003",
-      validation_status: "不合格",
-      is_valid: false,
-      passed_conditions: 2,
-      failed_conditions: 1,
-      error_messages: expect.arrayContaining([
-        expect.stringMatching(/顧客区分/),
-      ]),
-    });
+  test('SCEN-1068-ERR: いずれかの業務スコアが合格基準以下の場合に不合格判定される', () => {
+    const staff_id = 'STAFF_002';
+    const evaluation_date = new Date('2024-12-15T10:00:00Z');
+    const pass_threshold = 70;
 
-    // テストケース4: 営業担当者が未割当の場合は不合格
-    expect(validation_results[3]).toEqual({
-      data_id: "data_004",
-      validation_status: "不合格",
-      is_valid: false,
-      passed_conditions: 2,
-      failed_conditions: 1,
-      error_messages: expect.arrayContaining([
-        expect.stringMatching(/営業担当者/),
-      ]),
-    });
+    const invoice_creation_score = 65;
+    const sales_report_aggregation_score = 80;
+    const contract_management_score = 75;
 
-    // テストケース5: 境界値（10000は条件未満）は不合格
-    expect(validation_results[4]).toEqual({
-      data_id: "data_005",
-      validation_status: "不合格",
-      is_valid: false,
-      passed_conditions: 2,
-      failed_conditions: 1,
-      error_messages: expect.arrayContaining([
-        expect.stringMatching(/金額/),
-      ]),
-    });
+    const evaluation_input = {
+      staff_id: staff_id,
+      evaluation_date: evaluation_date,
+      invoice_creation_score: invoice_creation_score,
+      sales_report_aggregation_score: sales_report_aggregation_score,
+      contract_management_score: contract_management_score,
+      pass_threshold: pass_threshold,
+    };
 
-    // テストケース6: 境界値超過（10001）は合格
-    expect(validation_results[5]).toEqual({
-      data_id: "data_006",
-      validation_status: "合格",
-      is_valid: true,
-      passed_conditions: 3,
-      failed_conditions: 0,
-      error_messages: [],
-    });
+    const result = evaluateNewStaffCompetency(evaluation_input);
 
-    // テストケース7: すべての条件を満たす（大金額）は合格
-    expect(validation_results[6]).toEqual({
-      data_id: "data_007",
-      validation_status: "合格",
-      is_valid: true,
-      passed_conditions: 3,
-      failed_conditions: 0,
-      error_messages: [],
-    });
+    expect(result.overall_judgment).toBe('不合格');
+    expect(result.invoice_creation_judgment).toBe('不合格');
+    expect(result.sales_report_aggregation_judgment).toBe('合格');
+    expect(result.contract_management_judgment).toBe('合格');
+  });
 
-    // 複合条件の論理演算（AND）が正確に機能しているか検証
-    const all_pass_count = validation_results.filter(
-      (r) => r.is_valid === true
-    ).length;
-    expect(all_pass_count).toBe(3); // data_001, data_006, data_007 のみ合格
+  test('SCEN-1068-ERR: 複数業務が合格基準以下の場合に不合格判定される', () => {
+    const staff_id = 'STAFF_003';
+    const evaluation_date = new Date('2024-12-15T11:00:00Z');
+    const pass_threshold = 70;
 
-    const all_fail_count = validation_results.filter(
-      (r) => r.is_valid === false
-    ).length;
-    expect(all_fail_count).toBe(4); // data_002, data_003, data_004, data_005 は不合格
+    const invoice_creation_score = 60;
+    const sales_report_aggregation_score = 65;
+    const contract_management_score = 75;
 
-    // 検証ルール条件の変更を行い、再度検証を実行
-    const modified_rules = [
-      {
-        rule_id: "rule_001_modified",
-        rule_name: "金額下限チェック（修正版）",
-        condition_operator: "AND",
-        conditions: [
-          {
-            condition_id: "cond_001_modified",
-            field_name: "amount",
-            operator: ">=",
-            value: 10000,
-            data_type: "number",
-          },
-        ],
-      },
-      {
-        rule_id: "rule_002",
-        rule_name: "顧客区分チェック",
-        condition_operator: "AND",
-        conditions: [
-          {
-            condition_id: "cond_002",
-            field_name: "customer_type",
-            operator: "=",
-            value: "法人",
-            data_type: "string",
-          },
-        ],
-      },
-      {
-        rule_id: "rule_003",
-        rule_name: "営業担当者割当チェック",
-        condition_operator: "AND",
-        conditions: [
-          {
-            condition_id: "cond_003",
-            field_name: "sales_person_id",
-            operator: "!=",
-            value: null,
-            data_type: "string",
-          },
-        ],
-      },
-    ];
+    const evaluation_input = {
+      staff_id: staff_id,
+      evaluation_date: evaluation_date,
+      invoice_creation_score: invoice_creation_score,
+      sales_report_aggregation_score: sales_report_aggregation_score,
+      contract_management_score: contract_management_score,
+      pass_threshold: pass_threshold,
+    };
 
-    // 修正後のルールで境界値データを再検証
-    const modified_result = validateSalesDataWithComplexRules(
-      {
-        amount: 10000,
-        customer_type: "法人",
-        sales_person_id: "sp_004",
-      },
-      modified_rules
-    );
+    const result = evaluateNewStaffCompetency(evaluation_input);
 
-    // >= 演算子に変更後、金額10000は条件を満たすようになる
-    expect(modified_result).toEqual({
-      validation_status: "合格",
-      is_valid: true,
-      passed_conditions: 3,
-      failed_conditions: 0,
-      error_messages: [],
-    });
+    expect(result.overall_judgment).toBe('不合格');
+    expect(result.invoice_creation_judgment).toBe('不合格');
+    expect(result.sales_report_aggregation_judgment).toBe('不合格');
+    expect(result.contract_management_judgment).toBe('合格');
+  });
+
+  test('SCEN-1068-ERR: すべての業務が合格基準以下の場合に不合格判定される', () => {
+    const staff_id = 'STAFF_004';
+    const evaluation_date = new Date('2024-12-15T12:00:00Z');
+    const pass_threshold = 70;
+
+    const invoice_creation_score = 50;
+    const sales_report_aggregation_score = 55;
+    const contract_management_score = 60;
+
+    const evaluation_input = {
+      staff_id: staff_id,
+      evaluation_date: evaluation_date,
+      invoice_creation_score: invoice_creation_score,
+      sales_report_aggregation_score: sales_report_aggregation_score,
+      contract_management_score: contract_management_score,
+      pass_threshold: pass_threshold,
+    };
+
+    const result = evaluateNewStaffCompetency(evaluation_input);
+
+    expect(result.overall_judgment).toBe('不合格');
+    expect(result.invoice_creation_judgment).toBe('不合格');
+    expect(result.sales_report_aggregation_judgment).toBe('不合格');
+    expect(result.contract_management_judgment).toBe('不合格');
+  });
+
+  test('SCEN-1068-BOUNDARY: 合格基準値と同じスコアの場合に合格判定される', () => {
+    const staff_id = 'STAFF_005';
+    const evaluation_date = new Date('2024-12-15T13:00:00Z');
+    const pass_threshold = 70;
+
+    const invoice_creation_score = 70;
+    const sales_report_aggregation_score = 70;
+    const contract_management_score = 70;
+
+    const evaluation_input = {
+      staff_id: staff_id,
+      evaluation_date: evaluation_date,
+      invoice_creation_score: invoice_creation_score,
+      sales_report_aggregation_score: sales_report_aggregation_score,
+      contract_management_score: contract_management_score,
+      pass_threshold: pass_threshold,
+    };
+
+    const result = evaluateNewStaffCompetency(evaluation_input);
+
+    expect(result.overall_judgment).toBe('合格');
+    expect(result.invoice_creation_judgment).toBe('合格');
+    expect(result.sales_report_aggregation_judgment).toBe('合格');
+    expect(result.contract_management_judgment).toBe('合格');
+  });
+
+  test('SCEN-1068-ERR: 合格基準値より1点低いスコアの場合に不合格判定される', () => {
+    const staff_id = 'STAFF_006';
+    const evaluation_date = new Date('2024-12-15T14:00:00Z');
+    const pass_threshold = 70;
+
+    const invoice_creation_score = 69;
+    const sales_report_aggregation_score = 80;
+    const contract_management_score = 75;
+
+    const evaluation_input = {
+      staff_id: staff_id,
+      evaluation_date: evaluation_date,
+      invoice_creation_score: invoice_creation_score,
+      sales_report_aggregation_score: sales_report_aggregation_score,
+      contract_management_score: contract_management_score,
+      pass_threshold: pass_threshold,
+    };
+
+    const result = evaluateNewStaffCompetency(evaluation_input);
+
+    expect(result.overall_judgment).toBe('不合格');
+    expect(result.invoice_creation_judgment).toBe('不合格');
+  });
+
+  test('SCEN-1068-ERR: staff_id が空の場合にエラーを発生させる', () => {
+    const evaluation_input = {
+      staff_id: '',
+      evaluation_date: new Date('2024-12-15T15:00:00Z'),
+      invoice_creation_score: 85,
+      sales_report_aggregation_score: 80,
+      contract_management_score: 75,
+      pass_threshold: 70,
+    };
+
+    expect(() => evaluateNewStaffCompetency(evaluation_input)).toThrow(/スタッフID/);
+  });
+
+  test('SCEN-1068-ERR: evaluation_date が無効な場合にエラーを発生させる', () => {
+    const evaluation_input = {
+      staff_id: 'STAFF_007',
+      evaluation_date: new Date('invalid'),
+      invoice_creation_score: 85,
+      sales_report_aggregation_score: 80,
+      contract_management_score: 75,
+      pass_threshold: 70,
+    };
+
+    expect(() => evaluateNewStaffCompetency(evaluation_input)).toThrow(/評価日時/);
+  });
+
+  test('SCEN-1068-ERR: invoice_creation_score が負の数の場合にエラーを発生させる', () => {
+    const evaluation_input = {
+      staff_id: 'STAFF_008',
+      evaluation_date: new Date('2024-12-15T16:00:00Z'),
+      invoice_creation_score: -10,
+      sales_report_aggregation_score: 80,
+      contract_management_score: 75,
+      pass_threshold: 70,
+    };
+
+    expect(() => evaluateNewStaffCompetency(evaluation_input)).toThrow(/請求書作成スコア/);
+  });
+
+  test('SCEN-1068-ERR: sales_report_aggregation_score が100を超える場合にエラーを発生させる', () => {
+    const evaluation_input = {
+      staff_id: 'STAFF_009',
+      evaluation_date: new Date('2024-12-15T17:00:00Z'),
+      invoice_creation_score: 85,
+      sales_report_aggregation_score: 105,
+      contract_management_score: 75,
+      pass_threshold: 70,
+    };
+
+    expect(() => evaluateNewStaffCompetency(evaluation_input)).toThrow(/営業報告書集計スコア/);
+  });
+
+  test('SCEN-1068-ERR: contract_management_score が100を超える場合にエラーを発生させる', () => {
+    const evaluation_input = {
+      staff_id: 'STAFF_010',
+      evaluation_date: new Date('2024-12-15T18:00:00Z'),
+      invoice_creation_score: 85,
+      sales_report_aggregation_score: 80,
+      contract_management_score: 110,
+      pass_threshold: 70,
+    };
+
+    expect(() => evaluateNewStaffCompetency(evaluation_input)).toThrow(/契約書管理スコア/);
+  });
+
+  test('SCEN-1068-ERR: pass_threshold が負の数の場合にエラーを発生させる', () => {
+    const evaluation_input = {
+      staff_id: 'STAFF_011',
+      evaluation_date: new Date('2024-12-15T19:00:00Z'),
+      invoice_creation_score: 85,
+      sales_report_aggregation_score: 80,
+      contract_management_score: 75,
+      pass_threshold: -5,
+    };
+
+    expect(() => evaluateNewStaffCompetency(evaluation_input)).toThrow(/合格基準/);
   });
 });

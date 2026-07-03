@@ -1,118 +1,84 @@
-import { filterReportsByUserAssignedContracts } from '../../src/logic/it-1-2-1';
+import { validateReportGenerationParameters } from '../../src/logic/it-1-2-1';
 
-describe('営業成果レポートのポータル配信アクセス制御', () => {
-  // SCEN-658
-  test('割り当てられた契約IDに紐付くレポートのみがポータルに表示される', () => {
-    // ===== 前提: ユーザーアカウント・契約・レポートが存在する状態 =====
-    const user_1_id = 'user_001';
-    const user_1_assigned_contract_ids = ['contract_A', 'contract_B'];
-    
-    const user_2_id = 'user_002';
-    const user_2_assigned_contract_ids = ['contract_C', 'contract_D'];
+describe('営業成果データから請求対象項目を自動抽出し、顧客ごと・サービスごとの請求額を集計する機能', () => {
+  // SCEN-658: [edge] レポート生成パラメータ妥当性検証機能 - 期間パラメータが正確に設定値の境界値で検証される
+  test('期間パラメータが境界値のすべてのエッジケースで正確に検証される', () => {
+    // ケース1: 最小値（1900-01-01）から最大値（2099-12-31）への有効な期間
+    const result_valid_full_range = validateReportGenerationParameters({
+      start_date: '1900-01-01',
+      end_date: '2099-12-31',
+    });
+    expect(result_valid_full_range.is_valid).toBe(true);
+    expect(result_valid_full_range.errors).toEqual([]);
 
-    const all_reports = [
-      {
-        report_id: 'report_001',
-        contract_id: 'contract_A',
-        title: 'Monthly Sales Report Jan 2024',
-        generated_date: '2024-01-31T09:00:00Z',
-      },
-      {
-        report_id: 'report_002',
-        contract_id: 'contract_B',
-        title: 'Monthly Sales Report Jan 2024',
-        generated_date: '2024-01-31T09:00:00Z',
-      },
-      {
-        report_id: 'report_003',
-        contract_id: 'contract_C',
-        title: 'Monthly Sales Report Jan 2024',
-        generated_date: '2024-01-31T09:00:00Z',
-      },
-      {
-        report_id: 'report_004',
-        contract_id: 'contract_D',
-        title: 'Monthly Sales Report Jan 2024',
-        generated_date: '2024-01-31T09:00:00Z',
-      },
-      {
-        report_id: 'report_005',
-        contract_id: 'contract_A',
-        title: 'Monthly Sales Report Feb 2024',
-        generated_date: '2024-02-29T09:00:00Z',
-      },
-    ];
+    // ケース2: 開始日が終了日以前であることを確認（有効な期間）
+    const result_valid_normal = validateReportGenerationParameters({
+      start_date: '2024-01-01',
+      end_date: '2024-12-31',
+    });
+    expect(result_valid_normal.is_valid).toBe(true);
+    expect(result_valid_normal.errors).toEqual([]);
 
-    // ===== 処理実行 =====
-    // ユーザー1がログイン後、ポータルのレポート一覧を取得
-    const user_1_filtered_reports = filterReportsByUserAssignedContracts(
-      all_reports,
-      user_1_assigned_contract_ids
+    // ケース3: 開始日と終了日の時間差が負の値でないことを確認（同一日付）
+    const result_same_date = validateReportGenerationParameters({
+      start_date: '2024-06-15',
+      end_date: '2024-06-15',
+    });
+    expect(result_same_date.is_valid).toBe(true);
+    expect(result_same_date.errors).toEqual([]);
+
+    // ケース4: 終了日が開始日より前の日付の場合バリデーションエラーが発生
+    const result_invalid_reverse = validateReportGenerationParameters({
+      start_date: '2024-12-31',
+      end_date: '2024-01-01',
+    });
+    expect(result_invalid_reverse.is_valid).toBe(false);
+    expect(result_invalid_reverse.errors).toContain(
+      expect.stringMatching(/期間/)
     );
 
-    // ユーザー2がログイン後、ポータルのレポート一覧を取得
-    const user_2_filtered_reports = filterReportsByUserAssignedContracts(
-      all_reports,
-      user_2_assigned_contract_ids
+    // ケース5: 開始日のみを設定して検証を実行
+    const result_start_only = validateReportGenerationParameters({
+      start_date: '2024-01-01',
+      end_date: undefined,
+    });
+    expect(result_start_only.is_valid).toBe(false);
+    expect(result_start_only.errors).toContain(
+      expect.stringMatching(/終了日/)
     );
 
-    // ===== 期待値計算 =====
-    // ユーザー1は contract_A, contract_B に割り当てられているため、
-    // report_001, report_002, report_005 が表示される (3件)
-    const expected_user_1_report_count = 3;
-    const expected_user_1_report_ids = ['report_001', 'report_002', 'report_005'];
-    const expected_user_1_contract_ids = ['contract_A', 'contract_B'];
-
-    // ユーザー2は contract_C, contract_D に割り当てられているため、
-    // report_003, report_004 が表示される (2件)
-    const expected_user_2_report_count = 2;
-    const expected_user_2_report_ids = ['report_003', 'report_004'];
-    const expected_user_2_contract_ids = ['contract_C', 'contract_D'];
-
-    // ===== 検証 =====
-    // ユーザー1: 割り当てられた契約IDのレポートのみが表示されることを検証
-    expect(user_1_filtered_reports.length).toBe(expected_user_1_report_count);
-    expect(user_1_filtered_reports.map((r) => r.report_id)).toEqual(
-      expect.arrayContaining(expected_user_1_report_ids)
+    // ケース6: 終了日のみを設定して検証を実行
+    const result_end_only = validateReportGenerationParameters({
+      start_date: undefined,
+      end_date: '2024-12-31',
+    });
+    expect(result_end_only.is_valid).toBe(false);
+    expect(result_end_only.errors).toContain(
+      expect.stringMatching(/開始日/)
     );
-    expect(user_1_filtered_reports.every((r) =>
-      expected_user_1_contract_ids.includes(r.contract_id)
-    )).toBe(true);
 
-    // ユーザー1: 割り当てられていない契約IDのレポートが表示されていないことを検証
-    expect(
-      user_1_filtered_reports.some((r) =>
-        user_2_assigned_contract_ids.includes(r.contract_id)
-      )
-    ).toBe(false);
+    // ケース7: 両方のパラメータが空白の場合の検証結果を確認
+    const result_both_empty = validateReportGenerationParameters({
+      start_date: undefined,
+      end_date: undefined,
+    });
+    expect(result_both_empty.is_valid).toBe(false);
+    expect(result_both_empty.errors.length).toBeGreaterThan(0);
 
-    // ユーザー2: 割り当てられた契約IDのレポートのみが表示されることを検証
-    expect(user_2_filtered_reports.length).toBe(expected_user_2_report_count);
-    expect(user_2_filtered_reports.map((r) => r.report_id)).toEqual(
-      expect.arrayContaining(expected_user_2_report_ids)
-    );
-    expect(user_2_filtered_reports.every((r) =>
-      expected_user_2_contract_ids.includes(r.contract_id)
-    )).toBe(true);
+    // ケース8: 無効な日付形式の場合
+    expect(() =>
+      validateReportGenerationParameters({
+        start_date: '2024-13-01',
+        end_date: '2024-12-31',
+      })
+    ).toThrow(/日付形式/);
 
-    // ユーザー2: 割り当てられていない契約IDのレポートが表示されていないことを検証
-    expect(
-      user_2_filtered_reports.some((r) =>
-        user_1_assigned_contract_ids.includes(r.contract_id)
-      )
-    ).toBe(false);
-
-    // ===== 複数ユーザー間でのアクセス制御が正しく機能していることを検証 =====
-    // ユーザー1とユーザー2が異なるレポートセットを取得していることを検証
-    expect(user_1_filtered_reports).not.toEqual(user_2_filtered_reports);
-
-    // ユーザー1のレポートとユーザー2のレポートに重複がないことを検証
-    const user_1_report_ids_set = new Set(
-      user_1_filtered_reports.map((r) => r.report_id)
-    );
-    const user_2_report_ids_in_user_1 = user_2_filtered_reports.filter((r) =>
-      user_1_report_ids_set.has(r.report_id)
-    );
-    expect(user_2_report_ids_in_user_1.length).toBe(0);
+    // ケース9: 無効な日付形式（終了日）の場合
+    expect(() =>
+      validateReportGenerationParameters({
+        start_date: '2024-01-01',
+        end_date: '2024-12-32',
+      })
+    ).toThrow(/日付形式/);
   });
 });

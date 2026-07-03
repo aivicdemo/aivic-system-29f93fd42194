@@ -1,70 +1,61 @@
 import { describe, test, expect } from "@jest/globals";
-import {
-  markObsoleteDocumentVersion,
-} from "../../src/logic/it-1781935279444-1-1-1";
+import { selectMetadataVersionByPriority } from "../../src/logic/it-1781935279444-1-1-1";
 
-describe("営業データ項目メタデータ管理 - 旧版資料の自動廃棄マーキング機能", () => {
-  // SCEN-788
-  test("新バージョンリリース時に旧バージョン資料が廃棄対象にマークされること", () => {
-    // 事前条件: 旧バージョン資料が『有効』ステータスで存在
-    const oldDocumentVersion = {
-      version_id: "doc_v1_0_0",
-      document_id: "doc_123",
-      version_number: "1.0.0",
-      status: "active",
-      released_at: new Date("2024-01-01T10:00:00Z"),
-      created_by: "user_001",
-      effective_from: new Date("2024-01-01T00:00:00Z"),
-      effective_to: null,
-      is_obsolete_marked: false,
-      obsolete_mark_date: null,
-      planned_disposal_date: null,
-    };
+describe("営業データ項目メタデータ管理", () => {
+  test("SCEN-788: 優先度が同じ複数バージョン存在時、最新作成日時のバージョンを優先する", () => {
+    // Setup: 同じ優先度を持つ複数バージョンデータ
+    const metadataVersions = [
+      {
+        version_id: "meta_v_001",
+        item_name: "アポ数",
+        priority: 1,
+        created_at: "2024-01-01T10:00:00Z",
+        updated_at: "2024-01-01T10:00:00Z",
+        data_type: "integer",
+        unit: "件",
+        calculation_logic: "COUNT(appointment)",
+        report_mapping_key: "appointments_count",
+        is_active: true,
+      },
+      {
+        version_id: "meta_v_002",
+        item_name: "アポ数",
+        priority: 1,
+        created_at: "2024-01-01T15:00:00Z",
+        updated_at: "2024-01-01T15:00:00Z",
+        data_type: "integer",
+        unit: "件",
+        calculation_logic: "COUNT(appointment)",
+        report_mapping_key: "appointments_count",
+        is_active: true,
+      },
+      {
+        version_id: "meta_v_003",
+        item_name: "アポ数",
+        priority: 1,
+        created_at: "2024-01-01T12:00:00Z",
+        updated_at: "2024-01-01T12:00:00Z",
+        data_type: "integer",
+        unit: "件",
+        calculation_logic: "COUNT(appointment)",
+        report_mapping_key: "appointments_count",
+        is_active: true,
+      },
+    ];
 
-    // 新バージョン資料がリリースされた時点
-    const newDocumentVersion = {
-      version_id: "doc_v1_1_0",
-      document_id: "doc_123",
-      version_number: "1.1.0",
-      status: "active",
-      released_at: new Date("2024-01-15T14:30:00Z"),
-      created_by: "user_002",
-      effective_from: new Date("2024-01-15T00:00:00Z"),
-      effective_to: null,
-      is_obsolete_marked: false,
-      obsolete_mark_date: null,
-      planned_disposal_date: null,
-    };
+    // Execute: 優先度ベース特定機能を実行
+    const selectedVersion = selectMetadataVersionByPriority(metadataVersions);
 
-    // 廃棄マーク処理実行
-    const result = markObsoleteDocumentVersion({
-      obsolete_document_version: oldDocumentVersion,
-      new_document_version: newDocumentVersion,
-      obsolete_mark_timestamp: new Date("2024-01-15T14:30:00Z"),
-      planned_disposal_days_offset: 30,
-    });
-
-    // 期待結果: 旧バージョンが廃棄対象にマークされている
-    expect(result.is_obsolete_marked).toBe(true);
-    expect(result.obsolete_mark_date).toEqual(
-      new Date("2024-01-15T14:30:00Z")
-    );
-    expect(result.planned_disposal_date).toEqual(
-      new Date("2024-02-14T14:30:00Z")
-    );
-    expect(result.status).toBe("obsolete_marked");
-
-    // 新バージョンは『有効』ステータスのまま
-    expect(newDocumentVersion.status).toBe("active");
-    expect(newDocumentVersion.is_obsolete_marked).toBe(false);
-    expect(newDocumentVersion.obsolete_mark_date).toBeNull();
-    expect(newDocumentVersion.planned_disposal_date).toBeNull();
-
-    // メタデータの完全性を検証
-    expect(result).toHaveProperty("version_id");
-    expect(result).toHaveProperty("document_id");
-    expect(result).toHaveProperty("version_number");
-    expect(result.version_id).toBe("doc_v1_0_0");
-    expect(result.version_number).toBe("1.0.0");
+    // Verify: 返却されたバージョンの検証
+    expect(selectedVersion).toBeDefined();
+    expect(selectedVersion.version_id).toBe("meta_v_002");
+    expect(selectedVersion.created_at).toBe("2024-01-01T15:00:00Z");
+    expect(selectedVersion.priority).toBe(1);
+    expect(selectedVersion.item_name).toBe("アポ数");
+    expect(selectedVersion.data_type).toBe("integer");
+    expect(selectedVersion.unit).toBe("件");
+    expect(selectedVersion.calculation_logic).toBe("COUNT(appointment)");
+    expect(selectedVersion.report_mapping_key).toBe("appointments_count");
+    expect(selectedVersion.is_active).toBe(true);
   });
 });

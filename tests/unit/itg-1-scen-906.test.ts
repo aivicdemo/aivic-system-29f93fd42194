@@ -1,47 +1,66 @@
-import { validateInvoiceChecklistItems } from '../../src/logic/it-1781935279444-2-1-1';
+import { validateBillingItemsAgainstContract } from '../../src/logic/it-1-2-1';
 
-describe('請求書作成チェックリスト検証機能', () => {
-  // SCEN-906: [error] 複数のチェックリスト項目が不備で、全ての修正指示が集約される
-  test('複数の不備がある請求書データに対してチェックリスト検証を実行し、全ての修正指示が集約されて返されること', () => {
-    const invoiceData = {
-      customer_id: '',
-      customer_name: '',
-      invoice_amount: -500,
-      tax_rate: null,
-      payment_due_date: '',
-      invoice_date: '2024-01-15',
-      payment_method: 'bank_transfer',
-      contract_id: 'CNT-001',
+describe('営業成果データから請求対象項目を自動抽出し、顧客ごと・サービスごとの請求額を集計する機能', () => {
+  // SCEN-906: [edge] 契約内容と請求額の整合性検証 - 請求対象項目が契約書に記載されていない場合、該当項目の除外判定と理由コードを返す
+  test('契約書に記載されていない請求対象項目を識別し、除外判定と理由コードを返す', () => {
+    const contractId = 'CONTRACT_2024_001';
+    const contractItems = [
+      { itemCode: 'ITEM_APO_COUNT', itemName: 'アポ数', unitPrice: 5000 },
+      { itemCode: 'ITEM_DEAL_COUNT', itemName: '成約数', unitPrice: 50000 },
+    ];
+
+    const billingData = {
+      customerId: 'CUST_123',
+      contractId: contractId,
+      billingItems: [
+        { itemCode: 'ITEM_APO_COUNT', quantity: 10, unitPrice: 5000, amount: 50000 },
+        { itemCode: 'ITEM_DEAL_COUNT', quantity: 2, unitPrice: 50000, amount: 100000 },
+        { itemCode: 'ITEM_UNKNOWN_SERVICE', quantity: 5, unitPrice: 10000, amount: 50000 },
+      ],
+      totalAmount: 200000,
     };
 
-    const result = validateInvoiceChecklistItems(invoiceData);
-
-    expect(result.is_valid).toBe(false);
-    expect(result.error_items).toHaveLength(4);
-
-    const error_item_names = result.error_items.map((item: any) => item.item_name);
-    expect(error_item_names).toContain('顧客情報');
-    expect(error_item_names).toContain('金額計算');
-    expect(error_item_names).toContain('税率設定');
-    expect(error_item_names).toContain('支払期限');
-
-    expect(result.error_items[0].priority).toBe(1);
-    expect(result.error_items[1].priority).toBe(2);
-    expect(result.error_items[2].priority).toBe(3);
-    expect(result.error_items[3].priority).toBe(4);
-
-    result.error_items.forEach((item: any) => {
-      expect(item.correction_message).toBeTruthy();
-      expect(typeof item.correction_message).toBe('string');
-      expect(item.correction_message.length).toBeGreaterThan(0);
+    const validationResult = validateBillingItemsAgainstContract({
+      contractId: contractId,
+      contractItems: contractItems,
+      billingData: billingData,
     });
 
-    const all_messages = result.error_items.map((item: any) => item.correction_message);
-    const unique_messages = new Set(all_messages);
-    expect(unique_messages.size).toBe(all_messages.length);
+    expect(validationResult).toEqual({
+      isValid: false,
+      excludedItems: [
+        {
+          itemCode: 'ITEM_UNKNOWN_SERVICE',
+          itemName: '不明なサービス',
+          quantity: 5,
+          unitPrice: 10000,
+          amount: 50000,
+          excludeStatus: 'EXCLUDED',
+          reasonCode: 'ERR_ITEM_NOT_IN_CONTRACT',
+          reasonMessage: '契約書に未記載',
+        },
+      ],
+      validItems: [
+        { itemCode: 'ITEM_APO_COUNT', quantity: 10, unitPrice: 5000, amount: 50000 },
+        { itemCode: 'ITEM_DEAL_COUNT', quantity: 2, unitPrice: 50000, amount: 100000 },
+      ],
+      adjustedTotalAmount: 150000,
+      originalTotalAmount: 200000,
+      deductionAmount: 50000,
+      validationDetails: {
+        contractItemCount: 2,
+        billingItemCount: 3,
+        matchedItemCount: 2,
+        unmatchedItemCount: 1,
+        unmatchedPercentage: 33.33,
+      },
+    });
 
-    expect(result.aggregated_message).toBeTruthy();
-    expect(result.aggregated_message).toContain('4');
-    expect(result.aggregated_message).toContain('修正');
+    expect(validationResult.excludedItems).toHaveLength(1);
+    expect(validationResult.excludedItems[0].reasonCode).toBe('ERR_ITEM_NOT_IN_CONTRACT');
+    expect(validationResult.adjustedTotalAmount).toBe(150000);
+    expect(validationResult.originalTotalAmount).toBe(200000);
+    expect(validationResult.deductionAmount).toBe(50000);
+    expect(validationResult.isValid).toBe(false);
   });
 });

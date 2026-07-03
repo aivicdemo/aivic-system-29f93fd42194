@@ -1,152 +1,95 @@
-import { describe, test, expect } from "@jest/globals";
+import { describe, test, expect, beforeEach, afterEach } from "@jest/globals";
 import {
-  validateBillingDataCompleteness,
-} from "../../src/logic/it-1781935279444-2-2-1";
+  recordConsultationWithTimestamp,
+  retrieveConsultationHistory,
+} from "../../src/logic/it-1-1-1";
 
-describe("営業データ品質検証 - 請求データ妥当性自動検証機能", () => {
-  // SCEN-819: [error] 請求データ妥当性自動検証機能 - 請求対象項目が営業成果データに存在しない場合にエラーが検出される
-  test("請求対象項目が営業成果データに存在しない場合、エラーが検出されること", () => {
-    // Arrange
-    const sales_performance_data = {
-      customer_id: "CUST-001",
-      service_id: "SVC-A",
-      appointment_count: 5,
-      contract_count: 2,
-      customer_response_rating: 8.5,
-      billing_month: "2024-01",
+describe("営業成果データの自動検証ルール定義と異常検出機能", () => {
+  // SCEN-819: [edge] 代表への相談受領・履歴管理機能 - 複数の相談が同一タイムスタンプで到達した場合も個別にタイムスタンプが付与されて記録される
+  test("複数の相談が同一タイムスタンプで到達した場合、各相談に一意で異なるタイムスタンプが付与され、順序が保持される", () => {
+    // 初期化
+    const systemBaseTimestamp = new Date("2024-01-15T11:00:00.000Z");
+    const consultationSubmitTimestamp = "2024-01-15T11:00:00.000Z";
+
+    // 複数の相談データ（3件以上）を同じタイムスタンプ値で作成
+    const consultation1 = {
+      consultationId: "CONS-001",
+      customerId: "CUST-101",
+      consultationContent: "請求額に関する質問",
+      submittedAt: consultationSubmitTimestamp,
+      status: "pending",
     };
 
-    const billing_data = {
-      customer_id: "CUST-001",
-      service_id: "SVC-A",
-      billing_target_item_1: "appointment_count",
-      billing_target_item_2: "non_existent_field",
-      billing_target_item_3: "unknown_metric",
-      billing_month: "2024-01",
+    const consultation2 = {
+      consultationId: "CONS-002",
+      customerId: "CUST-101",
+      consultationContent: "納期変更について相談",
+      submittedAt: consultationSubmitTimestamp,
+      status: "pending",
     };
 
-    // Act & Assert
-    expect(() =>
-      validateBillingDataCompleteness({
-        sales_performance_data,
-        billing_data,
-      })
-    ).toThrow(/営業成果データに存在しません/);
-  });
-
-  test("すべての請求対象項目が営業成果データに存在する場合、検証が成功すること", () => {
-    // Arrange
-    const sales_performance_data = {
-      customer_id: "CUST-001",
-      service_id: "SVC-A",
-      appointment_count: 5,
-      contract_count: 2,
-      customer_response_rating: 8.5,
-      billing_month: "2024-01",
+    const consultation3 = {
+      consultationId: "CONS-003",
+      customerId: "CUST-102",
+      consultationContent: "契約条件の確認",
+      submittedAt: consultationSubmitTimestamp,
+      status: "pending",
     };
 
-    const billing_data = {
-      customer_id: "CUST-001",
-      service_id: "SVC-A",
-      billing_target_item_1: "appointment_count",
-      billing_target_item_2: "contract_count",
-      billing_target_item_3: "customer_response_rating",
-      billing_month: "2024-01",
-    };
+    // 複数の相談データを同時に相談受領APIに送信
+    const result1 = recordConsultationWithTimestamp(consultation1);
+    const result2 = recordConsultationWithTimestamp(consultation2);
+    const result3 = recordConsultationWithTimestamp(consultation3);
 
-    // Act
-    const result = validateBillingDataCompleteness({
-      sales_performance_data,
-      billing_data,
+    // 各相談レコードに付与されたタイムスタンプを確認
+    expect(result1).toHaveProperty("recordedAt");
+    expect(result2).toHaveProperty("recordedAt");
+    expect(result3).toHaveProperty("recordedAt");
+
+    const timestamp1 = new Date(result1.recordedAt);
+    const timestamp2 = new Date(result2.recordedAt);
+    const timestamp3 = new Date(result3.recordedAt);
+
+    // 各相談レコードのタイムスタンプが互いに異なる値であることを検証
+    expect(timestamp1.getTime()).not.toBe(timestamp2.getTime());
+    expect(timestamp2.getTime()).not.toBe(timestamp3.getTime());
+    expect(timestamp1.getTime()).not.toBe(timestamp3.getTime());
+
+    // 各タイムスタンプがシステム基準時刻以降であることを確認
+    expect(timestamp1.getTime()).toBeGreaterThanOrEqual(systemBaseTimestamp.getTime());
+    expect(timestamp2.getTime()).toBeGreaterThanOrEqual(systemBaseTimestamp.getTime());
+    expect(timestamp3.getTime()).toBeGreaterThanOrEqual(systemBaseTimestamp.getTime());
+
+    // タイムスタンプの順序が相談受領の順序と一致していることを検証
+    expect(timestamp1.getTime()).toBeLessThan(timestamp2.getTime());
+    expect(timestamp2.getTime()).toBeLessThan(timestamp3.getTime());
+
+    // 相談履歴取得
+    const history = retrieveConsultationHistory({
+      customerId: "CUST-101",
+      startDate: "2024-01-15",
+      endDate: "2024-01-15",
     });
 
-    // Assert
-    expect(result).toEqual({
-      is_valid: true,
-      missing_fields: [],
-      validation_status: "合格",
-    });
-  });
+    // 相談履歴表示画面で複数の相談が個別に表示されていることを確認
+    expect(history).toHaveLength(2);
 
-  test("複数の欠落項目が存在する場合、すべての欠落項目がエラーメッセージに含まれること", () => {
-    // Arrange
-    const sales_performance_data = {
-      customer_id: "CUST-002",
-      service_id: "SVC-B",
-      appointment_count: 3,
-      billing_month: "2024-02",
-    };
+    const historyItem1 = history.find((h) => h.consultationId === "CONS-001");
+    const historyItem2 = history.find((h) => h.consultationId === "CONS-002");
 
-    const billing_data = {
-      customer_id: "CUST-002",
-      service_id: "SVC-B",
-      billing_target_item_1: "contract_count",
-      billing_target_item_2: "customer_response_rating",
-      billing_target_item_3: "undefined_metric",
-      billing_month: "2024-02",
-    };
+    expect(historyItem1).toBeDefined();
+    expect(historyItem2).toBeDefined();
 
-    // Act & Assert
-    expect(() =>
-      validateBillingDataCompleteness({
-        sales_performance_data,
-        billing_data,
-      })
-    ).toThrow(/営業成果データに存在しません/);
-  });
+    // 履歴内のタイムスタンプも個別に記録されていることを確認
+    const historyTimestamp1 = new Date(historyItem1!.recordedAt);
+    const historyTimestamp2 = new Date(historyItem2!.recordedAt);
 
-  test("請求対象項目が空の場合、検証が成功すること", () => {
-    // Arrange
-    const sales_performance_data = {
-      customer_id: "CUST-003",
-      service_id: "SVC-C",
-      appointment_count: 0,
-      contract_count: 0,
-      billing_month: "2024-03",
-    };
+    expect(historyTimestamp1.getTime()).not.toBe(historyTimestamp2.getTime());
+    expect(historyTimestamp1.getTime()).toBeLessThan(historyTimestamp2.getTime());
 
-    const billing_data = {
-      customer_id: "CUST-003",
-      service_id: "SVC-C",
-      billing_month: "2024-03",
-    };
-
-    // Act
-    const result = validateBillingDataCompleteness({
-      sales_performance_data,
-      billing_data,
-    });
-
-    // Assert
-    expect(result).toEqual({
-      is_valid: true,
-      missing_fields: [],
-      validation_status: "合格",
-    });
-  });
-
-  test("営業成果データが空の場合、すべての請求対象項目に対してエラーが検出されること", () => {
-    // Arrange
-    const sales_performance_data = {
-      customer_id: "CUST-004",
-      service_id: "SVC-D",
-      billing_month: "2024-04",
-    };
-
-    const billing_data = {
-      customer_id: "CUST-004",
-      service_id: "SVC-D",
-      billing_target_item_1: "appointment_count",
-      billing_target_item_2: "contract_count",
-      billing_month: "2024-04",
-    };
-
-    // Act & Assert
-    expect(() =>
-      validateBillingDataCompleteness({
-        sales_performance_data,
-        billing_data,
-      })
-    ).toThrow(/営業成果データに存在しません/);
+    // 全相談が一意のタイムスタンプを持つことを最終検証
+    const allTimestamps = [result1.recordedAt, result2.recordedAt, result3.recordedAt];
+    const uniqueTimestamps = new Set(allTimestamps);
+    expect(uniqueTimestamps.size).toBe(3);
   });
 });

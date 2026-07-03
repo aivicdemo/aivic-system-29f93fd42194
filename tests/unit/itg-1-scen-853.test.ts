@@ -1,84 +1,47 @@
-import { describe, test, expect } from "@jest/globals";
-import { visualizeBillingAmountChange } from "../../src/logic/it-1781935279444-2-2-1";
+import { validateContractChangeConsistency } from "../../src/logic/it-1-1-1";
 
-describe("契約変更前後の比較・差分可視化機能", () => {
+describe("営業成果データの自動検証ルール定義と異常検出機能", () => {
   // SCEN-853
-  test("請求金額変更時に変更前後の請求データが差分画面に視覚的に可視化される", () => {
-    const beforeBillingAmount = 10000;
-    const afterBillingAmount = 15000;
-    const changedAt = new Date("2024-01-15T11:00:00Z");
-    const changedBy = "user_001";
-
-    const input = {
-      contractId: "contract_001",
-      beforeData: {
-        billingAmount: beforeBillingAmount,
-        currency: "JPY",
-        billingCycle: "monthly",
-        effectiveDate: "2024-01-01"
-      },
-      afterData: {
-        billingAmount: afterBillingAmount,
-        currency: "JPY",
-        billingCycle: "monthly",
-        effectiveDate: "2024-01-15"
-      },
-      changedAt: changedAt,
-      changedBy: changedBy
+  test("契約変更前後の整合性検証機能 - 請求額の計算誤りが検出され異常フラグが設定される", () => {
+    const beforeContract = {
+      contractId: "CTR-2024-001",
+      customerId: "CUST-A001",
+      serviceId: "SVC-001",
+      baseAmount: 100000,
+      discountRate: 0.1,
+      calculatedBillingAmount: 90000,
+      effectiveDate: "2024-01-01",
+      updatedAt: "2024-01-01T09:00:00Z",
     };
 
-    const result = visualizeBillingAmountChange(input);
+    const afterContract = {
+      contractId: "CTR-2024-001",
+      customerId: "CUST-A001",
+      serviceId: "SVC-001",
+      baseAmount: 100000,
+      discountRate: 0.1,
+      calculatedBillingAmount: 85000,
+      effectiveDate: "2024-02-01",
+      updatedAt: "2024-02-01T09:00:00Z",
+    };
 
-    expect(result).toEqual({
-      contractId: "contract_001",
-      changeType: "billingAmountChange",
-      beforeState: {
-        billingAmount: 10000,
-        currency: "JPY",
-        billingCycle: "monthly",
-        effectiveDate: "2024-01-01"
-      },
-      afterState: {
-        billingAmount: 15000,
-        currency: "JPY",
-        billingCycle: "monthly",
-        effectiveDate: "2024-01-15"
-      },
-      differences: [
-        {
-          fieldName: "billingAmount",
-          beforeValue: 10000,
-          afterValue: 15000,
-          changeAmount: 5000,
-          isHighlighted: true
-        },
-        {
-          fieldName: "effectiveDate",
-          beforeValue: "2024-01-01",
-          afterValue: "2024-01-15",
-          isHighlighted: true
-        }
-      ],
-      metadata: {
-        changedAt: "2024-01-15T11:00:00Z",
-        changedBy: "user_001",
-        timestamp: "2024-01-15T11:00:00Z"
-      },
-      displayFormat: {
-        layout: "sideBySide",
-        leftLabel: "変更前",
-        rightLabel: "変更後",
-        highlightColor: "#FFEB3B"
-      }
-    });
+    const result = validateContractChangeConsistency(
+      beforeContract,
+      afterContract
+    );
 
-    expect(result.beforeState.billingAmount).toBe(10000);
-    expect(result.afterState.billingAmount).toBe(15000);
-    expect(result.differences.length).toBe(2);
-    expect(result.differences[0].fieldName).toBe("billingAmount");
-    expect(result.differences[0].isHighlighted).toBe(true);
-    expect(result.metadata.changedAt).toBe("2024-01-15T11:00:00Z");
-    expect(result.metadata.changedBy).toBe("user_001");
-    expect(result.displayFormat.layout).toBe("sideBySide");
+    expect(result.isConsistent).toBe(false);
+    expect(result.hasError).toBe(true);
+    expect(result.errorFlag).toBe("error");
+    expect(result.discrepancyAmount).toBe(-5000);
+    expect(result.expectedAmount).toBe(90000);
+    expect(result.actualAmount).toBe(85000);
+    expect(result.errorMessage).toMatch(/計算誤り|請求額|不一致/);
+    expect(result.errorCode).toBeDefined();
+    expect(result.contractId).toBe("CTR-2024-001");
+    expect(result.changeType).toBe("billing_calculation_error");
+    expect(Array.isArray(result.detailedLog)).toBe(true);
+    expect(result.detailedLog.length).toBeGreaterThan(0);
+    expect(result.detailedLog[0]).toMatch(/期待値|実際の値|差分/);
   });
 });

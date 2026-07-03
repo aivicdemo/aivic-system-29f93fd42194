@@ -1,66 +1,84 @@
-import { sendContractChangeReminderNotification } from '../../src/logic/it-1781935279444-2-1-1';
+import { validateSalesDataCompleteness } from '../../src/logic/it-1781935279444-2-2-1';
 
-describe('契約変更確認催促通知機能', () => {
-  test('SCEN-1246: 顧客合意受領から確認処理開始までの時間が設定値を超過した場合に営業責任者への催促通知が送信される', () => {
-    // 設定値: 超過時間の閾値を24時間とする
-    const thresholdHours = 24;
-    const thresholdMs = thresholdHours * 60 * 60 * 1000;
+describe('営業データの完全性・正確性検証', () => {
+  // SCEN-1246: [error] 月次営業データの完全性・正確性検証機能 - 必須項目が欠落している場合、検証エラーと欠落項目情報を検出・通知する
+  test('必須項目が欠落している場合、検証エラーと欠落項目情報を検出・通知する', () => {
+    const testDataWithMissingFields = [
+      {
+        rowNumber: 1,
+        customerId: 'CUST001',
+        salesAmount: undefined,
+        salesDate: '2024-01-15',
+        salesPersonId: 'SALES001'
+      },
+      {
+        rowNumber: 2,
+        customerId: undefined,
+        salesAmount: 150000,
+        salesDate: '2024-01-16',
+        salesPersonId: 'SALES002'
+      },
+      {
+        rowNumber: 3,
+        customerId: 'CUST003',
+        salesAmount: 200000,
+        salesDate: undefined,
+        salesPersonId: 'SALES003'
+      },
+      {
+        rowNumber: 4,
+        customerId: 'CUST004',
+        salesAmount: 100000,
+        salesDate: '2024-01-18',
+        salesPersonId: undefined
+      }
+    ];
 
-    // 顧客合意受領時刻を固定値で設定
-    const agreementReceivedAt = new Date('2024-01-15T09:00:00Z');
+    const validationResult = validateSalesDataCompleteness(testDataWithMissingFields);
 
-    // 催促通知実行時刻: 合意受領から設定値を超過
-    const reminderExecutedAt = new Date(
-      agreementReceivedAt.getTime() + thresholdMs + 1000
+    expect(validationResult.isValid).toBe(false);
+    expect(validationResult.errorCount).toBe(4);
+    
+    expect(validationResult.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          rowNumber: 1,
+          missingFields: ['salesAmount'],
+          message: expect.stringMatching(/salesAmount/)
+        }),
+        expect.objectContaining({
+          rowNumber: 2,
+          missingFields: ['customerId'],
+          message: expect.stringMatching(/customerId/)
+        }),
+        expect.objectContaining({
+          rowNumber: 3,
+          missingFields: ['salesDate'],
+          message: expect.stringMatching(/salesDate/)
+        }),
+        expect.objectContaining({
+          rowNumber: 4,
+          missingFields: ['salesPersonId'],
+          message: expect.stringMatching(/salesPersonId/)
+        })
+      ])
     );
 
-    // テスト入力データ
-    const contractChangeRequest = {
-      contractChangeId: 'CC-2024-001',
-      customerId: 'CUST-12345',
-      customerName: '株式会社テスト',
-      contractChangeSummary: '請求単価を10%引き上げ',
-      agreementReceivedAt: agreementReceivedAt.toISOString(),
-      salesRepresentativeEmail: 'sales-rep@company.com',
-      salesRepresentativeName: '営業太郎',
-      thresholdMs: thresholdMs,
-      currentTime: reminderExecutedAt.toISOString(),
-    };
+    expect(validationResult.errors.length).toBe(4);
+    
+    validationResult.errors.forEach((error: any) => {
+      expect(error.rowNumber).toBeGreaterThanOrEqual(1);
+      expect(error.rowNumber).toBeLessThanOrEqual(4);
+      expect(Array.isArray(error.missingFields)).toBe(true);
+      expect(error.missingFields.length).toBeGreaterThan(0);
+      expect(typeof error.message).toBe('string');
+      expect(error.message.length).toBeGreaterThan(0);
+    });
 
-    // 催促通知処理を実行
-    const notificationResult = sendContractChangeReminderNotification(
-      contractChangeRequest
-    );
-
-    // 通知が送信されたことを検証
-    expect(notificationResult.notificationSent).toBe(true);
-
-    // 通知タイプが催促通知であることを検証
-    expect(notificationResult.notificationType).toBe('REMINDER');
-
-    // 通知メッセージに顧客名が含まれていることを検証
-    expect(notificationResult.message).toContain('株式会社テスト');
-
-    // 通知メッセージに契約変更内容が含まれていることを検証
-    expect(notificationResult.message).toContain('請求単価を10%引き上げ');
-
-    // 通知メッセージに合意受領時刻が含まれていることを検証
-    expect(notificationResult.message).toContain('2024-01-15T09:00:00Z');
-
-    // 通知送信先が営業責任者のメールアドレスであることを検証
-    expect(notificationResult.recipientEmail).toBe('sales-rep@company.com');
-
-    // 通知送信時刻が設定値超過タイミング（合意受領から24時間以上経過後）であることを検証
-    const notificationSentAt = new Date(notificationResult.notificationSentAt);
-    const elapsedMs =
-      notificationSentAt.getTime() - agreementReceivedAt.getTime();
-    expect(elapsedMs).toBeGreaterThanOrEqual(thresholdMs);
-
-    // 通知に含まれるトランザクションIDが存在することを検証
-    expect(notificationResult.transactionId).toBeDefined();
-    expect(notificationResult.transactionId).toMatch(/^CC-2024-001/);
-
-    // 通知ステータスが送信完了であることを検証
-    expect(notificationResult.status).toBe('SENT');
+    expect(validationResult.notification).toBeDefined();
+    expect(validationResult.notification.status).toBe('error');
+    expect(validationResult.notification.message).toMatch(/欠落/);
+    expect(validationResult.notification.affectedRows).toEqual([1, 2, 3, 4]);
+    expect(validationResult.notification.timestamp).toBeDefined();
   });
 });

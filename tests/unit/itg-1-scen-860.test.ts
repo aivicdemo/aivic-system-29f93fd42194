@@ -1,133 +1,195 @@
-import { recordOperationLog } from '../../src/logic/it-1781935279444-1-1-1';
+import { describe, test, expect, beforeEach } from '@jest/globals';
+import { generateContractChangeVerificationReport } from '../../src/logic/it-1-br-1781935279444-1-2-1';
 
-describe('操作ログ自動記録機能 - 短時間複数操作の時系列記録', () => {
-  test('SCEN-860: 短時間に複数の操作が実行されたときに各操作が正しい時系列で記録される', () => {
-    // モック時間を初期化
-    const baseTime = new Date('2024-01-15T11:00:00.000Z');
-    let currentTime = new Date(baseTime.getTime());
+describe('月次サマリーテンプレート定義・管理機能 - 契約変更検証レポート自動生成', () => {
+  // SCEN-860: [normal] 契約変更検証レポートの自動生成機能 - 妥当性判定結果・過去契約履歴比較・請求額根拠を含む標準化レポートが正常に生成される
+  test('should generate standardized contract change verification report with validity judgment, historical comparison, and billing basis', () => {
+    const input_contract_changes = [
+      {
+        contract_change_id: 'CC-001',
+        customer_id: 'CUST-A',
+        contract_id: 'CTR-A-001',
+        change_type: 'price_adjustment',
+        effective_date: '2024-01-15',
+        changed_fields: {
+          monthly_fee: { old_value: 50000, new_value: 55000 },
+          discount_rate: { old_value: 10, new_value: 8 }
+        },
+        change_reason: 'Service tier upgrade',
+        recorded_by: 'user001',
+        recorded_at: '2024-01-10T09:30:00Z'
+      },
+      {
+        contract_change_id: 'CC-002',
+        customer_id: 'CUST-B',
+        contract_id: 'CTR-B-001',
+        change_type: 'service_scope_change',
+        effective_date: '2024-02-01',
+        changed_fields: {
+          service_items: { old_value: ['basic', 'support'], new_value: ['basic', 'support', 'premium'] }
+        },
+        change_reason: 'Customer requested additional features',
+        recorded_by: 'user002',
+        recorded_at: '2024-01-12T14:15:00Z'
+      }
+    ];
 
-    // テスト用モック操作ログ格納配列
-    const recordedLogs: Array<{
-      operation_id: string;
-      operation_type: string;
-      user_id: string;
-      timestamp: Date;
-      sequence_number: number;
-      details: Record<string, unknown>;
-    }> = [];
+    const input_historical_contracts = [
+      {
+        contract_id: 'CTR-A-001',
+        customer_id: 'CUST-A',
+        valid_from: '2023-01-01',
+        valid_to: '2024-01-14',
+        monthly_fee: 50000,
+        discount_rate: 10,
+        service_items: ['basic', 'support']
+      },
+      {
+        contract_id: 'CTR-B-001',
+        customer_id: 'CUST-B',
+        valid_from: '2023-06-01',
+        valid_to: '2024-01-31',
+        monthly_fee: 30000,
+        discount_rate: 5,
+        service_items: ['basic', 'support']
+      }
+    ];
 
-    // 操作ログ記録の実装（テスト内で操作を模擬）
-    const recordOperation = (
-      operationType: string,
-      userId: string,
-      details: Record<string, unknown>
-    ) => {
-      recordedLogs.push({
-        operation_id: `op_${recordedLogs.length + 1}`,
-        operation_type: operationType,
-        user_id: userId,
-        timestamp: new Date(currentTime.getTime()),
-        sequence_number: recordedLogs.length + 1,
-        details,
-      });
-      // 次の操作のための時間を1ミリ秒進める
-      currentTime = new Date(currentTime.getTime() + 1);
+    const input_billing_calculations = [
+      {
+        contract_id: 'CTR-A-001',
+        billing_period: '2024-01',
+        base_amount: 50000,
+        discount_amount: 5000,
+        final_amount: 45000,
+        calculation_formula: 'base_amount * (1 - discount_rate / 100)'
+      },
+      {
+        contract_id: 'CTR-B-001',
+        billing_period: '2024-01',
+        base_amount: 30000,
+        discount_amount: 1500,
+        final_amount: 28500,
+        calculation_formula: 'base_amount * (1 - discount_rate / 100)'
+      }
+    ];
+
+    const input_options = {
+      include_validity_judgment: true,
+      include_historical_comparison: true,
+      include_billing_basis: true,
+      report_format: 'standardized',
+      language: 'ja'
     };
 
-    // 操作A: 営業データ入力
-    recordOperation('sales_data_input', 'user_001', {
-      customer_id: 'cust_123',
-      appointment_count: 5,
+    const result = generateContractChangeVerificationReport({
+      contract_changes: input_contract_changes,
+      historical_contracts: input_historical_contracts,
+      billing_calculations: input_billing_calculations,
+      options: input_options
     });
 
-    // 操作B: データ検証
-    recordOperation('data_validation', 'user_001', {
-      validation_status: 'passed',
-      error_count: 0,
-    });
+    expect(result).toBeDefined();
+    expect(result.report_id).toBeTruthy();
+    expect(result.generated_at).toBeTruthy();
+    expect(result.status).toBe('generated');
 
-    // 操作C: 請求データ更新
-    recordOperation('billing_data_update', 'user_001', {
-      billing_amount: 50000,
-      contract_id: 'contract_456',
-    });
+    expect(result.sections).toBeDefined();
+    expect(Array.isArray(result.sections)).toBe(true);
+    expect(result.sections.length).toBeGreaterThanOrEqual(3);
 
-    // 操作D: ログ出力
-    recordOperation('log_export', 'user_001', {
-      export_format: 'csv',
-      record_count: 3,
-    });
+    const validity_section = result.sections.find(
+      (s: any) => s.section_type === 'validity_judgment'
+    );
+    expect(validity_section).toBeDefined();
+    expect(validity_section.title).toBeTruthy();
+    expect(Array.isArray(validity_section.entries)).toBe(true);
+    expect(validity_section.entries.length).toBe(2);
 
-    // 記録されたログが4件であることを確認
-    expect(recordedLogs.length).toBe(4);
+    const cc001_judgment = validity_section.entries.find(
+      (e: any) => e.contract_change_id === 'CC-001'
+    );
+    expect(cc001_judgment).toBeDefined();
+    expect(cc001_judgment.judgment_result).toBe('valid');
+    expect(cc001_judgment.judgment_reason).toBeTruthy();
+    expect(typeof cc001_judgment.judgment_confidence).toBe('number');
+    expect(cc001_judgment.judgment_confidence).toBeGreaterThanOrEqual(0);
+    expect(cc001_judgment.judgment_confidence).toBeLessThanOrEqual(100);
 
-    // 操作A の検証
-    expect(recordedLogs[0].operation_type).toBe('sales_data_input');
-    expect(recordedLogs[0].sequence_number).toBe(1);
-    expect(recordedLogs[0].timestamp.getTime()).toBe(
-      new Date('2024-01-15T11:00:00.000Z').getTime()
+    const historical_section = result.sections.find(
+      (s: any) => s.section_type === 'historical_comparison'
+    );
+    expect(historical_section).toBeDefined();
+    expect(historical_section.title).toBeTruthy();
+    expect(Array.isArray(historical_section.comparisons)).toBe(true);
+    expect(historical_section.comparisons.length).toBe(2);
+
+    const cc001_comparison = historical_section.comparisons.find(
+      (c: any) => c.contract_id === 'CTR-A-001'
+    );
+    expect(cc001_comparison).toBeDefined();
+    expect(cc001_comparison.old_terms).toBeDefined();
+    expect(cc001_comparison.old_terms.monthly_fee).toBe(50000);
+    expect(cc001_comparison.old_terms.discount_rate).toBe(10);
+    expect(cc001_comparison.new_terms).toBeDefined();
+    expect(cc001_comparison.new_terms.monthly_fee).toBe(55000);
+    expect(cc001_comparison.new_terms.discount_rate).toBe(8);
+    expect(Array.isArray(cc001_comparison.differences)).toBe(true);
+    expect(cc001_comparison.differences.length).toBeGreaterThan(0);
+
+    const billing_section = result.sections.find(
+      (s: any) => s.section_type === 'billing_basis'
+    );
+    expect(billing_section).toBeDefined();
+    expect(billing_section.title).toBeTruthy();
+    expect(Array.isArray(billing_section.billing_bases)).toBe(true);
+    expect(billing_section.billing_bases.length).toBe(2);
+
+    const cc001_billing = billing_section.billing_bases.find(
+      (b: any) => b.contract_id === 'CTR-A-001'
+    );
+    expect(cc001_billing).toBeDefined();
+    expect(cc001_billing.old_calculation).toBeDefined();
+    expect(cc001_billing.old_calculation.base_amount).toBe(50000);
+    expect(cc001_billing.old_calculation.discount_rate).toBe(10);
+    expect(cc001_billing.old_calculation.discount_amount).toBe(5000);
+    expect(cc001_billing.old_calculation.final_amount).toBe(45000);
+    expect(cc001_billing.new_calculation).toBeDefined();
+    expect(cc001_billing.new_calculation.base_amount).toBe(55000);
+    expect(cc001_billing.new_calculation.discount_rate).toBe(8);
+    expect(cc001_billing.new_calculation.discount_amount).toBe(4400);
+    expect(cc001_billing.new_calculation.final_amount).toBe(50600);
+    expect(cc001_billing.billing_difference).toBeDefined();
+    expect(cc001_billing.billing_difference.amount_change).toBe(5600);
+    expect(cc001_billing.billing_difference.percentage_change).toBeCloseTo(12.44, 1);
+    expect(cc001_billing.calculation_formula).toBe('base_amount * (1 - discount_rate / 100)');
+
+    expect(result.metadata).toBeDefined();
+    expect(result.metadata.report_format).toBe('standardized');
+    expect(result.metadata.report_locale).toBe('ja');
+    expect(result.metadata.contract_changes_count).toBe(2);
+    expect(result.metadata.sections_included).toEqual(
+      expect.arrayContaining(['validity_judgment', 'historical_comparison', 'billing_basis'])
     );
 
-    // 操作B の検証
-    expect(recordedLogs[1].operation_type).toBe('data_validation');
-    expect(recordedLogs[1].sequence_number).toBe(2);
-    expect(recordedLogs[1].timestamp.getTime()).toBe(
-      new Date('2024-01-15T11:00:00.001Z').getTime()
+    expect(result.formatting).toBeDefined();
+    expect(result.formatting.layout_type).toBe('standardized');
+    expect(result.formatting.is_consistent).toBe(true);
+    expect(result.formatting.validation_passed).toBe(true);
+
+    expect(Array.isArray(result.classified_changes)).toBe(true);
+    expect(result.classified_changes.length).toBe(2);
+    
+    const price_adjustment_group = result.classified_changes.filter(
+      (cc: any) => cc.change_type === 'price_adjustment'
     );
+    expect(price_adjustment_group.length).toBe(1);
+    expect(price_adjustment_group[0].contract_change_id).toBe('CC-001');
 
-    // 操作C の検証
-    expect(recordedLogs[2].operation_type).toBe('billing_data_update');
-    expect(recordedLogs[2].sequence_number).toBe(3);
-    expect(recordedLogs[2].timestamp.getTime()).toBe(
-      new Date('2024-01-15T11:00:00.002Z').getTime()
+    const service_scope_group = result.classified_changes.filter(
+      (cc: any) => cc.change_type === 'service_scope_change'
     );
-
-    // 操作D の検証
-    expect(recordedLogs[3].operation_type).toBe('log_export');
-    expect(recordedLogs[3].sequence_number).toBe(4);
-    expect(recordedLogs[3].timestamp.getTime()).toBe(
-      new Date('2024-01-15T11:00:00.003Z').getTime()
-    );
-
-    // タイムスタンプが昇順であることを確認
-    expect(recordedLogs[0].timestamp.getTime()).toBeLessThan(
-      recordedLogs[1].timestamp.getTime()
-    );
-    expect(recordedLogs[1].timestamp.getTime()).toBeLessThan(
-      recordedLogs[2].timestamp.getTime()
-    );
-    expect(recordedLogs[2].timestamp.getTime()).toBeLessThan(
-      recordedLogs[3].timestamp.getTime()
-    );
-
-    // 各ログエントリ間のタイムスタンプ差分が1ミリ秒以上であることを確認
-    expect(recordedLogs[1].timestamp.getTime() - recordedLogs[0].timestamp.getTime()).toBe(1);
-    expect(recordedLogs[2].timestamp.getTime() - recordedLogs[1].timestamp.getTime()).toBe(1);
-    expect(recordedLogs[3].timestamp.getTime() - recordedLogs[2].timestamp.getTime()).toBe(1);
-
-    // シーケンス番号が連続していることを確認
-    expect(recordedLogs[0].sequence_number).toBe(1);
-    expect(recordedLogs[1].sequence_number).toBe(2);
-    expect(recordedLogs[2].sequence_number).toBe(3);
-    expect(recordedLogs[3].sequence_number).toBe(4);
-
-    // すべてのログエントリが同じユーザーであることを確認
-    recordedLogs.forEach((log) => {
-      expect(log.user_id).toBe('user_001');
-    });
-
-    // ログが重複していないことを確認（操作IDが一意であること）
-    const operationIds = recordedLogs.map((log) => log.operation_id);
-    const uniqueOperationIds = new Set(operationIds);
-    expect(uniqueOperationIds.size).toBe(4);
-
-    // 時系列順序が操作実行順序と完全に一致していることを確認
-    const operationTypes = recordedLogs.map((log) => log.operation_type);
-    expect(operationTypes).toEqual([
-      'sales_data_input',
-      'data_validation',
-      'billing_data_update',
-      'log_export',
-    ]);
+    expect(service_scope_group.length).toBe(1);
+    expect(service_scope_group[0].contract_change_id).toBe('CC-002');
   });
 });

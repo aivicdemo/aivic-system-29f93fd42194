@@ -1,185 +1,230 @@
-import { validateSalesDataQuality } from '../../src/logic/it-1781935279444-2-2-1';
+import { extractBillingItems, aggregateBillingAmount } from '../../src/logic/it-1-2-1';
 
-describe('営業データ品質確認と修正サイクル', () => {
-  // SCEN-743
-  test('修正完了データが再検証時に品質基準を満たさない場合、修正→チェック→通知のサイクルが継続される', () => {
-    // 初回品質チェック: 複数の不適合を検出
-    const initial_sales_data = {
-      id: 'SD-743-001',
-      customer_name: '',
-      contact_date: '2024-01-15',
-      outcome: 'appointment_confirmed',
-      amount: 50000,
-      service_type: 'consulting',
-      status: 'pending_review',
-      revision_count: 0,
-      validation_history: [],
-    };
+describe('営業成果データから請求対象項目を自動抽出し、顧客ごと・サービスごとの請求額を集計する機能', () => {
+  // SCEN-743: [normal] 請求対象項目の自動抽出・集計 - 顧客ごと・サービスごとの請求額が正確に集計される
+  test('複数顧客・複数サービスの請求対象項目を正確に抽出・集計する', () => {
+    const sales_data = [
+      {
+        sales_data_id: 'sd_001',
+        customer_id: 'cust_a',
+        service_id: 'svc_1',
+        metric_name: 'appointment_count',
+        metric_value: 10,
+        unit_price: 500,
+        billing_flag: true,
+        record_date: '2024-01-15',
+      },
+      {
+        sales_data_id: 'sd_002',
+        customer_id: 'cust_a',
+        service_id: 'svc_1',
+        metric_name: 'contract_count',
+        metric_value: 3,
+        unit_price: 2000,
+        billing_flag: true,
+        record_date: '2024-01-15',
+      },
+      {
+        sales_data_id: 'sd_003',
+        customer_id: 'cust_a',
+        service_id: 'svc_2',
+        metric_name: 'appointment_count',
+        metric_value: 8,
+        unit_price: 600,
+        billing_flag: true,
+        record_date: '2024-01-15',
+      },
+      {
+        sales_data_id: 'sd_004',
+        customer_id: 'cust_a',
+        service_id: 'svc_2',
+        metric_name: 'contract_count',
+        metric_value: 2,
+        unit_price: 1800,
+        billing_flag: true,
+        record_date: '2024-01-15',
+      },
+      {
+        sales_data_id: 'sd_005',
+        customer_id: 'cust_b',
+        service_id: 'svc_1',
+        metric_name: 'appointment_count',
+        metric_value: 5,
+        unit_price: 500,
+        billing_flag: true,
+        record_date: '2024-01-15',
+      },
+      {
+        sales_data_id: 'sd_006',
+        customer_id: 'cust_b',
+        service_id: 'svc_1',
+        metric_name: 'contract_count',
+        metric_value: 1,
+        unit_price: 2000,
+        billing_flag: true,
+        record_date: '2024-01-15',
+      },
+      {
+        sales_data_id: 'sd_007',
+        customer_id: 'cust_a',
+        service_id: 'svc_3',
+        metric_name: 'customer_satisfaction',
+        metric_value: 4,
+        unit_price: 300,
+        billing_flag: true,
+        record_date: '2024-01-15',
+      },
+      {
+        sales_data_id: 'sd_008',
+        customer_id: 'cust_c',
+        service_id: 'svc_1',
+        metric_name: 'appointment_count',
+        metric_value: 0,
+        unit_price: 500,
+        billing_flag: false,
+        record_date: '2024-01-15',
+      },
+    ];
 
-    const initial_check_result = validateSalesDataQuality(initial_sales_data);
+    const extracted_items = extractBillingItems(sales_data);
 
-    // 初回検証: 必須項目欠落、値の範囲外を検出
-    expect(initial_check_result.is_valid).toBe(false);
-    expect(initial_check_result.errors.length).toBe(2);
-    expect(initial_check_result.errors[0].field).toBe('customer_name');
-    expect(initial_check_result.errors[0].error_code).toBe('REQUIRED_FIELD_MISSING');
-    expect(initial_check_result.errors[1].field).toBe('amount');
-    expect(initial_check_result.errors[1].error_code).toBe('VALUE_OUT_OF_RANGE');
+    // 顧客A・サービス1の請求対象項目確認
+    const cust_a_svc_1_items = extracted_items.filter(
+      (item: any) => item.customer_id === 'cust_a' && item.service_id === 'svc_1'
+    );
+    expect(cust_a_svc_1_items.length).toBe(2);
+    expect(cust_a_svc_1_items[0]).toEqual({
+      sales_data_id: 'sd_001',
+      customer_id: 'cust_a',
+      service_id: 'svc_1',
+      metric_name: 'appointment_count',
+      metric_value: 10,
+      unit_price: 500,
+      billing_flag: true,
+      record_date: '2024-01-15',
+    });
+    expect(cust_a_svc_1_items[1]).toEqual({
+      sales_data_id: 'sd_002',
+      customer_id: 'cust_a',
+      service_id: 'svc_1',
+      metric_name: 'contract_count',
+      metric_value: 3,
+      unit_price: 2000,
+      billing_flag: true,
+      record_date: '2024-01-15',
+    });
 
-    // 初回修正通知が営業担当者に送信される想定
-    const initial_notification = {
-      recipient_user_id: 'sales_rep_001',
-      notification_type: 'quality_check_failed',
-      data_record_id: 'SD-743-001',
-      failed_fields: ['customer_name', 'amount'],
-      notification_timestamp: '2024-01-15T09:00:00Z',
-      cycle_count: 1,
-    };
-    expect(initial_notification.failed_fields.length).toBe(2);
-    expect(initial_notification.cycle_count).toBe(1);
+    // 顧客A・サービス2の請求対象項目確認
+    const cust_a_svc_2_items = extracted_items.filter(
+      (item: any) => item.customer_id === 'cust_a' && item.service_id === 'svc_2'
+    );
+    expect(cust_a_svc_2_items.length).toBe(2);
+    expect(cust_a_svc_2_items[0]).toEqual({
+      sales_data_id: 'sd_003',
+      customer_id: 'cust_a',
+      service_id: 'svc_2',
+      metric_name: 'appointment_count',
+      metric_value: 8,
+      unit_price: 600,
+      billing_flag: true,
+      record_date: '2024-01-15',
+    });
+    expect(cust_a_svc_2_items[1]).toEqual({
+      sales_data_id: 'sd_004',
+      customer_id: 'cust_a',
+      service_id: 'svc_2',
+      metric_name: 'contract_count',
+      metric_value: 2,
+      unit_price: 1800,
+      billing_flag: true,
+      record_date: '2024-01-15',
+    });
 
-    // 営業担当者が修正を完了したデータ（ただし部分修正）
-    const first_revised_data = {
-      id: 'SD-743-001',
-      customer_name: 'Acme Corp',
-      contact_date: '2024-01-15',
-      outcome: 'appointment_confirmed',
-      amount: 80000, // 修正：前回の 50000 から範囲内の値へ
-      service_type: 'consulting',
-      status: 'pending_review',
-      revision_count: 1,
-      validation_history: [
-        {
-          cycle_number: 1,
-          timestamp: '2024-01-15T10:30:00Z',
-          failed_fields: ['customer_name', 'amount'],
-        },
-      ],
-    };
+    // 顧客B・サービス1の請求対象項目確認
+    const cust_b_svc_1_items = extracted_items.filter(
+      (item: any) => item.customer_id === 'cust_b' && item.service_id === 'svc_1'
+    );
+    expect(cust_b_svc_1_items.length).toBe(2);
+    expect(cust_b_svc_1_items[0]).toEqual({
+      sales_data_id: 'sd_005',
+      customer_id: 'cust_b',
+      service_id: 'svc_1',
+      metric_name: 'appointment_count',
+      metric_value: 5,
+      unit_price: 500,
+      billing_flag: true,
+      record_date: '2024-01-15',
+    });
+    expect(cust_b_svc_1_items[1]).toEqual({
+      sales_data_id: 'sd_006',
+      customer_id: 'cust_b',
+      service_id: 'svc_1',
+      metric_name: 'contract_count',
+      metric_value: 1,
+      unit_price: 2000,
+      billing_flag: true,
+      record_date: '2024-01-15',
+    });
 
-    const first_revision_result = validateSalesDataQuality(first_revised_data);
+    // 請求フラグがfalseの項目は除外されていることを確認
+    const non_billable = extracted_items.filter(
+      (item: any) => item.billing_flag === false
+    );
+    expect(non_billable.length).toBe(0);
 
-    // 初回修正後の検証: 新たな不適合を検出
-    // contact_date が未来日付の場合は不適合と仮定
-    expect(first_revision_result.is_valid).toBe(false);
-    expect(first_revision_result.errors.length).toBe(1);
-    expect(first_revision_result.errors[0].field).toBe('contact_date');
-    expect(first_revision_result.errors[0].error_code).toBe('INVALID_DATE_RANGE');
+    // 顧客A・サービス1の請求額集計: (10 * 500) + (3 * 2000) = 5000 + 6000 = 11000
+    const aggregated_amounts = aggregateBillingAmount(extracted_items);
+    const cust_a_svc_1_amount = aggregated_amounts.find(
+      (agg: any) =>
+        agg.customer_id === 'cust_a' &&
+        agg.service_id === 'svc_1'
+    );
+    expect(cust_a_svc_1_amount.total_billing_amount).toBe(11000);
 
-    // 修正→チェック→通知サイクルが継続
-    const second_notification = {
-      recipient_user_id: 'sales_rep_001',
-      notification_type: 'quality_check_failed',
-      data_record_id: 'SD-743-001',
-      failed_fields: ['contact_date'],
-      notification_timestamp: '2024-01-15T10:35:00Z',
-      cycle_count: 2,
-    };
-    expect(second_notification.failed_fields.length).toBe(1);
-    expect(second_notification.cycle_count).toBe(2);
+    // 顧客A・サービス2の請求額集計: (8 * 600) + (2 * 1800) = 4800 + 3600 = 8400
+    const cust_a_svc_2_amount = aggregated_amounts.find(
+      (agg: any) =>
+        agg.customer_id === 'cust_a' &&
+        agg.service_id === 'svc_2'
+    );
+    expect(cust_a_svc_2_amount.total_billing_amount).toBe(8400);
 
-    // 営業担当者が修正画面に再度アクセス可能であることを確認
-    const portal_access_check = {
-      user_id: 'sales_rep_001',
-      record_id: 'SD-743-001',
-      access_allowed: true,
-      revision_count: 1,
-    };
-    expect(portal_access_check.access_allowed).toBe(true);
-    expect(portal_access_check.revision_count).toBe(1);
+    // 顧客B・サービス1の請求額集計: (5 * 500) + (1 * 2000) = 2500 + 2000 = 4500
+    const cust_b_svc_1_amount = aggregated_amounts.find(
+      (agg: any) =>
+        agg.customer_id === 'cust_b' &&
+        agg.service_id === 'svc_1'
+    );
+    expect(cust_b_svc_1_amount.total_billing_amount).toBe(4500);
 
-    // 営業担当者が再度修正を完了
-    const second_revised_data = {
-      id: 'SD-743-001',
-      customer_name: 'Acme Corp',
-      contact_date: '2024-01-10', // 修正：過去の日付に変更
-      outcome: 'appointment_confirmed',
-      amount: 80000,
-      service_type: 'consulting',
-      status: 'pending_review',
-      revision_count: 2,
-      validation_history: [
-        {
-          cycle_number: 1,
-          timestamp: '2024-01-15T10:30:00Z',
-          failed_fields: ['customer_name', 'amount'],
-        },
-        {
-          cycle_number: 2,
-          timestamp: '2024-01-15T10:35:00Z',
-          failed_fields: ['contact_date'],
-        },
-      ],
-    };
+    // 顧客A・サービス3の請求額集計: (4 * 300) = 1200
+    const cust_a_svc_3_amount = aggregated_amounts.find(
+      (agg: any) =>
+        agg.customer_id === 'cust_a' &&
+        agg.service_id === 'svc_3'
+    );
+    expect(cust_a_svc_3_amount.total_billing_amount).toBe(1200);
 
-    const second_revision_result = validateSalesDataQuality(second_revised_data);
+    // 顧客Aの合計請求額: 11000 + 8400 + 1200 = 20600
+    const cust_a_total = aggregated_amounts
+      .filter((agg: any) => agg.customer_id === 'cust_a')
+      .reduce((sum: number, agg: any) => sum + agg.total_billing_amount, 0);
+    expect(cust_a_total).toBe(20600);
 
-    // 再々検証: すべての項目が基準を満たす
-    expect(second_revision_result.is_valid).toBe(true);
-    expect(second_revision_result.errors.length).toBe(0);
+    // 顧客Bの合計請求額: 4500
+    const cust_b_total = aggregated_amounts
+      .filter((agg: any) => agg.customer_id === 'cust_b')
+      .reduce((sum: number, agg: any) => sum + agg.total_billing_amount, 0);
+    expect(cust_b_total).toBe(4500);
 
-    // 最終承認通知がシステム管理者に送信される想定
-    const final_notification = {
-      recipient_user_id: 'admin_001',
-      notification_type: 'quality_check_passed',
-      data_record_id: 'SD-743-001',
-      revision_cycles_completed: 2,
-      final_approval_timestamp: '2024-01-15T11:00:00Z',
-    };
-    expect(final_notification.revision_cycles_completed).toBe(2);
+    // 全顧客の合計請求額: 20600 + 4500 = 25100
+    const grand_total = aggregated_amounts.reduce(
+      (sum: number, agg: any) => sum + agg.total_billing_amount,
+      0
+    );
+    expect(grand_total).toBe(25100);
 
-    // システムログに各サイクルの実行記録が記録されていることを確認
-    const system_log = {
-      record_id: 'SD-743-001',
-      total_cycles: 2,
-      cycle_details: [
-        {
-          cycle_number: 1,
-          check_timestamp: '2024-01-15T10:30:00Z',
-          check_result: 'failed',
-          failed_field_count: 2,
-          notification_sent: true,
-        },
-        {
-          cycle_number: 2,
-          check_timestamp: '2024-01-15T10:35:00Z',
-          check_result: 'failed',
-          failed_field_count: 1,
-          notification_sent: true,
-        },
-        {
-          cycle_number: 3,
-          check_timestamp: '2024-01-15T11:00:00Z',
-          check_result: 'passed',
-          failed_field_count: 0,
-          notification_sent: true,
-        },
-      ],
-      final_status: 'approved',
-    };
-
-    expect(system_log.total_cycles).toBe(2);
-    expect(system_log.cycle_details.length).toBe(3);
-    expect(system_log.cycle_details[0].failed_field_count).toBe(2);
-    expect(system_log.cycle_details[1].failed_field_count).toBe(1);
-    expect(system_log.cycle_details[2].failed_field_count).toBe(0);
-    expect(system_log.final_status).toBe('approved');
-
-    // エラーハンドリング: 検証ルール未定義の場合
-    const invalid_validation_input = {
-      id: 'SD-743-002',
-      customer_name: null,
-      contact_date: 'invalid-date',
-      outcome: undefined,
-      amount: NaN,
-      service_type: '',
-      status: 'pending_review',
-      revision_count: 0,
-      validation_history: [],
-    };
-
-    expect(() => {
-      validateSalesDataQuality(invalid_validation_input);
-    }).toThrow(/営業データ/);
+    // 集計結果の件数確認
+    expect(aggregated_amounts.length).toBe(4);
   });
 });

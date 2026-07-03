@@ -1,56 +1,88 @@
-import { validateReportCompleteness } from "../../src/logic/it-1781935279444-2-2-1";
+import { validateSalesDataQuality } from "../../src/logic/it-1781935279444-2-2-1";
 
-describe("レポート完全性・正確性の自動検証 - 負数検出エラーハンドリング", () => {
-  test("SCEN-1152: 顧客別成果指標に不正な負数が検出された場合、検証エラーが返される", () => {
-    // テストデータ準備：顧客別成果指標に負数を含むレポート
-    const reportData = {
-      report_id: "report_202401_001",
-      customer_id: "cust_12345",
-      service_id: "svc_sales",
-      reporting_period: "2024-01",
-      indicators: {
-        appointment_count: 5,
-        contract_count: 2,
-        revenue_amount: -50000, // 不正な負数
-        customer_response_score: 8.5,
-      },
-      generation_timestamp: "2024-01-31T23:59:59Z",
+describe("営業データ品質検証・エラー検出機能", () => {
+  // SCEN-1152: [error] 営業データ品質検証・エラー検出機能 - 検証失敗時に代表へ通知が送信され後続処理が停止される
+  test("検証失敗時に代表へエラー通知が送信され後続処理が停止される", () => {
+    const notificationsSent: Array<{
+      recipientType: string;
+      errorType: string;
+      details: string;
+      timestamp: string;
+    }> = [];
+
+    const mockNotify = (
+      recipientType: string,
+      errorType: string,
+      details: string,
+      timestamp: string
+    ): void => {
+      notificationsSent.push({
+        recipientType,
+        errorType,
+        details,
+        timestamp,
+      });
     };
 
-    // レポート完全性・正確性の自動検証機能を実行
-    const result = validateReportCompleteness(reportData);
+    // テストデータ：複数の検証ルール違反を含む
+    const invalidSalesData = {
+      customerId: "", // 必須項目が空白
+      serviceType: null, // null値
+      appointmentCount: -5, // 範囲外（負数）
+      contractAmount: "invalid_amount", // データ型不正
+      contactDate: "2024-13-45", // 日付形式不正
+      status: "UNKNOWN_STATUS", // 許可されていないステータス
+      salesPersonId: undefined, // 未定義
+    };
 
-    // 検証エラーが返されたことを確認
-    expect(result.is_valid).toBe(false);
-    expect(result.validation_status).toBe("failed");
+    // 検証実行
+    const validationResult = validateSalesDataQuality(
+      invalidSalesData,
+      mockNotify
+    );
 
-    // エラーレスポンスに必要な情報が含まれていることを確認
-    expect(result.errors).toBeDefined();
-    expect(Array.isArray(result.errors)).toBe(true);
-    expect(result.errors.length).toBeGreaterThan(0);
+    // 検証結果がエラーステータスであることを確認
+    expect(validationResult.isValid).toBe(false);
+    expect(validationResult.status).toBe("VALIDATION_FAILED");
 
-    // エラーコードを確認
-    expect(result.errors[0].error_code).toBe("NEGATIVE_VALUE_DETECTED");
+    // 検出されたエラーが複数あることを確認
+    expect(validationResult.errors.length).toBeGreaterThanOrEqual(7);
 
-    // エラーメッセージに検出された負数フィールドの特定情報を含むことを確認
-    expect(result.errors[0].error_message).toMatch(/revenue_amount/);
-    expect(result.errors[0].error_message).toMatch(/負数/);
+    // エラーの詳細内容を検証
+    const errorTypes = validationResult.errors.map((e) => e.field);
+    expect(errorTypes).toContain("customerId");
+    expect(errorTypes).toContain("serviceType");
+    expect(errorTypes).toContain("appointmentCount");
+    expect(errorTypes).toContain("contractAmount");
+    expect(errorTypes).toContain("contactDate");
+    expect(errorTypes).toContain("status");
+    expect(errorTypes).toContain("salesPersonId");
 
-    // 該当する顧客識別子がエラーレスポンスに含まれることを確認
-    expect(result.errors[0].customer_id).toBe("cust_12345");
+    // 代表への通知が送信されたことを確認
+    expect(notificationsSent.length).toBeGreaterThan(0);
 
-    // どの顧客のどの指標に問題があるかが明確に特定できることを確認
-    expect(result.errors[0].affected_field).toBe("revenue_amount");
-    expect(result.errors[0].affected_value).toBe(-50000);
+    // 通知の内容を検証
+    const firstNotification = notificationsSent[0];
+    expect(firstNotification.recipientType).toBe("REPRESENTATIVE");
+    expect(firstNotification.errorType).toBe("DATA_VALIDATION_ERROR");
+    expect(firstNotification.details).toContain("必須項目");
 
-    // エラーレスポンスの構造を検証
-    expect(result.errors[0]).toHaveProperty("error_code");
-    expect(result.errors[0]).toHaveProperty("error_message");
-    expect(result.errors[0]).toHaveProperty("customer_id");
-    expect(result.errors[0]).toHaveProperty("affected_field");
-    expect(result.errors[0]).toHaveProperty("affected_value");
+    // 通知タイムスタンプが ISO形式であることを確認
+    expect(firstNotification.timestamp).toMatch(
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/
+    );
 
-    // エラーメッセージが具体的で、対応に必要な情報を含むことを確認
-    expect(result.errors[0].error_message).toContain("cust_12345");
+    // 後続処理が停止されたことを確認
+    expect(validationResult.shouldProceedToNextStep).toBe(false);
+
+    // ロールバック状態が記録されていることを確認
+    expect(validationResult.rollbackApplied).toBe(true);
+
+    // システム状態が「エラー」に設定されたことを確認
+    expect(validationResult.systemState).toBe("ERROR");
+
+    // 検証結果にエラーメッセージが含まれていることを確認
+    expect(validationResult.errors[0]).toHaveProperty("message");
+    expect(validationResult.errors[0].message).toMatch(/項目/);
   });
 });

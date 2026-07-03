@@ -1,75 +1,202 @@
-import { describe, test, expect, beforeEach } from "@jest/globals";
 import {
-  aggregateBillingByCustomerAndService,
-} from "../../src/logic/it-1781935279444-1-1-1";
+  validateSalesDataCompleteness,
+} from "../../src/logic/it-1781935279444-2-2-1";
 
-describe("営業データ項目のメタデータ管理機能 - 顧客別・サービス別請求対象抽出集計", () => {
-  beforeEach(() => {
-    jest.clearAllMocks();
-  });
+describe("営業データ品質検証 - 必須項目不足検出", () => {
+  // SCEN-650: [normal] 営業データ異常値・漏れデータ自動検出機能 - 必須項目の不足データが正確に検出され、補正対象として通知される
+  test("必須項目の不足データが正確に検出され、補正対象として通知される", () => {
+    // 必須項目: customerName, amount, invoiceDate, partnerClassification
+    const incompleteRecord = {
+      recordId: "REC-001",
+      customerName: "", // 欠落: 空文字列
+      amount: 50000,
+      invoiceDate: "2024-01-15",
+      partnerClassification: "agency",
+      salesRepresentative: "田中太郎",
+      transactionDate: "2024-01-10",
+    };
 
-  // SCEN-650: 集計対象が1件のみの場合に単一レコード集計が正しく実行される
-  test("集計対象が1件のみの請求レコードに対して、単一レコード集計を正常に実行し、すべての項目が正確に集計される", () => {
-    // Arrange: テストデータ準備 - 集計対象が1件のみの請求レコード
-    const input_billing_records = [
-      {
-        id: "billing_001",
-        customer_id: "cust_001",
-        service_id: "svc_001",
-        amount: 50000,
-        quantity: 1,
-        unit_price: 50000,
-        description: "営業成果報酬_成約",
-        billing_date: "2024-01-15",
-        status: "valid",
-      },
-    ];
+    const result = validateSalesDataCompleteness(incompleteRecord);
 
-    // Act: 顧客IDとサービスIDを指定して集計処理を実行
-    const result = aggregateBillingByCustomerAndService({
-      billing_records: input_billing_records,
-      customer_id: "cust_001",
-      service_id: "svc_001",
+    // 検出結果の構造を検証
+    expect(result).toEqual({
+      recordId: "REC-001",
+      isValid: false,
+      status: "hold",
+      missingFields: ["customerName"],
+      detectionTimestamp: expect.any(String),
+      notificationMessage:
+        "補正対象: 欠落している必須項目: customerName。該当レコード(REC-001)は保留状態となり、手動補正が必要です。",
+      shouldExcludeFromBilling: true,
     });
 
-    // Assert1: 集計処理が正常に完了し、結果オブジェクトが返される
-    expect(result).toBeDefined();
-    expect(result).not.toBeNull();
+    // 個別検証
+    expect(result.isValid).toBe(false);
+    expect(result.status).toBe("hold");
+    expect(result.missingFields).toContain("customerName");
+    expect(result.missingFields.length).toBe(1);
+    expect(result.shouldExcludeFromBilling).toBe(true);
+    expect(result.notificationMessage).toMatch(/補正対象/);
+    expect(result.notificationMessage).toMatch(/customerName/);
+    expect(result.notificationMessage).toMatch(/REC-001/);
+  });
 
-    // Assert2: 集計結果に含まれる顧客IDが正確に反映される
-    expect(result.customer_id).toBe("cust_001");
+  test("複数の必須項目が欠落している場合、すべて検出される", () => {
+    const multipleIncompleteRecord = {
+      recordId: "REC-002",
+      customerName: "",
+      amount: null,
+      invoiceDate: "", // 欠落
+      partnerClassification: "", // 欠落
+      salesRepresentative: "鈴木次郎",
+      transactionDate: "2024-01-10",
+    };
 
-    // Assert3: 集計結果に含まれるサービスIDが正確に反映される
-    expect(result.service_id).toBe("svc_001");
+    const result = validateSalesDataCompleteness(multipleIncompleteRecord);
 
-    // Assert4: 集計金額が正確に計算される（単一レコード: 50000）
-    expect(result.total_amount).toBe(50000);
+    expect(result.isValid).toBe(false);
+    expect(result.status).toBe("hold");
+    expect(result.missingFields.length).toBe(4);
+    expect(result.missingFields).toEqual(
+      expect.arrayContaining([
+        "customerName",
+        "amount",
+        "invoiceDate",
+        "partnerClassification",
+      ])
+    );
+    expect(result.shouldExcludeFromBilling).toBe(true);
+    expect(result.notificationMessage).toMatch(/customerName/);
+    expect(result.notificationMessage).toMatch(/amount/);
+    expect(result.notificationMessage).toMatch(/invoiceDate/);
+    expect(result.notificationMessage).toMatch(/partnerClassification/);
+  });
 
-    // Assert5: 集計件数が正確に計算される（1件）
-    expect(result.record_count).toBe(1);
+  test("すべての必須項目が完全に入力されている場合、検証が合格する", () => {
+    const completeRecord = {
+      recordId: "REC-003",
+      customerName: "テスト顧客株式会社",
+      amount: 100000,
+      invoiceDate: "2024-01-15",
+      partnerClassification: "direct_client",
+      salesRepresentative: "佐藤三郎",
+      transactionDate: "2024-01-10",
+    };
 
-    // Assert6: 集計対象レコードの詳細情報が保持される
-    expect(result.records).toBeDefined();
-    expect(result.records.length).toBe(1);
-    expect(result.records[0].id).toBe("billing_001");
-    expect(result.records[0].amount).toBe(50000);
+    const result = validateSalesDataCompleteness(completeRecord);
 
-    // Assert7: 集計結果にエラーフラグが存在しない（正常完了）
-    expect(result.error).toBeUndefined();
-    expect(result.is_valid).toBe(true);
+    expect(result.isValid).toBe(true);
+    expect(result.status).toBe("approved");
+    expect(result.missingFields).toEqual([]);
+    expect(result.shouldExcludeFromBilling).toBe(false);
+    expect(result.notificationMessage).toMatch(/合格/);
+  });
 
-    // Assert8: 集計結果が請求書生成に必要な最小限の情報をすべて含む
-    expect(result.billing_period_start).toBeDefined();
-    expect(result.billing_period_end).toBeDefined();
-    expect(result.aggregation_status).toBe("completed");
+  test("金額がゼロの場合、欠落として検出される", () => {
+    const zeroAmountRecord = {
+      recordId: "REC-004",
+      customerName: "顧客A",
+      amount: 0,
+      invoiceDate: "2024-01-15",
+      partnerClassification: "agency",
+      salesRepresentative: "山田四郎",
+      transactionDate: "2024-01-10",
+    };
 
-    // Assert9: 単一レコード集計であることが識別できる
-    expect(result.record_count).toBe(1);
-    expect(Array.isArray(result.records)).toBe(true);
+    const result = validateSalesDataCompleteness(zeroAmountRecord);
 
-    // Assert10: 集計結果が請求書生成処理への遷移に適切な形式である
-    expect(typeof result.total_amount).toBe("number");
-    expect(typeof result.record_count).toBe("number");
-    expect(result.total_amount).toBeGreaterThan(0);
+    expect(result.isValid).toBe(false);
+    expect(result.missingFields).toContain("amount");
+    expect(result.shouldExcludeFromBilling).toBe(true);
+  });
+
+  test("invoiceDateが無効な形式の場合、欠落として検出される", () => {
+    const invalidDateRecord = {
+      recordId: "REC-005",
+      customerName: "顧客B",
+      amount: 75000,
+      invoiceDate: "invalid-date",
+      partnerClassification: "agency",
+      salesRepresentative: "田中五郎",
+      transactionDate: "2024-01-10",
+    };
+
+    const result = validateSalesDataCompleteness(invalidDateRecord);
+
+    expect(result.isValid).toBe(false);
+    expect(result.missingFields).toContain("invoiceDate");
+    expect(result.shouldExcludeFromBilling).toBe(true);
+  });
+
+  test("partnerClassificationが空の場合、欠落として検出される", () => {
+    const missingClassificationRecord = {
+      recordId: "REC-006",
+      customerName: "顧客C",
+      amount: 60000,
+      invoiceDate: "2024-01-15",
+      partnerClassification: "",
+      salesRepresentative: "鈴木六郎",
+      transactionDate: "2024-01-10",
+    };
+
+    const result = validateSalesDataCompleteness(missingClassificationRecord);
+
+    expect(result.isValid).toBe(false);
+    expect(result.missingFields).toContain("partnerClassification");
+    expect(result.shouldExcludeFromBilling).toBe(true);
+  });
+
+  test("検出結果のタイムスタンプがISO形式で記録される", () => {
+    const recordWithTimestamp = {
+      recordId: "REC-007",
+      customerName: "",
+      amount: 45000,
+      invoiceDate: "2024-01-15",
+      partnerClassification: "direct_client",
+      salesRepresentative: "佐藤七郎",
+      transactionDate: "2024-01-10",
+    };
+
+    const result = validateSalesDataCompleteness(recordWithTimestamp);
+
+    expect(result.detectionTimestamp).toMatch(
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/
+    );
+  });
+
+  test("不足データの補正対象通知メッセージにレコードIDが含まれる", () => {
+    const recordForNotification = {
+      recordId: "REC-TEST-12345",
+      customerName: "",
+      amount: 30000,
+      invoiceDate: "2024-01-15",
+      partnerClassification: "agency",
+      salesRepresentative: "山田八郎",
+      transactionDate: "2024-01-10",
+    };
+
+    const result = validateSalesDataCompleteness(recordForNotification);
+
+    expect(result.notificationMessage).toContain("REC-TEST-12345");
+    expect(result.notificationMessage).toContain("補正対象");
+  });
+
+  test("複数不足項目の場合、すべての項目が補正対象通知メッセージに列挙される", () => {
+    const multiMissingRecord = {
+      recordId: "REC-009",
+      customerName: "",
+      amount: null,
+      invoiceDate: "",
+      partnerClassification: "direct_client",
+      salesRepresentative: "鈴木九郎",
+      transactionDate: "2024-01-10",
+    };
+
+    const result = validateSalesDataCompleteness(multiMissingRecord);
+
+    const message = result.notificationMessage;
+    expect(message).toMatch(/customerName/);
+    expect(message).toMatch(/amount/);
+    expect(message).toMatch(/invoiceDate/);
   });
 });

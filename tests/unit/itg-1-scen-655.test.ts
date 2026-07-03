@@ -1,134 +1,78 @@
-import { validateGeneratedReportChecklist } from "../../src/logic/it-1781935279444-2-2-1";
+import { validateReportGenerationParameters } from '../../src/logic/it-1781935279444-1-1-1';
 
-describe("自動生成レポート品質チェックリスト検証機能", () => {
-  // SCEN-655
-  test("チェックリストのすべての項目が検証されて承認判定が確定される", () => {
-    // Arrange: チェックリスト検証対象データ
-    const checklistId = "checklist_001";
-    const userId = "user_rep_001";
-    const executionTimestamp = new Date("2024-01-15T11:00:00Z");
+describe('営業データ項目のメタデータ管理機能 - レポート生成パラメータ妥当性検証', () => {
+  test('SCEN-655: レポート生成パラメータが営業データと契約条件に整合している場合、検証が成功する', () => {
+    // テストデータ: 営業データ
+    const salesData = [
+      {
+        sales_amount: 100000,
+        product_code: 'PRD001',
+        sales_date: '2024-01-15'
+      },
+      {
+        sales_amount: 250000,
+        product_code: 'PRD002',
+        sales_date: '2024-02-10'
+      },
+      {
+        sales_amount: 150000,
+        product_code: 'PRD001',
+        sales_date: '2024-03-05'
+      }
+    ];
 
-    const checklistData = {
-      checklist_id: checklistId,
-      user_id: userId,
-      execution_timestamp: executionTimestamp,
-      check_items: [
-        {
-          item_id: "item_001",
-          item_name: "データ完全性チェック",
-          verification_status: "completed",
-          check_result: "pass",
-          checked_at: new Date("2024-01-15T10:05:00Z"),
-        },
-        {
-          item_id: "item_002",
-          item_name: "形式妥当性チェック",
-          verification_status: "completed",
-          check_result: "pass",
-          checked_at: new Date("2024-01-15T10:10:00Z"),
-        },
-        {
-          item_id: "item_003",
-          item_name: "数値精度チェック",
-          verification_status: "completed",
-          check_result: "pass",
-          checked_at: new Date("2024-01-15T10:15:00Z"),
-        },
-        {
-          item_id: "item_004",
-          item_name: "異常値検出チェック",
-          verification_status: "completed",
-          check_result: "pass",
-          checked_at: new Date("2024-01-15T10:20:00Z"),
-        },
-      ],
+    // テストデータ: 契約条件
+    const contractConditions = {
+      billing_cycle: 'monthly',
+      discount_rate: 5,
+      max_discount_rate: 10,
+      min_discount_rate: 0,
+      allowed_data_types: ['sales_amount', 'product_code', 'sales_date'],
+      allowed_report_formats: ['CSV', 'JSON', 'PDF'],
+      payment_terms: 30,
+      min_sales_date: '2024-01-01',
+      max_sales_date: '2024-03-31'
     };
 
-    // Act: チェックリスト検証を実行
-    const result = validateGeneratedReportChecklist(checklistData);
+    // レポート生成パラメータ（営業データと契約条件に整合）
+    const reportParameters = {
+      period_start: '2024-01-15',
+      period_end: '2024-03-05',
+      data_types: ['sales_amount', 'product_code'],
+      report_format: 'JSON',
+      discount_rate: 5,
+      include_fees: true
+    };
 
-    // Assert: 検証結果の確認
-    // 1. チェックリスト ID が正確に記録されている
-    expect(result.checklist_id).toBe("checklist_001");
-
-    // 2. 全チェック項目数が正確に反映されている
-    expect(result.total_check_items).toBe(4);
-
-    // 3. すべてのチェック項目が完了状態として記録されている
-    expect(result.completed_items_count).toBe(4);
-
-    // 4. 完了率が 100% となっている
-    expect(result.completion_rate).toBe(100);
-
-    // 5. すべてのチェック項目が検証に合格している
-    expect(result.all_items_passed).toBe(true);
-
-    // 6. 不合格項目が 0 件である
-    expect(result.failed_items_count).toBe(0);
-
-    // 7. 承認判定が可能な状態（承認ボタン有効）となっている
-    expect(result.approval_button_enabled).toBe(true);
-
-    // 8. 承認判定ステータスが未承認から承認済みに変更されている
-    expect(result.approval_status).toBe("approved");
-
-    // 9. 承認確定日時が正確に記録されている
-    expect(result.approval_confirmed_at).toEqual(
-      new Date("2024-01-15T11:00:00Z")
+    // 検証関数を呼び出す
+    const validationResult = validateReportGenerationParameters(
+      reportParameters,
+      salesData,
+      contractConditions
     );
 
-    // 10. 承認実行者のユーザー ID が正確に記録されている
-    expect(result.approved_by_user_id).toBe("user_rep_001");
+    // 期待結果: 検証が成功し、エラーがないこと
+    expect(validationResult.is_valid).toBe(true);
+    expect(validationResult.errors).toEqual([]);
+    expect(validationResult.status).toBe('success');
 
-    // 11. チェックリスト全体のステータスが「承認済み」を示す
-    expect(result.checklist_status).toBe("approved");
+    // パラメータ内の期間が営業データの日付範囲内であることを確認
+    expect(validationResult.period_in_range).toBe(true);
 
-    // 12. 各チェック項目の検証状態が正確に記録されている
-    expect(result.check_items_details).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          item_id: "item_001",
-          item_name: "データ完全性チェック",
-          verification_status: "completed",
-          check_result: "pass",
-        }),
-        expect.objectContaining({
-          item_id: "item_002",
-          item_name: "形式妥当性チェック",
-          verification_status: "completed",
-          check_result: "pass",
-        }),
-        expect.objectContaining({
-          item_id: "item_003",
-          item_name: "数値精度チェック",
-          verification_status: "completed",
-          check_result: "pass",
-        }),
-        expect.objectContaining({
-          item_id: "item_004",
-          item_name: "異常値検出チェック",
-          verification_status: "completed",
-          check_result: "pass",
-        }),
-      ])
-    );
+    // パラメータ内のデータ種別が契約で許可されている種別であることを確認
+    expect(validationResult.data_types_allowed).toBe(true);
 
-    // 13. 承認判定の確定情報が履歴として記録されている
-    expect(result.approval_confirmation_record).toBeDefined();
-    expect(result.approval_confirmation_record.confirmed_timestamp).toEqual(
-      new Date("2024-01-15T11:00:00Z")
-    );
-    expect(result.approval_confirmation_record.confirmed_by).toBe(
-      "user_rep_001"
-    );
+    // パラメータ内の割引率が契約条件の範囲内であることを確認
+    expect(validationResult.discount_rate_valid).toBe(true);
+    expect(validationResult.discount_rate_within_contract).toBe(true);
 
-    // 14. チェックリスト一覧で表示されるステータスが更新されている
-    expect(result.list_display_status).toBe("承認済み");
+    // レポート形式が契約で許可されていることを確認
+    expect(validationResult.report_format_allowed).toBe(true);
 
-    // 15. チェック項目すべてが検証完了フラグを持っている
-    const allItemsVerified = result.check_items_details.every(
-      (item) => item.verification_status === "completed"
-    );
-    expect(allItemsVerified).toBe(true);
+    // メッセージが返されないことを確認
+    expect(validationResult.message).toBe('');
+
+    // レポート生成処理に進むことが可能な状態であることを確認
+    expect(validationResult.can_proceed_to_generation).toBe(true);
   });
 });

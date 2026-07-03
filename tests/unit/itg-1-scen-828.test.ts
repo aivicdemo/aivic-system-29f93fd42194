@@ -1,138 +1,158 @@
-import { describe, test, expect, beforeEach, afterEach } from '@jest/globals';
-import { setDueDateByPriority } from '../../src/logic/it-1-1-1';
+import { describe, test, expect } from "@jest/globals";
+import {
+  validateContractDocumentMetadata,
+} from "../../src/logic/it-1781935279444-1-1-1";
 
-const fetchMock = require('jest-fetch-mock');
-
-describe('営業成果データの自動検証ルール定義と異常検出機能', () => {
-  beforeEach(() => {
-    fetchMock.enableMocks();
-    fetchMock.resetMocks();
-  });
-
-  afterEach(() => {
-    fetchMock.disableMocks();
-  });
-
-  // SCEN-828: [normal] 対応期限の自動設定機能 - 優先度に応じた対応期限が自動設定され、代表への通知と共に記録される
-  test('優先度に応じて対応期限が自動設定され、通知・履歴記録される', async () => {
-    const case_high_priority = {
-      case_name: 'case_high_priority',
-      project_id: 'PRJ-2024-001',
-      priority: 'high',
-      created_at: '2024-01-15T09:00:00Z',
-      created_by: 'sales_staff_001',
+describe("契約書・提案資料バージョン管理機能 - メタデータ検証", () => {
+  // SCEN-828
+  test("メタデータが不正なファイルはアップロードが拒否され、バージョン記録が作成されない", () => {
+    // 正常なメタデータの基準値を定義
+    const validMetadata = {
+      fileName: "contract_2024_01.pdf",
+      fileSize: 2048000, // 2MB
+      uploadedAt: "2024-01-15T09:00:00Z",
+      uploadedBy: "user_001",
+      documentType: "contract", // contract または proposal
+      version: "v1.0.0",
+      applicableCustomerIds: ["cust_A", "cust_B"],
+      effectiveDate: "2024-01-15T00:00:00Z",
+      expiryDate: "2024-12-31T23:59:59Z",
     };
 
-    const case_medium_priority = {
-      case_name: 'case_medium_priority',
-      project_id: 'PRJ-2024-002',
-      priority: 'medium',
-      created_at: '2024-01-15T09:00:00Z',
-      created_by: 'sales_staff_002',
+    // ケース1: 必須フィールド欠落（fileName 欠落）
+    const metadataWithMissingField = {
+      fileSize: 2048000,
+      uploadedAt: "2024-01-15T09:00:00Z",
+      uploadedBy: "user_001",
+      documentType: "contract",
+      version: "v1.0.0",
+      applicableCustomerIds: ["cust_A"],
+      effectiveDate: "2024-01-15T00:00:00Z",
+      expiryDate: "2024-12-31T23:59:59Z",
     };
+    expect(() =>
+      validateContractDocumentMetadata(metadataWithMissingField)
+    ).toThrow(/ファイル名/);
 
-    const case_low_priority = {
-      case_name: 'case_low_priority',
-      project_id: 'PRJ-2024-003',
-      priority: 'low',
-      created_at: '2024-01-15T09:00:00Z',
-      created_by: 'sales_staff_003',
+    // ケース2: データ型不正（fileSize が文字列）
+    const metadataWithWrongType = {
+      fileName: "contract_2024_01.pdf",
+      fileSize: "2048000", // 数値ではなく文字列
+      uploadedAt: "2024-01-15T09:00:00Z",
+      uploadedBy: "user_001",
+      documentType: "contract",
+      version: "v1.0.0",
+      applicableCustomerIds: ["cust_A"],
+      effectiveDate: "2024-01-15T00:00:00Z",
+      expiryDate: "2024-12-31T23:59:59Z",
     };
+    expect(() =>
+      validateContractDocumentMetadata(metadataWithWrongType)
+    ).toThrow(/ファイルサイズ/);
 
-    // 高優先度: 翌営業日（2024-01-16）
-    fetchMock.mockResponseOnce(
-      JSON.stringify({
-        project_id: case_high_priority.project_id,
-        priority: case_high_priority.priority,
-        due_date: '2024-01-16',
-        notification_sent: true,
-        notification_recipient: 'representative@company.com',
-        history_recorded: true,
-      }),
-      { status: 200 }
-    );
-
-    const result_high = await setDueDateByPriority(case_high_priority);
-
-    expect(result_high.project_id).toBe('PRJ-2024-001');
-    expect(result_high.due_date).toBe('2024-01-16');
-    expect(result_high.notification_sent).toBe(true);
-    expect(result_high.notification_recipient).toBe('representative@company.com');
-    expect(result_high.history_recorded).toBe(true);
-
-    // 中優先度: 3営業日以内（2024-01-18）
-    fetchMock.mockResponseOnce(
-      JSON.stringify({
-        project_id: case_medium_priority.project_id,
-        priority: case_medium_priority.priority,
-        due_date: '2024-01-18',
-        notification_sent: true,
-        notification_recipient: 'representative@company.com',
-        history_recorded: true,
-      }),
-      { status: 200 }
-    );
-
-    const result_medium = await setDueDateByPriority(case_medium_priority);
-
-    expect(result_medium.project_id).toBe('PRJ-2024-002');
-    expect(result_medium.due_date).toBe('2024-01-18');
-    expect(result_medium.notification_sent).toBe(true);
-    expect(result_medium.notification_recipient).toBe('representative@company.com');
-    expect(result_medium.history_recorded).toBe(true);
-
-    // 低優先度: 1週間以内（2024-01-22）
-    fetchMock.mockResponseOnce(
-      JSON.stringify({
-        project_id: case_low_priority.project_id,
-        priority: case_low_priority.priority,
-        due_date: '2024-01-22',
-        notification_sent: true,
-        notification_recipient: 'representative@company.com',
-        history_recorded: true,
-      }),
-      { status: 200 }
-    );
-
-    const result_low = await setDueDateByPriority(case_low_priority);
-
-    expect(result_low.project_id).toBe('PRJ-2024-003');
-    expect(result_low.due_date).toBe('2024-01-22');
-    expect(result_low.notification_sent).toBe(true);
-    expect(result_low.notification_recipient).toBe('representative@company.com');
-    expect(result_low.history_recorded).toBe(true);
-
-    // 各優先度で異なる期限が設定されたことを確認
-    expect(result_high.due_date).not.toBe(result_medium.due_date);
-    expect(result_medium.due_date).not.toBe(result_low.due_date);
-
-    // 高優先度が最短、低優先度が最長であることを確認
-    const due_date_high = new Date(result_high.due_date);
-    const due_date_medium = new Date(result_medium.due_date);
-    const due_date_low = new Date(result_low.due_date);
-
-    expect(due_date_high.getTime()).toBeLessThan(due_date_medium.getTime());
-    expect(due_date_medium.getTime()).toBeLessThan(due_date_low.getTime());
-
-    // すべてのケースで通知が送信されたことを確認
-    expect(result_high.notification_sent).toBe(true);
-    expect(result_medium.notification_sent).toBe(true);
-    expect(result_low.notification_sent).toBe(true);
-
-    // すべてのケースで履歴記録されたことを確認
-    expect(result_high.history_recorded).toBe(true);
-    expect(result_medium.history_recorded).toBe(true);
-    expect(result_low.history_recorded).toBe(true);
-
-    // 無効な優先度が入力された場合のエラー
-    const case_invalid_priority = {
-      case_name: 'case_invalid',
-      project_id: 'PRJ-2024-999',
-      priority: 'invalid',
-      created_at: '2024-01-15T09:00:00Z',
-      created_by: 'sales_staff_invalid',
+    // ケース3: ファイルサイズが上限を超過（上限は 100MB = 104857600 バイト）
+    const metadataWithExcessiveSize = {
+      fileName: "contract_2024_01.pdf",
+      fileSize: 104857601, // 100MBを超過
+      uploadedAt: "2024-01-15T09:00:00Z",
+      uploadedBy: "user_001",
+      documentType: "contract",
+      version: "v1.0.0",
+      applicableCustomerIds: ["cust_A"],
+      effectiveDate: "2024-01-15T00:00:00Z",
+      expiryDate: "2024-12-31T23:59:59Z",
     };
+    expect(() =>
+      validateContractDocumentMetadata(metadataWithExcessiveSize)
+    ).toThrow(/ファイルサイズ/);
 
-    expect(() => setDueDateByPriority(case_invalid_priority)).toThrow(/優先度/);
+    // ケース4: ドキュメント種別が無効（contract / proposal 以外）
+    const metadataWithInvalidDocType = {
+      fileName: "contract_2024_01.pdf",
+      fileSize: 2048000,
+      uploadedAt: "2024-01-15T09:00:00Z",
+      uploadedBy: "user_001",
+      documentType: "invalid_type", // contract または proposal 以外
+      version: "v1.0.0",
+      applicableCustomerIds: ["cust_A"],
+      effectiveDate: "2024-01-15T00:00:00Z",
+      expiryDate: "2024-12-31T23:59:59Z",
+    };
+    expect(() =>
+      validateContractDocumentMetadata(metadataWithInvalidDocType)
+    ).toThrow(/ドキュメント種別/);
+
+    // ケース5: 有効期限が不正（expiryDate < effectiveDate）
+    const metadataWithInvalidDateRange = {
+      fileName: "contract_2024_01.pdf",
+      fileSize: 2048000,
+      uploadedAt: "2024-01-15T09:00:00Z",
+      uploadedBy: "user_001",
+      documentType: "contract",
+      version: "v1.0.0",
+      applicableCustomerIds: ["cust_A"],
+      effectiveDate: "2024-12-31T23:59:59Z", // 開始日
+      expiryDate: "2024-01-15T00:00:00Z", // 終了日が前
+    };
+    expect(() =>
+      validateContractDocumentMetadata(metadataWithInvalidDateRange)
+    ).toThrow(/有効期限/);
+
+    // ケース6: 適用対象顧客IDが空配列
+    const metadataWithEmptyCustomerList = {
+      fileName: "contract_2024_01.pdf",
+      fileSize: 2048000,
+      uploadedAt: "2024-01-15T09:00:00Z",
+      uploadedBy: "user_001",
+      documentType: "contract",
+      version: "v1.0.0",
+      applicableCustomerIds: [], // 空配列
+      effectiveDate: "2024-01-15T00:00:00Z",
+      expiryDate: "2024-12-31T23:59:59Z",
+    };
+    expect(() =>
+      validateContractDocumentMetadata(metadataWithEmptyCustomerList)
+    ).toThrow(/顧客/);
+
+    // ケース7: ISO 形式の日付が不正
+    const metadataWithMalformedDate = {
+      fileName: "contract_2024_01.pdf",
+      fileSize: 2048000,
+      uploadedAt: "2024/01/15 09:00:00", // ISO形式ではない
+      uploadedBy: "user_001",
+      documentType: "contract",
+      version: "v1.0.0",
+      applicableCustomerIds: ["cust_A"],
+      effectiveDate: "2024-01-15T00:00:00Z",
+      expiryDate: "2024-12-31T23:59:59Z",
+    };
+    expect(() =>
+      validateContractDocumentMetadata(metadataWithMalformedDate)
+    ).toThrow(/アップロード日時/);
+
+    // ケース8: 正常なメタデータは検証に成功し、エラーを投げない
+    const validationResult = validateContractDocumentMetadata(validMetadata);
+    expect(validationResult).toEqual({
+      isValid: true,
+      errors: [],
+      versionId: expect.any(String),
+      recordedAt: expect.any(String),
+    });
+
+    // ケース9: バージョン形式が不正（v1.0.0 形式ではない）
+    const metadataWithInvalidVersion = {
+      fileName: "contract_2024_01.pdf",
+      fileSize: 2048000,
+      uploadedAt: "2024-01-15T09:00:00Z",
+      uploadedBy: "user_001",
+      documentType: "contract",
+      version: "invalid_version", // v1.0.0 形式ではない
+      applicableCustomerIds: ["cust_A"],
+      effectiveDate: "2024-01-15T00:00:00Z",
+      expiryDate: "2024-12-31T23:59:59Z",
+    };
+    expect(() =>
+      validateContractDocumentMetadata(metadataWithInvalidVersion)
+    ).toThrow(/バージョン/);
   });
 });

@@ -1,112 +1,77 @@
-import { detectDataDiscrepancies } from '../../src/logic/it-1781935279444-2-2-1';
+import { sendContractChangeReminderNotification } from "../../src/logic/it-1-1-1";
 
-describe('営業データの完全性・正確性を自動検証し、不足データ・誤りを検出・通知する機能', () => {
-  // SCEN-1217: [edge] データ不一致自動判定機能 - 複数の不一致原因が同時に存在する場合、優先度に基づいて主要原因が判定される
-  test('複数の不一致原因が同時に存在する場合、優先度に基づいて主要原因が判定される', () => {
-    // テストパターン1: 金額差異（優先度1）+ 日付ずれ（優先度2）+ 顧客情報相違（優先度3）が同時に存在
-    const discrepancyData_pattern1 = {
-      amount_difference: 50000,
-      date_mismatch_days: 5,
-      customer_info_mismatch: true,
-      contract_id: 'C001',
-      period: '2024-01',
+describe("営業成果データの自動検証ルール定義と異常検出機能", () => {
+  test("SCEN-1217: 契約変更確認催促通知機能 - 設定超過時間経過後に営業責任者に催促通知が送信される", () => {
+    // 入力データ: 契約変更確認待機中のデータ
+    const contractChangeConfirmationInput = {
+      contract_id: "CONT-2024-001",
+      customer_id: "CUST-ABC001",
+      customer_name: "株式会社テスト顧客",
+      change_content: "サービス数量を5から10に変更",
+      change_date: new Date("2024-01-15T09:00:00Z"),
+      customer_agreement_received_at: new Date("2024-01-15T14:30:00Z"),
+      confirmation_received_at: new Date("2024-01-15T14:30:00Z"),
+      sales_manager_email: "manager@example.com",
+      sales_manager_name: "営業マネージャー太郎",
+      reminder_threshold_hours: 24,
+      current_time: new Date("2024-01-16T15:00:00Z"),
+      notification_log_id: "NTF-LOG-001",
     };
 
-    const result_pattern1 = detectDataDiscrepancies(discrepancyData_pattern1);
+    // 実行: 催促通知送信処理
+    const result = sendContractChangeReminderNotification(
+      contractChangeConfirmationInput
+    );
 
-    expect(result_pattern1.primary_cause).toBe('金額差異');
-    expect(result_pattern1.primary_cause_priority).toBe(1);
-    expect(result_pattern1.secondary_causes).toEqual([
-      { cause: '日付ずれ', priority: 2 },
-      { cause: '顧客情報相違', priority: 3 },
-    ]);
-    expect(result_pattern1.all_discrepancies_detected).toBe(3);
+    // 期待結果の検証
+    // 1. 通知が送信されたことを確認
+    expect(result.notification_sent).toBe(true);
 
-    // テストパターン2: 日付ずれ（優先度2）+ 顧客情報相違（優先度3）のみ（金額差異なし）
-    const discrepancyData_pattern2 = {
-      amount_difference: 0,
-      date_mismatch_days: 7,
-      customer_info_mismatch: true,
-      contract_id: 'C002',
-      period: '2024-02',
-    };
+    // 2. 催促通知に必須情報が含まれていることを確認
+    expect(result.notification_content).toEqual({
+      customer_info: {
+        customer_id: "CUST-ABC001",
+        customer_name: "株式会社テスト顧客",
+      },
+      contract_change_details: {
+        contract_id: "CONT-2024-001",
+        change_content: "サービス数量を5から10に変更",
+        change_date: new Date("2024-01-15T09:00:00Z"),
+      },
+      confirmation_status: "待機中",
+      confirmation_received_at: new Date("2024-01-15T14:30:00Z"),
+      elapsed_hours: 24.5,
+      reminder_message:
+        "契約変更の承認確認がまだ完了していません。至急ご確認ください。",
+    });
 
-    const result_pattern2 = detectDataDiscrepancies(discrepancyData_pattern2);
+    // 3. 送信先メールアドレスが正確であることを確認
+    expect(result.recipient_email).toBe("manager@example.com");
 
-    expect(result_pattern2.primary_cause).toBe('日付ずれ');
-    expect(result_pattern2.primary_cause_priority).toBe(2);
-    expect(result_pattern2.secondary_causes).toEqual([
-      { cause: '顧客情報相違', priority: 3 },
-    ]);
-    expect(result_pattern2.all_discrepancies_detected).toBe(2);
+    // 4. 送信者情報が記録されていることを確認
+    expect(result.sender_name).toBe("営業代行企業");
 
-    // テストパターン3: 金額差異（優先度1）+ 顧客情報相違（優先度3）のみ（日付ずれなし）
-    const discrepancyData_pattern3 = {
-      amount_difference: 25000,
-      date_mismatch_days: 0,
-      customer_info_mismatch: true,
-      contract_id: 'C003',
-      period: '2024-03',
-    };
+    // 5. 通知ログに正しく記録されていることを確認
+    expect(result.notification_log).toEqual({
+      notification_log_id: "NTF-LOG-001",
+      contract_id: "CONT-2024-001",
+      customer_id: "CUST-ABC001",
+      sales_manager_email: "manager@example.com",
+      notification_type: "契約変更確認催促",
+      sent_at: new Date("2024-01-16T15:00:00Z"),
+      status: "送信完了",
+      content_summary:
+        "契約変更CONT-2024-001の確認待機時間が設定閾値(24時間)を超過したため催促通知を送信",
+    });
 
-    const result_pattern3 = detectDataDiscrepancies(discrepancyData_pattern3);
+    // 6. 超過時間が計算されて記録されていることを確認
+    expect(result.elapsed_hours).toBe(24.5);
+    expect(result.is_reminder_threshold_exceeded).toBe(true);
 
-    expect(result_pattern3.primary_cause).toBe('金額差異');
-    expect(result_pattern3.primary_cause_priority).toBe(1);
-    expect(result_pattern3.secondary_causes).toEqual([
-      { cause: '顧客情報相違', priority: 3 },
-    ]);
-    expect(result_pattern3.all_discrepancies_detected).toBe(2);
+    // 7. 通知送信時刻が現在時刻と一致することを確認
+    expect(result.notification_sent_at).toEqual(new Date("2024-01-16T15:00:00Z"));
 
-    // テストパターン4: 顧客情報相違（優先度3）のみ
-    const discrepancyData_pattern4 = {
-      amount_difference: 0,
-      date_mismatch_days: 0,
-      customer_info_mismatch: true,
-      contract_id: 'C004',
-      period: '2024-04',
-    };
-
-    const result_pattern4 = detectDataDiscrepancies(discrepancyData_pattern4);
-
-    expect(result_pattern4.primary_cause).toBe('顧客情報相違');
-    expect(result_pattern4.primary_cause_priority).toBe(3);
-    expect(result_pattern4.secondary_causes).toEqual([]);
-    expect(result_pattern4.all_discrepancies_detected).toBe(1);
-
-    // テストパターン5: 複数の金額差異ケース - 差異が大きい場合
-    const discrepancyData_pattern5 = {
-      amount_difference: 150000,
-      date_mismatch_days: 3,
-      customer_info_mismatch: true,
-      contract_id: 'C005',
-      period: '2024-05',
-    };
-
-    const result_pattern5 = detectDataDiscrepancies(discrepancyData_pattern5);
-
-    expect(result_pattern5.primary_cause).toBe('金額差異');
-    expect(result_pattern5.primary_cause_priority).toBe(1);
-    expect(result_pattern5.secondary_causes).toEqual([
-      { cause: '日付ずれ', priority: 2 },
-      { cause: '顧客情報相違', priority: 3 },
-    ]);
-    expect(result_pattern5.all_discrepancies_detected).toBe(3);
-    expect(result_pattern5.amount_difference_value).toBe(150000);
-
-    // テストパターン6: 不一致が存在しないケース
-    const discrepancyData_pattern6 = {
-      amount_difference: 0,
-      date_mismatch_days: 0,
-      customer_info_mismatch: false,
-      contract_id: 'C006',
-      period: '2024-06',
-    };
-
-    const result_pattern6 = detectDataDiscrepancies(discrepancyData_pattern6);
-
-    expect(result_pattern6.primary_cause).toBeNull();
-    expect(result_pattern6.secondary_causes).toEqual([]);
-    expect(result_pattern6.all_discrepancies_detected).toBe(0);
+    // 8. 催促通知後のステータスが更新されていることを確認
+    expect(result.updated_confirmation_status).toBe("催促済み");
   });
 });

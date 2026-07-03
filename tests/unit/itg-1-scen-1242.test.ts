@@ -1,75 +1,176 @@
-import { approveContractChange } from '../../src/logic/it-1781935279444-2-1-1';
+import { validateContractAgreement } from "../../src/logic/it-1-1-1";
 
-describe('営業データ入力時の品質検証ルール定義・実行機能', () => {
-  // SCEN-1242: [normal] 契約変更承認・署名記録機能
-  test('営業責任者が変更内容を承認した場合、承認記録が保存され、署名ログが生成される', () => {
-    const contractChangeId = 'CC-2024-001';
-    const approverId = 'USER-SALES-001';
-    const approverName = '営業責任者太郎';
-    const approvalTimestamp = new Date('2024-12-15T14:30:00Z');
-    const signatureData = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAUA...';
-    const contractChangeContent = {
-      contractId: 'CONTRACT-001',
-      changeItems: [
-        {
-          fieldName: '請求金額',
-          beforeValue: '100000',
-          afterValue: '120000',
-        },
-        {
-          fieldName: '納期',
-          beforeValue: '2024-12-31',
-          afterValue: '2025-01-15',
-        },
-      ],
-      changedBy: 'USER-ADMIN-001',
-      changedAt: new Date('2024-12-14T10:00:00Z'),
+describe("営業成果データの自動検証ルール定義と異常検出機能", () => {
+  test("SCEN-1242: 契約変更内容の合意状況検証機能 - 顧客の合意と登録済み変更内容が一致する場合、承認フローへ進める", () => {
+    // 前提: 登録済み変更内容
+    const registeredChangeContent = {
+      contractChangeId: "CC-2024-001",
+      customerId: "CUST-A001",
+      contractId: "CONT-2024-001",
+      changeType: "SERVICE_SCOPE",
+      changeDetails: {
+        beforeValue: "Service A",
+        afterValue: "Service B",
+        effectiveDate: "2024-02-01",
+      },
+      registrationDate: "2024-01-15T10:00:00Z",
+      registrationStatus: "PENDING_AGREEMENT",
     };
 
-    const result = approveContractChange({
-      contractChangeId,
-      approverId,
-      approverName,
-      approvalTimestamp,
-      signatureData,
-      contractChangeContent,
+    // 顧客の合意内容（登録済み変更内容と完全に一致）
+    const customerAgreement = {
+      contractChangeId: "CC-2024-001",
+      customerId: "CUST-A001",
+      agreementStatus: "AGREED",
+      agreementDetails: {
+        beforeValue: "Service A",
+        afterValue: "Service B",
+        effectiveDate: "2024-02-01",
+      },
+      agreementDate: "2024-01-20T14:30:00Z",
+      approverEmail: "manager@customer.example.com",
+      approverName: "Manager Name",
+    };
+
+    // テスト対象: 合意内容の検証実行
+    const validationResult = validateContractAgreement({
+      registeredChange: registeredChangeContent,
+      customerAgreement: customerAgreement,
     });
 
-    // 承認記録が保存されていることを検証
-    expect(result.approvalRecord).toBeDefined();
-    expect(result.approvalRecord.contractChangeId).toBe(contractChangeId);
-    expect(result.approvalRecord.approverId).toBe(approverId);
-    expect(result.approvalRecord.approverName).toBe(approverName);
-    expect(result.approvalRecord.approvalStatus).toBe('承認完了');
-    expect(result.approvalRecord.approvalTimestamp.toISOString()).toBe(
-      approvalTimestamp.toISOString()
-    );
+    // 期待結果1: 検証が成功する（isValidが true）
+    expect(validationResult.isValid).toBe(true);
 
-    // 署名ログが生成されていることを検証
-    expect(result.signatureLog).toBeDefined();
-    expect(result.signatureLog.contractChangeId).toBe(contractChangeId);
-    expect(result.signatureLog.approverId).toBe(approverId);
-    expect(result.signatureLog.signatureData).toBe(signatureData);
-    expect(result.signatureLog.signatureTimestamp.toISOString()).toBe(
-      approvalTimestamp.toISOString()
-    );
+    // 期待結果2: 検証メッセージが「一致」であること
+    expect(validationResult.validationMessage).toBe("一致");
 
-    // 契約変更のステータスが承認完了に更新されていることを検証
-    expect(result.contractChangeStatus).toBe('承認完了');
+    // 期待結果3: ステータスが「合意済み」に更新される
+    expect(validationResult.updatedStatus).toBe("AGREED");
 
-    // 監査ログが記録されていることを検証
-    expect(result.auditLog).toBeDefined();
-    expect(result.auditLog.eventType).toBe('契約変更承認');
-    expect(result.auditLog.approverId).toBe(approverId);
-    expect(result.auditLog.approverName).toBe(approverName);
-    expect(result.auditLog.contractChangeId).toBe(contractChangeId);
-    expect(result.auditLog.eventTimestamp.toISOString()).toBe(
-      approvalTimestamp.toISOString()
-    );
-    expect(result.auditLog.changeContent).toEqual(contractChangeContent);
+    // 期待結果4: 承認フローへ進む準備フラグが true
+    expect(validationResult.proceedToApprovalFlow).toBe(true);
 
-    // 正常完了メッセージ
-    expect(result.message).toBe('承認処理が完了しました');
-    expect(result.success).toBe(true);
+    // 期待結果5: 契約変更IDが正確に返される
+    expect(validationResult.contractChangeId).toBe("CC-2024-001");
+
+    // 期待結果6: 検証完了タイムスタンプが記録される
+    expect(validationResult.validationCompletedAt).toBeDefined();
+    expect(typeof validationResult.validationCompletedAt).toBe("string");
+
+    // 境界値テスト: 合意内容と登録内容の beforeValue が異なる場合、検証失敗
+    const mismatchedAgreement = {
+      contractChangeId: "CC-2024-001",
+      customerId: "CUST-A001",
+      agreementStatus: "AGREED",
+      agreementDetails: {
+        beforeValue: "Service X", // 一致しない
+        afterValue: "Service B",
+        effectiveDate: "2024-02-01",
+      },
+      agreementDate: "2024-01-20T14:30:00Z",
+      approverEmail: "manager@customer.example.com",
+      approverName: "Manager Name",
+    };
+
+    const mismatchResult = validateContractAgreement({
+      registeredChange: registeredChangeContent,
+      customerAgreement: mismatchedAgreement,
+    });
+
+    expect(mismatchResult.isValid).toBe(false);
+    expect(mismatchResult.validationMessage).toMatch(/不一致/);
+    expect(mismatchResult.updatedStatus).toBe("MISMATCH_DETECTED");
+    expect(mismatchResult.proceedToApprovalFlow).toBe(false);
+
+    // エラーテスト: 契約変更IDが一致しない場合
+    const invalidContractChangeId = {
+      contractChangeId: "CC-2024-999", // 異なる ID
+      customerId: "CUST-A001",
+      agreementStatus: "AGREED",
+      agreementDetails: {
+        beforeValue: "Service A",
+        afterValue: "Service B",
+        effectiveDate: "2024-02-01",
+      },
+      agreementDate: "2024-01-20T14:30:00Z",
+      approverEmail: "manager@customer.example.com",
+      approverName: "Manager Name",
+    };
+
+    expect(() =>
+      validateContractAgreement({
+        registeredChange: registeredChangeContent,
+        customerAgreement: invalidContractChangeId,
+      })
+    ).toThrow(/契約変更ID/);
+
+    // エラーテスト: 顧客IDが一致しない場合
+    const invalidCustomerId = {
+      contractChangeId: "CC-2024-001",
+      customerId: "CUST-B999", // 異なる顧客
+      agreementStatus: "AGREED",
+      agreementDetails: {
+        beforeValue: "Service A",
+        afterValue: "Service B",
+        effectiveDate: "2024-02-01",
+      },
+      agreementDate: "2024-01-20T14:30:00Z",
+      approverEmail: "manager@customer.example.com",
+      approverName: "Manager Name",
+    };
+
+    expect(() =>
+      validateContractAgreement({
+        registeredChange: registeredChangeContent,
+        customerAgreement: invalidCustomerId,
+      })
+    ).toThrow(/顧客/);
+
+    // エラーテスト: agreementStatus が DISAGREED の場合
+    const disagreedAgreement = {
+      contractChangeId: "CC-2024-001",
+      customerId: "CUST-A001",
+      agreementStatus: "DISAGREED", // 非合意
+      agreementDetails: {
+        beforeValue: "Service A",
+        afterValue: "Service B",
+        effectiveDate: "2024-02-01",
+      },
+      agreementDate: "2024-01-20T14:30:00Z",
+      approverEmail: "manager@customer.example.com",
+      approverName: "Manager Name",
+    };
+
+    const disagreedResult = validateContractAgreement({
+      registeredChange: registeredChangeContent,
+      customerAgreement: disagreedAgreement,
+    });
+
+    expect(disagreedResult.isValid).toBe(false);
+    expect(disagreedResult.validationMessage).toMatch(/非合意/);
+    expect(disagreedResult.proceedToApprovalFlow).toBe(false);
+
+    // 境界値テスト: effectiveDate が異なる場合、検証失敗
+    const mismatchedEffectiveDate = {
+      contractChangeId: "CC-2024-001",
+      customerId: "CUST-A001",
+      agreementStatus: "AGREED",
+      agreementDetails: {
+        beforeValue: "Service A",
+        afterValue: "Service B",
+        effectiveDate: "2024-03-01", // 異なる日付
+      },
+      agreementDate: "2024-01-20T14:30:00Z",
+      approverEmail: "manager@customer.example.com",
+      approverName: "Manager Name",
+    };
+
+    const dateResult = validateContractAgreement({
+      registeredChange: registeredChangeContent,
+      customerAgreement: mismatchedEffectiveDate,
+    });
+
+    expect(dateResult.isValid).toBe(false);
+    expect(dateResult.validationMessage).toMatch(/不一致/);
   });
 });

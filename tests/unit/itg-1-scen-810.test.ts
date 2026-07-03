@@ -1,34 +1,23 @@
-import { describe, test, expect, beforeEach } from '@jest/globals';
-import { searchMailHistory } from '../../src/logic/it-1781935279444-1-1-1';
+import { validateBillingData } from "../../src/logic/it-1781935279444-2-2-1";
 
-describe('営業データ項目のメタデータ管理機能 - メール履歴検索・フィルタリング', () => {
-  beforeEach(() => {
-    jest.clearAllMocks();
-  });
+describe("請求データ妥当性自動検証", () => {
+  // SCEN-810: [edge] 請求データ妥当性自動検証機能 - 請求額が契約金額と完全に一致する境界値の場合に検証を通過する
+  test("請求額が契約金額と完全に一致する場合は検証を通過する", () => {
+    const contract_amount = 100000;
+    const billing_amount = 100000;
 
-  // SCEN-810
-  test('無効な日付範囲が指定された場合にエラーが返却される', async () => {
-    const start_date = '2024-12-31';
-    const end_date = '2024-12-01';
-    const customer_id = 'CUST-001';
-
-    const search_params = {
-      start_date,
-      end_date,
-      customer_id
+    const input = {
+      contract_id: "C001",
+      contract_amount: contract_amount,
+      billing_amount: billing_amount,
+      billing_date: "2024-01-15",
+      customer_id: "CUST001",
     };
 
-    let error_thrown = false;
-    let error_message = '';
+    const result = validateBillingData(input);
 
-    try {
-      await searchMailHistory(search_params);
-    } catch (err: any) {
-      error_thrown = true;
-      error_message = err.message;
-    }
-
-    expect(error_thrown).toBe(true);
-    expect(error_message).toMatch(/終了日付は開始日付以降の日付を指定してください/);
+    expect(result.is_valid).toBe(true);
+    expect(result.error_message).toBe("");
+    expect(result.billing_amount).toBe(100000);
   });
 });

@@ -1,184 +1,110 @@
-import { validateSystemCompatibility } from "../../src/logic/it-1781935279444-1-1-1";
+import { extractAndAggregateChargeableItems } from '../../src/logic/it-1-2-1';
 
-describe("営業システム・バックオフィス連携検証機能", () => {
-  test("SCEN-1360: 営業システム出力データ項目・形式・更新頻度がバックオフィス入力要件と完全に互換性がある場合、検証成功と判定される", () => {
-    // Arrange: 営業システム出力データの項目一覧
-    const sales_system_output_fields = [
+describe('営業成果データから請求対象項目を自動抽出し、顧客ごと・サービスごとの請求額を集計する機能', () => {
+  test('SCEN-1360: 複数の顧客とサービスの組み合わせが存在する場合、請求額の集計が正確に分離される', () => {
+    // Arrange: テストデータ構築
+    const salesData = [
       {
-        field_id: "sales_001",
-        field_name: "apo_count",
-        data_type: "integer",
-        format: "digits(10)",
-        unit: "count",
-        update_frequency: "daily",
-        calculation_logic: "COUNT(appointment_records WHERE status='completed')",
+        customerId: 'CUST_A',
+        customerName: '顧客A',
+        serviceId: 'SVC_1',
+        serviceName: 'サービス1',
+        amount: 100000,
+        transactionDate: '2024-01-15',
       },
       {
-        field_id: "sales_002",
-        field_name: "contract_count",
-        data_type: "integer",
-        format: "digits(10)",
-        unit: "count",
-        update_frequency: "daily",
-        calculation_logic: "COUNT(contract_records WHERE status='signed')",
+        customerId: 'CUST_A',
+        customerName: '顧客A',
+        serviceId: 'SVC_2',
+        serviceName: 'サービス2',
+        amount: 50000,
+        transactionDate: '2024-01-16',
       },
       {
-        field_id: "sales_003",
-        field_name: "customer_reaction",
-        data_type: "string",
-        format: "varchar(255)",
-        unit: "text",
-        update_frequency: "daily",
-        calculation_logic: "CONCATENATE(feedback_notes)",
+        customerId: 'CUST_B',
+        customerName: '顧客B',
+        serviceId: 'SVC_1',
+        serviceName: 'サービス1',
+        amount: 75000,
+        transactionDate: '2024-01-17',
       },
       {
-        field_id: "sales_004",
-        field_name: "service_type",
-        data_type: "string",
-        format: "varchar(50)",
-        unit: "text",
-        update_frequency: "daily",
-        calculation_logic: "service_master.service_name",
+        customerId: 'CUST_B',
+        customerName: '顧客B',
+        serviceId: 'SVC_3',
+        serviceName: 'サービス3',
+        amount: 30000,
+        transactionDate: '2024-01-18',
       },
       {
-        field_id: "sales_005",
-        field_name: "transaction_amount",
-        data_type: "decimal",
-        format: "decimal(15,2)",
-        unit: "JPY",
-        update_frequency: "daily",
-        calculation_logic: "SUM(sales_transactions.amount)",
+        customerId: 'CUST_C',
+        customerName: '顧客C',
+        serviceId: 'SVC_2',
+        serviceName: 'サービス2',
+        amount: 60000,
+        transactionDate: '2024-01-19',
       },
     ];
 
-    // Arrange: バックオフィスシステムの入力要件ドキュメント
-    const backoffice_input_requirements = {
-      required_fields: [
-        {
-          field_name: "apo_count",
-          data_type: "integer",
-          format: "digits(10)",
-          unit: "count",
-          update_frequency: "daily",
-        },
-        {
-          field_name: "contract_count",
-          data_type: "integer",
-          format: "digits(10)",
-          unit: "count",
-          update_frequency: "daily",
-        },
-        {
-          field_name: "customer_reaction",
-          data_type: "string",
-          format: "varchar(255)",
-          unit: "text",
-          update_frequency: "daily",
-        },
-        {
-          field_name: "service_type",
-          data_type: "string",
-          format: "varchar(50)",
-          unit: "text",
-          update_frequency: "daily",
-        },
-        {
-          field_name: "transaction_amount",
-          data_type: "decimal",
-          format: "decimal(15,2)",
-          unit: "JPY",
-          update_frequency: "daily",
-        },
-      ],
-    };
+    // Act: 請求対象項目自動抽出・集計機能を実行
+    const result = extractAndAggregateChargeableItems(salesData);
 
-    // Arrange: テスト用の営業システムから出力されたテストデータ
-    const test_output_data = {
-      apo_count: 5,
-      contract_count: 2,
-      customer_reaction: "Very interested in service upgrade",
-      service_type: "Premium Support",
-      transaction_amount: 125000.5,
-      export_timestamp: "2024-01-15T10:30:00Z",
-      export_status: "success",
-    };
+    // Assert: 結果の構造と値を検証
+    expect(result).toBeDefined();
+    expect(Array.isArray(result)).toBe(true);
 
-    // Arrange: 検証入力パラメータ
-    const validation_input = {
-      sales_system_fields: sales_system_output_fields,
-      backoffice_requirements: backoffice_input_requirements,
-      test_data: test_output_data,
-      validation_timestamp: "2024-01-15T10:30:00Z",
-    };
+    // 顧客A の検証
+    const customerA = result.find((item: any) => item.customerId === 'CUST_A');
+    expect(customerA).toBeDefined();
+    expect(customerA.customerName).toBe('顧客A');
+    expect(customerA.totalAmount).toBe(150000);
+    expect(Array.isArray(customerA.serviceBreakdown)).toBe(true);
+    expect(customerA.serviceBreakdown.length).toBe(2);
 
-    // Act: 互換性検証を実行
-    const validation_result = validateSystemCompatibility(validation_input);
+    const custA_svc1 = customerA.serviceBreakdown.find((svc: any) => svc.serviceId === 'SVC_1');
+    expect(custA_svc1).toBeDefined();
+    expect(custA_svc1.serviceName).toBe('サービス1');
+    expect(custA_svc1.amount).toBe(100000);
 
-    // Assert: 検証ステータスが「成功」
-    expect(validation_result.validation_status).toBe("success");
+    const custA_svc2 = customerA.serviceBreakdown.find((svc: any) => svc.serviceId === 'SVC_2');
+    expect(custA_svc2).toBeDefined();
+    expect(custA_svc2.serviceName).toBe('サービス2');
+    expect(custA_svc2.amount).toBe(50000);
 
-    // Assert: すべてのフィールド互換性チェックが合格
-    expect(validation_result.field_compatibility_checks.length).toBe(5);
-    expect(
-      validation_result.field_compatibility_checks.every(
-        (check: any) => check.compatibility_status === "compatible"
-      )
-    ).toBe(true);
+    // 顧客B の検証
+    const customerB = result.find((item: any) => item.customerId === 'CUST_B');
+    expect(customerB).toBeDefined();
+    expect(customerB.customerName).toBe('顧客B');
+    expect(customerB.totalAmount).toBe(105000);
+    expect(Array.isArray(customerB.serviceBreakdown)).toBe(true);
+    expect(customerB.serviceBreakdown.length).toBe(2);
 
-    // Assert: 全フィールドのデータ型互換性が確認される
-    const apo_count_check = validation_result.field_compatibility_checks.find(
-      (check: any) => check.field_name === "apo_count"
-    );
-    expect(apo_count_check.data_type_match).toBe(true);
-    expect(apo_count_check.format_match).toBe(true);
-    expect(apo_count_check.update_frequency_match).toBe(true);
+    const custB_svc1 = customerB.serviceBreakdown.find((svc: any) => svc.serviceId === 'SVC_1');
+    expect(custB_svc1).toBeDefined();
+    expect(custB_svc1.serviceName).toBe('サービス1');
+    expect(custB_svc1.amount).toBe(75000);
 
-    // Assert: decimal型フィールドのフォーマットが正確に一致
-    const transaction_amount_check =
-      validation_result.field_compatibility_checks.find(
-        (check: any) => check.field_name === "transaction_amount"
-      );
-    expect(transaction_amount_check.data_type_match).toBe(true);
-    expect(transaction_amount_check.format_match).toBe(true);
-    expect(transaction_amount_check.expected_format).toBe("decimal(15,2)");
+    const custB_svc3 = customerB.serviceBreakdown.find((svc: any) => svc.serviceId === 'SVC_3');
+    expect(custB_svc3).toBeDefined();
+    expect(custB_svc3.serviceName).toBe('サービス3');
+    expect(custB_svc3.amount).toBe(30000);
 
-    // Assert: 全フィールドの単位が互換
-    expect(
-      validation_result.field_compatibility_checks.every(
-        (check: any) => check.unit_match === true
-      )
-    ).toBe(true);
+    // 顧客C の検証
+    const customerC = result.find((item: any) => item.customerId === 'CUST_C');
+    expect(customerC).toBeDefined();
+    expect(customerC.customerName).toBe('顧客C');
+    expect(customerC.totalAmount).toBe(60000);
+    expect(Array.isArray(customerC.serviceBreakdown)).toBe(true);
+    expect(customerC.serviceBreakdown.length).toBe(1);
 
-    // Assert: テストデータがバックオフィスシステムに正常に入力される
-    expect(validation_result.test_data_ingestion_status).toBe("success");
-    expect(validation_result.test_data_record_count).toBe(1);
+    const custC_svc2 = customerC.serviceBreakdown.find((svc: any) => svc.serviceId === 'SVC_2');
+    expect(custC_svc2).toBeDefined();
+    expect(custC_svc2.serviceName).toBe('サービス2');
+    expect(custC_svc2.amount).toBe(60000);
 
-    // Assert: 検証ログに成功が記録される
-    expect(validation_result.validation_log_entries.length).toBeGreaterThan(0);
-    const success_log = validation_result.validation_log_entries.find(
-      (log: any) => log.log_level === "info" && log.message.includes("互換性")
-    );
-    expect(success_log).toBeDefined();
-    expect(success_log.validation_result).toBe("success");
-
-    // Assert: 互換性チェック完了タイムスタンプが記録される
-    expect(validation_result.validation_completed_at).toBe(
-      "2024-01-15T10:30:00Z"
-    );
-
-    // Assert: 問題がないことを示す詳細な互換性スコア
-    expect(validation_result.compatibility_score).toBe(100);
-
-    // Assert: 不整合フィールドがない
-    expect(validation_result.incompatible_fields.length).toBe(0);
-
-    // Assert: 全体的な検証サマリー
-    expect(validation_result.summary).toEqual({
-      total_fields_checked: 5,
-      compatible_fields: 5,
-      incompatible_fields: 0,
-      validation_passed: true,
-      compatibility_percentage: 100,
-    });
+    // 全体検証: 顧客数が 3 で、重複や漏れがないこと
+    expect(result.length).toBe(3);
+    const allCustomerIds = result.map((item: any) => item.customerId).sort();
+    expect(allCustomerIds).toEqual(['CUST_A', 'CUST_B', 'CUST_C']);
   });
 });

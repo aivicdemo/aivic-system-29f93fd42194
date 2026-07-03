@@ -1,78 +1,119 @@
-import { validateSalesData } from "../../src/logic/it-1781935279444-2-1-1";
+import { describe, test, expect } from '@jest/globals';
+import {
+  createSalesDataItemMetadata,
+  getSalesDataItemMetadataById,
+  updateSalesDataItemMetadata,
+  getSalesDataItemMetadataList,
+} from '../../src/logic/it-1781935279444-1-1-1';
 
-describe("営業データ入力時の品質検証ルール定義・実行機能", () => {
-  // SCEN-675: [edge] 営業データ品質自動検証機能 - 検証ルール条件が空（条件なし）の場合、検証がスキップされる
-  test("検証ルール条件が空の場合、検証がスキップされ、ログに記録される", () => {
-    const validation_rule_no_condition = {
-      rule_id: "RULE-001",
-      rule_name: "テスト_条件なし",
-      conditions: [] as any[],
-      enabled: true,
-      created_at: new Date("2024-01-15T09:00:00Z"),
+describe('営業データ項目メタデータ管理機能', () => {
+  test('SCEN-675: 営業データ項目の定義が一元管理される', () => {
+    // ステップ1: 新しい営業データ項目を作成
+    const createInput = {
+      itemName: '売上金額',
+      unit: '円',
+      dataType: '数値（整数）',
+      calculationLogic: '単価 × 数量',
     };
 
-    const validation_rule_with_condition = {
-      rule_id: "RULE-002",
-      rule_name: "テスト_条件あり",
-      conditions: [
-        {
-          condition_id: "COND-001",
-          field_name: "customer_name",
-          operator: "required",
-          expected_value: null,
-        },
-      ],
-      enabled: true,
-      created_at: new Date("2024-01-15T09:00:00Z"),
-    };
+    const createdMetadata = createSalesDataItemMetadata(createInput);
 
-    const sales_data = {
-      data_id: "DATA-001",
-      customer_name: "",
-      transaction_date: "2024-01-15",
-      amount: 50000,
-      service_type: "サービスA",
-    };
-
-    const validation_rules = [
-      validation_rule_no_condition,
-      validation_rule_with_condition,
-    ];
-
-    const result = validateSalesData(sales_data, validation_rules);
-
-    // 検証結果のスキップエントリ確認
-    expect(result.executed_rules).toContainEqual({
-      rule_id: "RULE-001",
-      status: "skipped",
-      reason: "条件なし",
-      timestamp: expect.any(String),
+    // ステップ2-3: 作成されたメタデータが正確に返される
+    expect(createdMetadata).toEqual({
+      id: expect.any(String),
+      itemName: '売上金額',
+      unit: '円',
+      dataType: '数値（整数）',
+      calculationLogic: '単価 × 数量',
+      createdAt: expect.any(String),
+      updatedAt: expect.any(String),
     });
 
-    // 有効な検証ルール（条件あり）は実行されること
-    expect(result.executed_rules).toContainEqual({
-      rule_id: "RULE-002",
-      status: "failed",
-      reason: "customer_name は必須項目です",
-      timestamp: expect.any(String),
+    const metadataId = createdMetadata.id;
+
+    // ステップ4: メタデータ一覧画面でアイテムが表示される
+    const metadataList = getSalesDataItemMetadataList();
+
+    expect(metadataList).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: metadataId,
+          itemName: '売上金額',
+          unit: '円',
+          dataType: '数値（整数）',
+          calculationLogic: '単価 × 数量',
+        }),
+      ]),
+    );
+
+    // ステップ5: 作成したメタデータの詳細を取得
+    const detailMetadata = getSalesDataItemMetadataById(metadataId);
+
+    expect(detailMetadata).toEqual({
+      id: metadataId,
+      itemName: '売上金額',
+      unit: '円',
+      dataType: '数値（整数）',
+      calculationLogic: '単価 × 数量',
+      createdAt: expect.any(String),
+      updatedAt: expect.any(String),
     });
 
-    // 総合結果は検証失敗（条件ありのルールで失敗）
-    expect(result.passed).toBe(false);
+    // ステップ6: 詳細情報が正確に表示される
+    expect(detailMetadata.itemName).toBe('売上金額');
+    expect(detailMetadata.unit).toBe('円');
+    expect(detailMetadata.dataType).toBe('数値（整数）');
+    expect(detailMetadata.calculationLogic).toBe('単価 × 数量');
 
-    // 実行ルール数は2（スキップされたものも含める）
-    expect(result.executed_rules).toHaveLength(2);
+    // ステップ7: 別の営業フォームでこのメタデータを参照して同じ定義が適用される
+    const referencedMetadata = getSalesDataItemMetadataById(metadataId);
 
-    // スキップされたルール数
-    expect(
-      result.executed_rules.filter((r) => r.status === "skipped")
-    ).toHaveLength(1);
+    expect(referencedMetadata.itemName).toBe('売上金額');
+    expect(referencedMetadata.unit).toBe('円');
+    expect(referencedMetadata.dataType).toBe('数値（整数）');
+    expect(referencedMetadata.calculationLogic).toBe('単価 × 数量');
 
-    // 実行されたルール数
-    expect(
-      result.executed_rules.filter(
-        (r) => r.status === "failed" || r.status === "passed"
-      )
-    ).toHaveLength(1);
+    // ステップ8-9: メタデータ項目を編集し、単位を「円」から「ドル」に変更
+    const updateInput = {
+      itemName: '売上金額',
+      unit: 'ドル',
+      dataType: '数値（整数）',
+      calculationLogic: '単価 × 数量',
+    };
+
+    const updatedMetadata = updateSalesDataItemMetadata(metadataId, updateInput);
+
+    expect(updatedMetadata).toEqual({
+      id: metadataId,
+      itemName: '売上金額',
+      unit: 'ドル',
+      dataType: '数値（整数）',
+      calculationLogic: '単価 × 数量',
+      createdAt: expect.any(String),
+      updatedAt: expect.any(String),
+    });
+
+    // ステップ10: システム全体の参照元で定義が更新されていることを確認
+    const confirmedMetadata = getSalesDataItemMetadataById(metadataId);
+
+    expect(confirmedMetadata.unit).toBe('ドル');
+    expect(confirmedMetadata.itemName).toBe('売上金額');
+    expect(confirmedMetadata.dataType).toBe('数値（整数）');
+    expect(confirmedMetadata.calculationLogic).toBe('単価 × 数量');
+
+    // 変更が一覧にも反映されている
+    const updatedList = getSalesDataItemMetadataList();
+
+    expect(updatedList).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: metadataId,
+          itemName: '売上金額',
+          unit: 'ドル',
+          dataType: '数値（整数）',
+          calculationLogic: '単価 × 数量',
+        }),
+      ]),
+    );
   });
 });

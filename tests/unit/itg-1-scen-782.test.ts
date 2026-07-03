@@ -1,70 +1,48 @@
-import { describe, test, expect } from '@jest/globals';
-import { identifyLatestDocumentVersion } from '../../src/logic/it-1781935279444-1-1-1';
+import { monitorResourceDocumentReleaseSLA } from "../../src/logic/it-1781935279444-1-1-1";
 
-describe('営業データ項目のメタデータ管理機能 - 契約・提案資料の最新版自動特定', () => {
-  // SCEN-782
-  test('顧客・案件に対応する資料が存在しない場合、空結果またはエラーが返される', () => {
-    const nonexistentCustomerId = 'CUST-99999999';
-    const nonexistentProjectId = 'PROJ-99999999';
+describe("営業データ項目のメタデータ管理機能", () => {
+  test("SCEN-782: 資料リリース通知から確認完了までのSLA監視機能 - 通知から確認完了までの経過時間が設定SLA以内の場合、処理を続行する", () => {
+    // テストシナリオの初期化：資料リリース通知SLAを60分に設定
+    const slaMinutes = 60;
 
-    const result = identifyLatestDocumentVersion({
-      customerId: nonexistentCustomerId,
-      projectId: nonexistentProjectId,
-    });
+    // 資料リリース通知を送信し、通知送信時刻をタイムスタンプとして記録
+    const notificationSentAt = new Date("2024-01-15T10:00:00Z");
 
-    expect(
-      result === null ||
-        (Array.isArray(result) && result.length === 0) ||
-        (result && result.error !== undefined)
-    ).toBe(true);
+    // ユーザーが資料を確認し、確認完了アクションを実行
+    // 確認完了時刻をタイムスタンプとして取得（通知から30分後）
+    const confirmationCompletedAt = new Date("2024-01-15T10:30:00Z");
 
-    if (Array.isArray(result)) {
-      expect(result).toEqual([]);
-    } else if (result === null) {
-      expect(result).toBeNull();
-    } else if (result && typeof result === 'object' && 'error' in result) {
-      expect(result).toHaveProperty('error');
-      expect(typeof result.error).toBe('string');
-    }
-  });
+    // 通知送信時刻から確認完了時刻までの経過時間を計算
+    const elapsedMinutes =
+      (confirmationCompletedAt.getTime() - notificationSentAt.getTime()) /
+      (1000 * 60);
 
-  test('顧客IDが空文字列の場合、適切なエラーが返される', () => {
-    expect(() =>
-      identifyLatestDocumentVersion({
-        customerId: '',
-        projectId: 'PROJ-123456',
-      })
-    ).toThrow(/顧客ID/);
-  });
+    // モニタリング対象のデータ
+    const input = {
+      slaMinutes: slaMinutes,
+      notificationSentAt: notificationSentAt,
+      confirmationCompletedAt: confirmationCompletedAt,
+    };
 
-  test('案件IDが空文字列の場合、適切なエラーが返される', () => {
-    expect(() =>
-      identifyLatestDocumentVersion({
-        customerId: 'CUST-123456',
-        projectId: '',
-      })
-    ).toThrow(/案件ID/);
-  });
+    // SLA監視機能を実行
+    const result = monitorResourceDocumentReleaseSLA(input);
 
-  test('存在する顧客・案件IDで複数の有効なバージョンが存在する場合、最新版のみが返される', () => {
-    const existingCustomerId = 'CUST-00001';
-    const existingProjectId = 'PROJ-00001';
+    // 計算した経過時間がSLA設定値（60分）以下であることを検証
+    expect(elapsedMinutes).toBeLessThanOrEqual(slaMinutes);
 
-    const result = identifyLatestDocumentVersion({
-      customerId: existingCustomerId,
-      projectId: existingProjectId,
-    });
+    // SLA内の場合、処理ステータスが「進行中」または「完了」となることを確認
+    expect(result.withinSLA).toBe(true);
 
-    if (Array.isArray(result) && result.length > 0) {
-      expect(result.length).toBe(1);
-      expect(result[0]).toHaveProperty('documentId');
-      expect(result[0]).toHaveProperty('version');
-      expect(result[0]).toHaveProperty('effectiveDate');
-      expect(typeof result[0].version).toBe('string');
-    } else if (result && typeof result === 'object' && !Array.isArray(result) && result.error === undefined) {
-      expect(result).toHaveProperty('documentId');
-      expect(result).toHaveProperty('version');
-      expect(result.version).toBe('1.0.0');
-    }
+    // 次のプロセス（請求データ処理など）が中断されることなく継続実行されることを確認
+    expect(result.processCanContinue).toBe(true);
+
+    // SLA監視ログに『SLA OK』または『Within SLA』の記録が残ること
+    expect(result.slaStatus).toMatch(/SLA\s+OK|Within\s+SLA/);
+
+    // 経過時間の記録確認
+    expect(result.elapsedMinutes).toBe(30);
+
+    // ステータスが正常系であることを確認
+    expect(result.status).toBe("進行中");
   });
 });

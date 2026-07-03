@@ -1,112 +1,185 @@
-import { executeAccountingSystemAPILinkage } from "../../src/logic/it-1-2-1";
+import { createSalesDataItemMetadata, getSalesDataItemMetadataList, getSalesDataItemMetadataByName, createValidationRuleWithMetadataReference, getValidationRuleReferences } from '../../src/logic/it-1781935279444-1-1-1';
 
-const fetchMock = require("jest-fetch-mock");
-
-describe("会計システムAPI連携実行機能 - タイムアウト再試行メカニズム", () => {
-  test("SCEN-1304: API呼び出しがタイムアウトした場合、指数バックオフで最大3回まで自動再試行し、3回目で成功してデータが連携される", async () => {
-    fetchMock.resetMocks();
-
-    const billing_data = {
-      customer_id: "CUST-001",
-      service_id: "SVC-A",
-      amount: 50000,
-      billing_month: "2024-01",
+describe('営業データ項目メタデータ管理機能', () => {
+  // SCEN-1304: [normal] 営業データ項目メタデータ管理機能 - 営業データ項目のメタデータ（項目名・単位・データ型・計算ロジック）が一元管理され、検証ルールで参照できる
+  test('営業データ項目メタデータが一元管理され、検証ルール設定時に正確に参照でき、複数の検証ルールから一貫性を保ったまま利用できること', () => {
+    // ステップ 1: 新規営業データ項目メタデータを作成する
+    const metadataInput1 = {
+      itemName: '売上金額',
+      unit: '円',
+      dataType: '数値型',
+      calculationLogic: '単価×数量'
     };
+    const createdMetadata1 = createSalesDataItemMetadata(metadataInput1);
+    
+    expect(createdMetadata1).toEqual(expect.objectContaining({
+      itemName: '売上金額',
+      unit: '円',
+      dataType: '数値型',
+      calculationLogic: '単価×数量'
+    }));
+    expect(createdMetadata1.id).toBeDefined();
+    expect(typeof createdMetadata1.id).toBe('string');
 
-    const api_config = {
-      endpoint: "https://accounting.example.com/api/billings",
-      timeout_ms: 500,
-      max_retries: 3,
-      backoff_strategy: "exponential",
-      initial_backoff_ms: 100,
+    // ステップ 2: 追加のメタデータを作成し、複数の営業データ項目が一元管理されることを確認する
+    const metadataInput2 = {
+      itemName: 'アポ数',
+      unit: '件',
+      dataType: '数値型',
+      calculationLogic: 'SUM(日別アポ数)'
     };
+    const createdMetadata2 = createSalesDataItemMetadata(metadataInput2);
 
-    // 1回目: タイムアウト（AbortError）
-    fetchMock.mockResponseOnce(
-      () =>
-        new Promise((resolve, reject) => {
-          setTimeout(
-            () => reject(new Error("Request timeout")),
-            api_config.timeout_ms + 100
-          );
-        })
-    );
+    const metadataInput3 = {
+      itemName: '成約数',
+      unit: '件',
+      dataType: '数値型',
+      calculationLogic: 'SUM(日別成約数)'
+    };
+    const createdMetadata3 = createSalesDataItemMetadata(metadataInput3);
 
-    // 2回目: タイムアウト（AbortError）
-    fetchMock.mockResponseOnce(
-      () =>
-        new Promise((resolve, reject) => {
-          setTimeout(
-            () => reject(new Error("Request timeout")),
-            api_config.timeout_ms + 100
-          );
-        })
-    );
-
-    // 3回目: 成功
-    fetchMock.mockResponseOnce(
-      JSON.stringify({
-        status: "success",
-        billing_id: "BIL-2024-001",
-        customer_id: "CUST-001",
-        service_id: "SVC-A",
-        amount: 50000,
-        billing_month: "2024-01",
-        linked_at: "2024-01-15T11:00:00Z",
+    // ステップ 3: メタデータ一覧を取得し、全てが登録されていることを確認する
+    const metadataList = getSalesDataItemMetadataList();
+    
+    expect(metadataList.length).toBeGreaterThanOrEqual(3);
+    expect(metadataList).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        itemName: '売上金額',
+        unit: '円',
+        dataType: '数値型',
+        calculationLogic: '単価×数量'
       }),
-      { status: 200 }
-    );
+      expect.objectContaining({
+        itemName: 'アポ数',
+        unit: '件',
+        dataType: '数値型',
+        calculationLogic: 'SUM(日別アポ数)'
+      }),
+      expect.objectContaining({
+        itemName: '成約数',
+        unit: '件',
+        dataType: '数値型',
+        calculationLogic: 'SUM(日別成約数)'
+      })
+    ]));
 
-    const result = await executeAccountingSystemAPILinkage(
-      billing_data,
-      api_config
-    );
+    // ステップ 4: 名前でメタデータを取得し、正確に参照できることを確認する
+    const retrievedMetadata = getSalesDataItemMetadataByName('売上金額');
+    
+    expect(retrievedMetadata).toEqual(expect.objectContaining({
+      itemName: '売上金額',
+      unit: '円',
+      dataType: '数値型',
+      calculationLogic: '単価×数量'
+    }));
 
-    // 最終的な成功を確認
-    expect(result.status).toBe("success");
-    expect(result.billing_id).toBe("BIL-2024-001");
-    expect(result.customer_id).toBe("CUST-001");
-    expect(result.service_id).toBe("SVC-A");
-    expect(result.amount).toBe(50000);
-    expect(result.billing_month).toBe("2024-01");
+    // ステップ 5: 検証ルール設定で「売上金額」項目メタデータを参照する
+    const validationRuleInput1 = {
+      ruleName: '売上金額範囲検証',
+      referencedItemName: '売上金額',
+      validationCondition: '値が0～10000000の範囲内'
+    };
+    const createdRule1 = createValidationRuleWithMetadataReference(validationRuleInput1);
+    
+    expect(createdRule1).toEqual(expect.objectContaining({
+      ruleName: '売上金額範囲検証',
+      referencedItemName: '売上金額'
+    }));
+    expect(createdRule1.id).toBeDefined();
 
-    // 再試行回数を確認（初回+2回の再試行=3回の総呼び出し）
-    expect(result.retry_count).toBe(2);
-    expect(result.total_attempts).toBe(3);
+    // ステップ 6: 別の検証ルールで「売上金額」を参照し、複数の検証ルールから参照可能であることを確認する
+    const validationRuleInput2 = {
+      ruleName: '売上金額データ型検証',
+      referencedItemName: '売上金額',
+      validationCondition: 'データ型が数値型'
+    };
+    const createdRule2 = createValidationRuleWithMetadataReference(validationRuleInput2);
+    
+    expect(createdRule2).toEqual(expect.objectContaining({
+      ruleName: '売上金額データ型検証',
+      referencedItemName: '売上金額'
+    }));
 
-    // 再試行ログが記録されたことを確認
-    expect(result.retry_logs).toBeDefined();
-    expect(result.retry_logs.length).toBe(2);
+    // ステップ 7: 「アポ数」と「成約数」を参照する検証ルールも作成する
+    const validationRuleInput3 = {
+      ruleName: 'アポ数範囲検証',
+      referencedItemName: 'アポ数',
+      validationCondition: '値が0～1000の範囲内'
+    };
+    const createdRule3 = createValidationRuleWithMetadataReference(validationRuleInput3);
 
-    // 1回目の再試行ログ
-    expect(result.retry_logs[0].attempt_number).toBe(1);
-    expect(result.retry_logs[0].error_message).toMatch(/timeout/i);
-    expect(result.retry_logs[0].backoff_delay_ms).toBe(100);
+    const validationRuleInput4 = {
+      ruleName: '成約数範囲検証',
+      referencedItemName: '成約数',
+      validationCondition: '値が0～500の範囲内'
+    };
+    const createdRule4 = createValidationRuleWithMetadataReference(validationRuleInput4);
 
-    // 2回目の再試行ログ
-    expect(result.retry_logs[1].attempt_number).toBe(2);
-    expect(result.retry_logs[1].error_message).toMatch(/timeout/i);
-    expect(result.retry_logs[1].backoff_delay_ms).toBe(200);
+    // ステップ 8: 「売上金額」を参照する全ての検証ルールを取得し、一貫性が保たれていることを確認する
+    const referencesForSalesAmount = getValidationRuleReferences('売上金額');
+    
+    expect(referencesForSalesAmount.length).toBeGreaterThanOrEqual(2);
+    expect(referencesForSalesAmount).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        ruleName: '売上金額範囲検証',
+        referencedItemName: '売上金額'
+      }),
+      expect.objectContaining({
+        ruleName: '売上金額データ型検証',
+        referencedItemName: '売上金額'
+      })
+    ]));
 
-    // 指数バックオフの検証（初期値100ms × 2^n）
-    expect(result.retry_logs[1].backoff_delay_ms).toBe(
-      api_config.initial_backoff_ms * Math.pow(2, 1)
-    );
+    // ステップ 9: 各検証ルールが参照しているメタデータの情報が一貫性を持っていることを確認する
+    referencesForSalesAmount.forEach((rule) => {
+      const referencedMetadata = getSalesDataItemMetadataByName(rule.referencedItemName);
+      
+      expect(referencedMetadata).toEqual(expect.objectContaining({
+        itemName: '売上金額',
+        unit: '円',
+        dataType: '数値型',
+        calculationLogic: '単価×数量'
+      }));
+    });
 
-    // 最大再試行回数の制限を超えていないことを確認
-    expect(result.total_attempts).toBeLessThanOrEqual(api_config.max_retries);
+    // ステップ 10: 複数項目の検証ルール参照情報も一貫性を保っていることを確認する
+    const referencesForApo = getValidationRuleReferences('アポ数');
+    expect(referencesForApo.length).toBeGreaterThanOrEqual(1);
+    
+    referencesForApo.forEach((rule) => {
+      const referencedMetadata = getSalesDataItemMetadataByName(rule.referencedItemName);
+      
+      expect(referencedMetadata).toEqual(expect.objectContaining({
+        itemName: 'アポ数',
+        unit: '件',
+        dataType: '数値型',
+        calculationLogic: 'SUM(日別アポ数)'
+      }));
+    });
 
-    // フェッチが3回呼ばれたことを確認
-    expect(fetchMock.mock.calls.length).toBe(3);
+    const referencesForAgreement = getValidationRuleReferences('成約数');
+    expect(referencesForAgreement.length).toBeGreaterThanOrEqual(1);
+    
+    referencesForAgreement.forEach((rule) => {
+      const referencedMetadata = getSalesDataItemMetadataByName(rule.referencedItemName);
+      
+      expect(referencedMetadata).toEqual(expect.objectContaining({
+        itemName: '成約数',
+        unit: '件',
+        dataType: '数値型',
+        calculationLogic: 'SUM(日別成約数)'
+      }));
+    });
 
-    // 最終的なAPI呼び出しのペイロード検証
-    const final_request_body = JSON.parse(
-      fetchMock.mock.calls[2][1].body
-    );
-    expect(final_request_body.customer_id).toBe("CUST-001");
-    expect(final_request_body.amount).toBe(50000);
-
-    // 成功時のステータスコード検証
-    expect(result.linked_at).toBe("2024-01-15T11:00:00Z");
+    // ステップ 11: メタデータが複数の検証ルールから同じ定義で参照されていることを最終確認する
+    const finalMetadataList = getSalesDataItemMetadataList();
+    const finalRuleCountForSalesAmount = referencesForSalesAmount.length;
+    const finalRuleCountForApo = referencesForApo.length;
+    const finalRuleCountForAgreement = referencesForAgreement.length;
+    
+    expect(finalMetadataList.length).toBeGreaterThanOrEqual(3);
+    expect(finalRuleCountForSalesAmount).toBeGreaterThanOrEqual(2);
+    expect(finalRuleCountForApo).toBeGreaterThanOrEqual(1);
+    expect(finalRuleCountForAgreement).toBeGreaterThanOrEqual(1);
   });
 });

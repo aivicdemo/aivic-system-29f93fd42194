@@ -1,81 +1,105 @@
-import { it, describe, expect, beforeEach } from '@jest/globals';
-import { getTimelineIntegratedContractInfo } from '../../src/logic/it-1-1-1';
+import { recordAuditLog, queryAuditLogs } from "../../src/logic/it-1781935279444-2-2-1";
 
-describe('営業成果データの自動検証ルール定義と異常検出機能', () => {
+describe("ポータルアクション監査ログ自動記録機能", () => {
   // SCEN-844
-  it('[normal] 契約・成果物情報の時系列統合表示機能 - 顧客企業営業責任者がポータルアクセス時、契約書・提案資料・メール履歴・納期情報が時系列順で正しく表示される', () => {
-    const customer_id = 'CUST-001';
-    const contract_id = 'CTR-2024-001';
+  test("同一ユーザーが短時間に複数アクションを実行した場合、各アクションが個別のレコードとして記録される", async () => {
+    const userId = "user_test_844";
+    const sessionId = "session_test_844_001";
+    const timestamp1 = new Date("2024-01-15T11:00:00.000Z");
+    const timestamp2 = new Date("2024-01-15T11:00:00.100Z");
+    const timestamp3 = new Date("2024-01-15T11:00:00.200Z");
 
-    const mock_contract_data = {
-      contract_id: 'CTR-2024-001',
-      customer_id: 'CUST-001',
-      contract_date: '2024-01-15T09:00:00Z',
-      contract_name: '基本契約',
-      document_type: 'contract'
-    };
+    // アクション1: データエクスポート
+    await recordAuditLog({
+      userId,
+      sessionId,
+      actionType: "DATA_EXPORT",
+      timestamp: timestamp1,
+      portalAction: "export",
+      details: { format: "csv", recordCount: 150 },
+    });
 
-    const mock_proposal_data = {
-      proposal_id: 'PROP-2024-001',
-      customer_id: 'CUST-001',
-      proposal_date: '2024-01-10T14:30:00Z',
-      proposal_name: '提案資料A',
-      document_type: 'proposal'
-    };
+    // アクション2: 請求書生成
+    await recordAuditLog({
+      userId,
+      sessionId,
+      actionType: "INVOICE_GENERATION",
+      timestamp: timestamp2,
+      portalAction: "generate_invoice",
+      details: { customerId: "cust_001", amount: 50000 },
+    });
 
-    const mock_email_history = {
-      email_id: 'EMAIL-2024-001',
-      customer_id: 'CUST-001',
-      email_sent_date: '2024-01-20T11:15:00Z',
-      subject: '契約内容確認',
-      document_type: 'email'
-    };
+    // アクション3: 営業レポート更新
+    await recordAuditLog({
+      userId,
+      sessionId,
+      actionType: "REPORT_UPDATE",
+      timestamp: timestamp3,
+      portalAction: "update_report",
+      details: { reportId: "rep_001", section: "sales_summary" },
+    });
 
-    const mock_delivery_deadline = {
-      delivery_id: 'DEL-2024-001',
-      customer_id: 'CUST-001',
-      deadline_date: '2024-02-28T23:59:59Z',
-      item_name: '成果物1',
-      document_type: 'delivery'
-    };
+    // 監査ログを照会
+    const auditLogs = await queryAuditLogs({
+      userId,
+      sessionId,
+      startTime: new Date("2024-01-15T10:59:00.000Z"),
+      endTime: new Date("2024-01-15T11:01:00.000Z"),
+    });
 
-    const input_params = {
-      customer_id: customer_id,
-      contract_id: contract_id,
-      documents: [
-        mock_proposal_data,
-        mock_contract_data,
-        mock_email_history,
-        mock_delivery_deadline
-      ]
-    };
+    // ログレコード件数が3件であることを検証
+    expect(auditLogs).toHaveLength(3);
 
-    const result = getTimelineIntegratedContractInfo(input_params);
+    // 最初のレコード (データエクスポート)
+    expect(auditLogs[0]).toEqual({
+      userId: "user_test_844",
+      sessionId: "session_test_844_001",
+      actionType: "DATA_EXPORT",
+      timestamp: timestamp1,
+      portalAction: "export",
+      details: { format: "csv", recordCount: 150 },
+    });
 
-    expect(result).toBeDefined();
-    expect(result.customer_id).toBe('CUST-001');
-    expect(result.timeline_items).toBeDefined();
-    expect(Array.isArray(result.timeline_items)).toBe(true);
-    expect(result.timeline_items.length).toBe(4);
+    // 2番目のレコード (請求書生成)
+    expect(auditLogs[1]).toEqual({
+      userId: "user_test_844",
+      sessionId: "session_test_844_001",
+      actionType: "INVOICE_GENERATION",
+      timestamp: timestamp2,
+      portalAction: "generate_invoice",
+      details: { customerId: "cust_001", amount: 50000 },
+    });
 
-    expect(result.timeline_items[0].document_type).toBe('proposal');
-    expect(result.timeline_items[0].timestamp).toBe('2024-01-10T14:30:00Z');
+    // 3番目のレコード (営業レポート更新)
+    expect(auditLogs[2]).toEqual({
+      userId: "user_test_844",
+      sessionId: "session_test_844_001",
+      actionType: "REPORT_UPDATE",
+      timestamp: timestamp3,
+      portalAction: "update_report",
+      details: { reportId: "rep_001", section: "sales_summary" },
+    });
 
-    expect(result.timeline_items[1].document_type).toBe('contract');
-    expect(result.timeline_items[1].timestamp).toBe('2024-01-15T09:00:00Z');
+    // 各ログレコードのタイムスタンプが異なることを検証 (ミリ秒単位で区別可能)
+    expect(auditLogs[0].timestamp.getTime()).toBe(
+      new Date("2024-01-15T11:00:00.000Z").getTime()
+    );
+    expect(auditLogs[1].timestamp.getTime()).toBe(
+      new Date("2024-01-15T11:00:00.100Z").getTime()
+    );
+    expect(auditLogs[2].timestamp.getTime()).toBe(
+      new Date("2024-01-15T11:00:00.200Z").getTime()
+    );
 
-    expect(result.timeline_items[2].document_type).toBe('email');
-    expect(result.timeline_items[2].timestamp).toBe('2024-01-20T11:15:00Z');
+    // 各ログレコードのアクション種別が正確に記録されていることを検証
+    expect(auditLogs[0].actionType).toBe("DATA_EXPORT");
+    expect(auditLogs[1].actionType).toBe("INVOICE_GENERATION");
+    expect(auditLogs[2].actionType).toBe("REPORT_UPDATE");
 
-    expect(result.timeline_items[3].document_type).toBe('delivery');
-    expect(result.timeline_items[3].timestamp).toBe('2024-02-28T23:59:59Z');
-
-    expect(result.is_chronological_order).toBe(true);
-    expect(result.total_items_displayed).toBe(4);
-
-    const timestamps = result.timeline_items.map(item => new Date(item.timestamp).getTime());
-    for (let i = 1; i < timestamps.length; i++) {
-      expect(timestamps[i]).toBeGreaterThanOrEqual(timestamps[i - 1]);
-    }
+    // すべてのログレコードが同一のユーザーID・セッションIDを持つことを検証
+    auditLogs.forEach((log) => {
+      expect(log.userId).toBe("user_test_844");
+      expect(log.sessionId).toBe("session_test_844_001");
+    });
   });
 });

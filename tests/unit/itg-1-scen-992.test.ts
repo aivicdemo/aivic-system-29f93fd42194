@@ -1,96 +1,97 @@
-import { detectExceptionCases } from '../../src/logic/it-1781935279444-2-1-1';
+import { determineRetroactiveRuleApplication } from "../../src/logic/it-1781935279444-2-1-1";
 
-describe('営業データ入力時の品質検証ルール定義・実行機能', () => {
-  // SCEN-992: [normal] 例外ケース検出と手順書への追加判定 - 判断基準の曖昧さが原因である例外ケースが改善対象として抽出される
-  test('判断基準が曖昧な営業データから例外ケースを検出し、改善対象として分類する', () => {
-    // 判断基準が曖昧な営業データサンプル
-    const ambiguousSalesData = {
-      customer_id: 'CUST-001',
-      service_type: 'premium',
-      appointment_count: 5,
-      contract_value: 250000,
-      discount_rate: 0.15,
-      execution_date: '2024-01-15',
-      notes: '顧客反応が曖昧で判定困難'
+describe("営業データ入力時の品質検証ルール定義・実行機能", () => {
+  test("SCEN-992: 請求ルール変更時の遡及適用判定機能 - 境界値における遡及判定が正確に行われる", () => {
+    const ruleChangeEffectiveDate = new Date("2024-01-01T00:00:00Z");
+    const oldRuleConfig = {
+      ruleId: "rule_001",
+      discountRate: 0.1,
+      minimumBillingAmount: 5000,
+      appliedFrom: new Date("2023-01-01T00:00:00Z"),
+      appliedUntil: new Date("2023-12-31T23:59:59Z"),
+    };
+    const newRuleConfig = {
+      ruleId: "rule_002",
+      discountRate: 0.15,
+      minimumBillingAmount: 10000,
+      appliedFrom: new Date("2024-01-01T00:00:00Z"),
+      appliedUntil: new Date("2024-12-31T23:59:59Z"),
     };
 
-    // データ品質検証ルール定義（判断基準が曖昧なケース）
-    const ambiguousValidationRules = [
-      {
-        rule_id: 'RULE-001',
-        field_name: 'discount_rate',
-        validation_type: 'range_check',
-        min_value: 0,
-        max_value: 0.5,
-        description: '割引率の範囲チェック'
-      },
-      {
-        rule_id: 'RULE-002',
-        field_name: 'contract_value',
-        validation_type: 'threshold',
-        threshold_value: 200000,
-        operator: 'gte',
-        description: '契約金額の最小値チェック（判断基準が明確でない）'
-      },
-      {
-        rule_id: 'RULE-003',
-        field_name: 'appointment_count',
-        validation_type: 'business_logic',
-        expected_min: 3,
-        expected_max: 10,
-        description: 'アポイント数の合理性チェック（基準が曖昧）'
-      }
-    ];
+    const dataBeforeChangeDate = {
+      dataId: "data_001",
+      occurrenceDate: new Date("2023-12-31T00:00:00Z"),
+      customerId: "cust_001",
+      serviceType: "service_A",
+      amount: 20000,
+    };
 
-    // データ品質分析を実行
-    const analysisResult = detectExceptionCases({
-      sales_data: ambiguousSalesData,
-      validation_rules: ambiguousValidationRules,
-      analysis_type: 'ambiguous_criteria_detection'
+    const dataOnChangeDate = {
+      dataId: "data_002",
+      occurrenceDate: new Date("2024-01-01T00:00:00Z"),
+      customerId: "cust_001",
+      serviceType: "service_A",
+      amount: 20000,
+    };
+
+    const dataAfterChangeDate = {
+      dataId: "data_003",
+      occurrenceDate: new Date("2024-01-02T00:00:00Z"),
+      customerId: "cust_001",
+      serviceType: "service_A",
+      amount: 20000,
+    };
+
+    const resultBeforeChange = determineRetroactiveRuleApplication({
+      operatingData: dataBeforeChangeDate,
+      ruleChangeEffectiveDate: ruleChangeEffectiveDate,
+      oldRuleConfig: oldRuleConfig,
+      newRuleConfig: newRuleConfig,
     });
 
-    // 検出された例外ケースの一覧を確認
-    expect(analysisResult).toHaveProperty('exception_cases');
-    expect(Array.isArray(analysisResult.exception_cases)).toBe(true);
-    expect(analysisResult.exception_cases.length).toBeGreaterThan(0);
+    const resultOnChange = determineRetroactiveRuleApplication({
+      operatingData: dataOnChangeDate,
+      ruleChangeEffectiveDate: ruleChangeEffectiveDate,
+      oldRuleConfig: oldRuleConfig,
+      newRuleConfig: newRuleConfig,
+    });
 
-    // 判断基準の曖昧さが原因である例外ケースが改善対象として分類されているか確認
-    const ambiguousCriteriaCases = analysisResult.exception_cases.filter(
-      (ec: any) => ec.root_cause === 'ambiguous_criteria'
+    const resultAfterChange = determineRetroactiveRuleApplication({
+      operatingData: dataAfterChangeDate,
+      ruleChangeEffectiveDate: ruleChangeEffectiveDate,
+      oldRuleConfig: oldRuleConfig,
+      newRuleConfig: newRuleConfig,
+    });
+
+    expect(resultBeforeChange.isRetroactivelyApplied).toBe(false);
+    expect(resultBeforeChange.appliedRuleId).toBe("rule_001");
+    expect(resultBeforeChange.discountRate).toBe(0.1);
+    expect(resultBeforeChange.minimumBillingAmount).toBe(5000);
+    expect(resultBeforeChange.reason).toBe(
+      "遡及適用対象外: 発生日が変更開始日より前"
     );
-    expect(ambiguousCriteriaCases.length).toBeGreaterThan(0);
 
-    // 検出された例外ケースの詳細を確認
-    const firstAmbiguousCase = ambiguousCriteriaCases[0];
-    expect(firstAmbiguousCase).toHaveProperty('exception_id');
-    expect(firstAmbiguousCase).toHaveProperty('rule_id');
-    expect(firstAmbiguousCase).toHaveProperty('detected_field');
-    expect(firstAmbiguousCase).toHaveProperty('detected_value');
-    expect(firstAmbiguousCase).toHaveProperty('root_cause');
-    expect(firstAmbiguousCase).toHaveProperty('improvement_category');
+    expect(resultOnChange.isRetroactivelyApplied).toBe(true);
+    expect(resultOnChange.appliedRuleId).toBe("rule_002");
+    expect(resultOnChange.discountRate).toBe(0.15);
+    expect(resultOnChange.minimumBillingAmount).toBe(10000);
+    expect(resultOnChange.reason).toBe(
+      "遡及適用対象: 発生日が変更開始日以降"
+    );
 
-    // 改善対象の判定内容を確認
-    expect(firstAmbiguousCase.root_cause).toBe('ambiguous_criteria');
-    expect(firstAmbiguousCase.improvement_category).toBe('clarify_judgment_criteria');
+    expect(resultAfterChange.isRetroactivelyApplied).toBe(true);
+    expect(resultAfterChange.appliedRuleId).toBe("rule_002");
+    expect(resultAfterChange.discountRate).toBe(0.15);
+    expect(resultAfterChange.minimumBillingAmount).toBe(10000);
+    expect(resultAfterChange.reason).toBe(
+      "遡及適用対象: 発生日が変更開始日以降"
+    );
 
-    // 手順書への追加判定処理を実行
-    const manualAdditionResult = detectExceptionCases({
-      sales_data: ambiguousSalesData,
-      validation_rules: ambiguousValidationRules,
-      analysis_type: 'ambiguous_criteria_detection',
-      action: 'add_to_procedure_manual'
-    });
-
-    // 改善対象として手順書に追加される処理が実行されたか確認
-    expect(manualAdditionResult).toHaveProperty('procedure_update_status');
-    expect(manualAdditionResult.procedure_update_status).toBe('queued_for_addition');
-    expect(manualAdditionResult).toHaveProperty('added_case_count');
-    expect(manualAdditionResult.added_case_count).toBeGreaterThan(0);
-    expect(manualAdditionResult).toHaveProperty('procedure_manual_version');
-    expect(typeof manualAdditionResult.procedure_manual_version).toBe('string');
-
-    // 改善対象ケースが正しく手順書に追加されるプロセスが進行していることを確認
-    expect(manualAdditionResult).toHaveProperty('next_approval_step');
-    expect(manualAdditionResult.next_approval_step).toBe('manager_review');
+    expect(resultBeforeChange.isRetroactivelyApplied).not.toBe(
+      resultOnChange.isRetroactivelyApplied
+    );
+    expect(resultOnChange.appliedRuleId).not.toBe(
+      resultBeforeChange.appliedRuleId
+    );
   });
 });

@@ -1,115 +1,100 @@
-import { searchSalesActivities } from "../../src/logic/it-1781935279444-1-1-1";
+import { calculateInquirySLA } from "../../src/logic/it-1781935279444-2-2-1";
 
-describe("営業活動データ検索・抽出・検証 - 検索対象期間の境界日時が正確に判定される", () => {
-  test("SCEN-1187: 検索対象期間の開始日時と終了日時の境界値が正確に判定される", () => {
-    // テスト用の営業活動データセット
-    const test_sales_activities = [
-      {
-        activity_id: "ACT001",
-        customer_name: "顧客A",
-        contact_datetime: new Date("2023-12-31T23:59:59Z"),
-        contact_type: "電話",
-        outcome: "対応予定",
-        appointment_status: "未確定",
-      },
-      {
-        activity_id: "ACT002",
-        customer_name: "顧客B",
-        contact_datetime: new Date("2024-01-01T00:00:00Z"),
-        contact_type: "訪問",
-        outcome: "アポ確定",
-        appointment_status: "確定",
-      },
-      {
-        activity_id: "ACT003",
-        customer_name: "顧客C",
-        contact_datetime: new Date("2024-01-15T12:30:45Z"),
-        contact_type: "メール",
-        outcome: "成約",
-        appointment_status: "完了",
-      },
-      {
-        activity_id: "ACT004",
-        customer_name: "顧客D",
-        contact_datetime: new Date("2024-01-31T23:59:59Z"),
-        contact_type: "訪問",
-        outcome: "成約",
-        appointment_status: "完了",
-      },
-      {
-        activity_id: "ACT005",
-        customer_name: "顧客E",
-        contact_datetime: new Date("2024-02-01T00:00:00Z"),
-        contact_type: "電話",
-        outcome: "対応予定",
-        appointment_status: "未確定",
-      },
-    ];
+describe("営業日ベースの問い合わせSLA管理", () => {
+  // SCEN-1187: 問い合わせ受領から検証結果回答までが営業日ベースで1営業日以内に完了する
+  test("月曜09:00受領の問い合わせ検証が火曜営業時間内に完了し、SLA要件を満たす", () => {
+    // テストデータ: 月曜日（祝日でない）09:00に問い合わせを受領
+    const inquiry = {
+      inquiryId: "INQ-20250120-001",
+      customerId: "CUST-0001",
+      customerName: "テスト顧客A",
+      inquiryContent: "請求額計算ロジックの妥当性確認",
+      receivedAt: new Date("2025-01-20T09:00:00+09:00"), // 月曜日 09:00
+      receivedDateStr: "2025-01-20",
+      receivedDayOfWeek: 1, // Monday
+      isHoliday: false,
+    };
 
-    // ケース1: 開始日時2024年1月1日 00:00:00、終了日時2024年1月31日 23:59:59
-    const search_result_1 = searchSalesActivities(test_sales_activities, {
-      start_datetime: new Date("2024-01-01T00:00:00Z"),
-      end_datetime: new Date("2024-01-31T23:59:59Z"),
+    // 問い合わせ管理システムに登録後、初期検証処理を実行
+    const verificationResult = {
+      inquiryId: inquiry.inquiryId,
+      verificationStartedAt: new Date(
+        "2025-01-20T09:30:00+09:00"
+      ),
+      verificationCompletedAt: new Date("2025-01-21T14:00:00+09:00"), // 火曜日 14:00
+      completedDateStr: "2025-01-21",
+      completedDayOfWeek: 2, // Tuesday
+      verificationStatus: "completed",
+      responseReadyAt: new Date("2025-01-21T14:00:00+09:00"),
+    };
+
+    // 営業日カレンダー定義（月～金が営業日、09:00～18:00が営業時間）
+    const businessDayCalendar = {
+      businessDays: [1, 2, 3, 4, 5], // Mon-Fri
+      businessHoursStart: 9,
+      businessHoursEnd: 18,
+      holidays: [] as string[],
+    };
+
+    // SLA計算処理を実行
+    const slaResult = calculateInquirySLA({
+      inquiryReceivedAt: inquiry.receivedAt,
+      verificationCompletedAt: verificationResult.verificationCompletedAt,
+      businessDayCalendar: businessDayCalendar,
+      slaThresholdBusinessDays: 1, // SLA閾値: 1営業日以内
     });
 
-    expect(search_result_1).toHaveLength(3);
-    expect(search_result_1.map((a: any) => a.activity_id)).toEqual([
-      "ACT002",
-      "ACT003",
-      "ACT004",
-    ]);
-    expect(search_result_1.some((a: any) => a.activity_id === "ACT001")).toBe(
-      false
-    );
-    expect(search_result_1.some((a: any) => a.activity_id === "ACT005")).toBe(
-      false
-    );
+    // 期待結果の検証
+    // 1. 問い合わせ受領日時が月曜日09:00に登録されていること
+    expect(inquiry.receivedDateStr).toBe("2025-01-20");
+    expect(inquiry.receivedDayOfWeek).toBe(1);
+    expect(inquiry.isHoliday).toBe(false);
 
-    // ケース2: 開始日時を2024年1月1日 00:00:01に変更
-    const search_result_2 = searchSalesActivities(test_sales_activities, {
-      start_datetime: new Date("2024-01-01T00:00:01Z"),
-      end_datetime: new Date("2024-01-31T23:59:59Z"),
-    });
-
-    expect(search_result_2).toHaveLength(2);
-    expect(search_result_2.map((a: any) => a.activity_id)).toEqual([
-      "ACT003",
-      "ACT004",
-    ]);
-    expect(search_result_2.some((a: any) => a.activity_id === "ACT002")).toBe(
-      false
+    // 2. 検証完了日時が火曜日の営業時間内（14:00）に設定されていること
+    expect(verificationResult.completedDateStr).toBe("2025-01-21");
+    expect(verificationResult.completedDayOfWeek).toBe(2);
+    expect(verificationResult.verificationCompletedAt.getHours()).toBe(14);
+    expect(verificationResult.verificationCompletedAt.getHours()).toBeGreaterThanOrEqual(
+      businessDayCalendar.businessHoursStart
+    );
+    expect(verificationResult.verificationCompletedAt.getHours()).toBeLessThan(
+      businessDayCalendar.businessHoursEnd
     );
 
-    // ケース3: 終了日時を2024年1月31日 23:59:58に変更
-    const search_result_3 = searchSalesActivities(test_sales_activities, {
-      start_datetime: new Date("2024-01-01T00:00:00Z"),
-      end_datetime: new Date("2024-01-31T23:59:58Z"),
-    });
+    // 3. SLA計算結果が1営業日以内に完了したことを示すこと
+    expect(slaResult.slaCompliant).toBe(true);
+    expect(slaResult.elapsedBusinessDays).toBe(1);
 
-    expect(search_result_3).toHaveLength(2);
-    expect(search_result_3.map((a: any) => a.activity_id)).toEqual([
-      "ACT002",
-      "ACT003",
-    ]);
-    expect(search_result_3.some((a: any) => a.activity_id === "ACT004")).toBe(
-      false
+    // 4. 回答可能時刻が営業時間内であること
+    expect(slaResult.responseReadyWithinBusinessHours).toBe(true);
+
+    // 5. 実際の経過営業日数が閾値以下であること
+    expect(slaResult.elapsedBusinessDays).toBeLessThanOrEqual(
+      businessDayCalendar.businessDays.length > 0 ? 1 : 0
     );
 
-    // 境界値の正確性確認
-    const boundary_check_result = searchSalesActivities(
-      test_sales_activities,
-      {
-        start_datetime: new Date("2024-01-01T00:00:00Z"),
-        end_datetime: new Date("2024-01-31T23:59:59Z"),
-      }
+    // 6. システムログが記録され、全処理タイムスタンプが営業日カレンダー基準で管理されていること
+    expect(slaResult.systemLog).toBeDefined();
+    expect(slaResult.systemLog.receivedTimestamp).toEqual(
+      inquiry.receivedAt.toISOString()
     );
+    expect(slaResult.systemLog.verificationCompletedTimestamp).toEqual(
+      verificationResult.verificationCompletedAt.toISOString()
+    );
+    expect(slaResult.systemLog.slaEvaluationCompleted).toBe(true);
 
-    const included_activities = boundary_check_result.map(
-      (a: any) => a.activity_id
+    // 7. 回答が翌営業日の営業時間内に完了していること
+    const receivedDayIndex = inquiry.receivedDayOfWeek;
+    const completedDayIndex = verificationResult.completedDayOfWeek;
+    const daysDifference = completedDayIndex - receivedDayIndex;
+    expect(daysDifference).toBe(1); // 1日後
+    expect(verificationResult.verificationCompletedAt.getHours()).toBeGreaterThanOrEqual(
+      9
     );
-    expect(included_activities.includes("ACT002")).toBe(true);
-    expect(included_activities.includes("ACT004")).toBe(true);
-    expect(included_activities.includes("ACT001")).toBe(false);
-    expect(included_activities.includes("ACT005")).toBe(false);
+    expect(verificationResult.verificationCompletedAt.getHours()).toBeLessThan(18);
+
+    // 8. SLA要件「営業日ベースで1営業日以内」を満たしていること
+    expect(slaResult.meetsRequirement).toBe(true);
+    expect(slaResult.slaStatus).toBe("compliant");
   });
 });

@@ -1,187 +1,145 @@
-import {
-  createMonthlySummaryTemplate,
-  updateMonthlySummaryTemplateItem,
-  generateMonthlySummaryReport,
-} from "../../src/logic/it-1-br-1781935279444-1-2-1";
+import { describe, test, expect, beforeEach, afterEach } from '@jest/globals';
+import { createQualityChecklistWithBoundaryValidation } from '../../src/logic/it-1781935279444-2-1-1';
 
-describe("月次サマリーテンプレート定義・管理", () => {
-  test("SCEN-1332: テンプレート項目の表示順序と計算ロジックが正しく反映される", () => {
-    // テンプレート作成: 売上、原価、粗利益、粗利益率を定義順序通りに追加
-    const template_id = "tpl_20240201_001";
-    const organization_id = "org_12345";
+describe('品質管理ルール・チェックリスト作成 - 数値範囲境界値テスト', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
 
-    const template_definition = {
-      template_id: template_id,
-      organization_id: organization_id,
-      template_name: "月次営業成果サマリー",
-      template_items: [
+  afterEach(() => {
+    jest.clearAllMocks();
+  });
+
+  // SCEN-1332: 数値範囲の上限値・下限値がチェックリストの境界値として正しく記録される
+  test('should correctly save numeric range boundary values in checklist', () => {
+    // ハッピーパス: 正常な範囲（下限値≤上限値）でチェックリストが作成される
+    const checklistInput1 = {
+      name: '数値範囲境界値テスト',
+      checkItems: [
         {
-          item_sequence: 1,
-          item_name: "売上",
-          item_key: "revenue",
-          data_type: "number",
-          calculation_formula: null,
-          display_format: "currency_jpy",
-          is_required: true,
-        },
-        {
-          item_sequence: 2,
-          item_name: "原価",
-          item_key: "cost",
-          data_type: "number",
-          calculation_formula: null,
-          display_format: "currency_jpy",
-          is_required: true,
-        },
-        {
-          item_sequence: 3,
-          item_name: "粗利益",
-          item_key: "gross_profit",
-          data_type: "number",
-          calculation_formula: "revenue - cost",
-          display_format: "currency_jpy",
-          is_required: false,
-        },
-        {
-          item_sequence: 4,
-          item_name: "粗利益率",
-          item_key: "gross_profit_ratio",
-          data_type: "number",
-          calculation_formula: "(revenue - cost) / revenue * 100",
-          display_format: "percent_2dp",
-          is_required: false,
+          itemType: '数値範囲',
+          minValue: -999999.99,
+          maxValue: 999999.99,
         },
       ],
     };
 
-    // テンプレート作成実行
-    const created_template = createMonthlySummaryTemplate({
-      template_id: template_definition.template_id,
-      organization_id: template_definition.organization_id,
-      template_name: template_definition.template_name,
-      template_items: template_definition.template_items,
-    });
+    const result1 = createQualityChecklistWithBoundaryValidation(checklistInput1);
 
-    // 作成結果の検証: 項目の表示順序が定義通り
-    expect(created_template.template_id).toBe("tpl_20240201_001");
-    expect(created_template.template_items.length).toBe(4);
-    expect(created_template.template_items[0].item_sequence).toBe(1);
-    expect(created_template.template_items[0].item_name).toBe("売上");
-    expect(created_template.template_items[1].item_sequence).toBe(2);
-    expect(created_template.template_items[1].item_name).toBe("原価");
-    expect(created_template.template_items[2].item_sequence).toBe(3);
-    expect(created_template.template_items[2].item_name).toBe("粗利益");
-    expect(created_template.template_items[3].item_sequence).toBe(4);
-    expect(created_template.template_items[3].item_name).toBe("粗利益率");
-
-    // テンプレート項目の計算ロジック検証
-    expect(created_template.template_items[2].calculation_formula).toBe(
-      "revenue - cost"
-    );
-    expect(created_template.template_items[3].calculation_formula).toBe(
-      "(revenue - cost) / revenue * 100"
-    );
-
-    // サンプルデータ1: 売上1000万円、原価600万円の場合
-    const sample_data_1 = {
-      template_id: template_id,
-      revenue: 10000000,
-      cost: 6000000,
-    };
-
-    const report_1 = generateMonthlySummaryReport({
-      template_id: sample_data_1.template_id,
-      monthly_data: sample_data_1,
-    });
-
-    // 計算結果の検証: 粗利益 = 10000000 - 6000000 = 4000000
-    expect(report_1.report_items[0].item_name).toBe("売上");
-    expect(report_1.report_items[0].item_value).toBe(10000000);
-    expect(report_1.report_items[1].item_name).toBe("原価");
-    expect(report_1.report_items[1].item_value).toBe(6000000);
-    expect(report_1.report_items[2].item_name).toBe("粗利益");
-    expect(report_1.report_items[2].item_value).toBe(4000000);
-    // 粗利益率 = (10000000 - 6000000) / 10000000 * 100 = 40.0
-    expect(report_1.report_items[3].item_name).toBe("粗利益率");
-    expect(report_1.report_items[3].item_value).toBe(40.0);
-
-    // サンプルデータ2: 売上2500万円、原価750万円の場合
-    const sample_data_2 = {
-      template_id: template_id,
-      revenue: 25000000,
-      cost: 7500000,
-    };
-
-    const report_2 = generateMonthlySummaryReport({
-      template_id: sample_data_2.template_id,
-      monthly_data: sample_data_2,
-    });
-
-    // 計算結果の検証: 粗利益 = 25000000 - 7500000 = 17500000
-    // 粗利益率 = (25000000 - 7500000) / 25000000 * 100 = 70.0
-    expect(report_2.report_items[0].item_value).toBe(25000000);
-    expect(report_2.report_items[1].item_value).toBe(7500000);
-    expect(report_2.report_items[2].item_value).toBe(17500000);
-    expect(report_2.report_items[3].item_value).toBe(70.0);
-
-    // テンプレート項目の表示順序を変更: 粗利益率を2番目に移動
-    const updated_template = updateMonthlySummaryTemplateItem({
-      template_id: template_id,
-      items_update: [
+    expect(result1.success).toBe(true);
+    expect(result1.checklist).toEqual({
+      id: expect.any(String),
+      name: '数値範囲境界値テスト',
+      checkItems: [
         {
-          item_key: "revenue",
-          item_sequence: 1,
-        },
-        {
-          item_key: "gross_profit_ratio",
-          item_sequence: 2,
-        },
-        {
-          item_key: "cost",
-          item_sequence: 3,
-        },
-        {
-          item_key: "gross_profit",
-          item_sequence: 4,
+          itemType: '数値範囲',
+          minValue: -999999.99,
+          maxValue: 999999.99,
         },
       ],
+      createdAt: expect.any(String),
+      updatedAt: expect.any(String),
     });
+    expect(result1.checklist.checkItems[0].minValue).toBe(-999999.99);
+    expect(result1.checklist.checkItems[0].maxValue).toBe(999999.99);
 
-    // 項目順序変更後の検証
-    expect(updated_template.template_items[0].item_sequence).toBe(1);
-    expect(updated_template.template_items[0].item_name).toBe("売上");
-    expect(updated_template.template_items[1].item_sequence).toBe(2);
-    expect(updated_template.template_items[1].item_name).toBe("粗利益率");
-    expect(updated_template.template_items[2].item_sequence).toBe(3);
-    expect(updated_template.template_items[2].item_name).toBe("原価");
-    expect(updated_template.template_items[3].item_sequence).toBe(4);
-    expect(updated_template.template_items[3].item_name).toBe("粗利益");
+    // 境界値が同一値である場合（下限値=上限値）もチェックリストが作成される
+    const checklistInput2 = {
+      name: '同一値範囲テスト',
+      checkItems: [
+        {
+          itemType: '数値範囲',
+          minValue: 100.00,
+          maxValue: 100.00,
+        },
+      ],
+    };
 
-    // 変更後のレポート生成: 項目順序が反映されているか確認
-    const report_3 = generateMonthlySummaryReport({
-      template_id: template_id,
-      monthly_data: sample_data_1,
-    });
+    const result2 = createQualityChecklistWithBoundaryValidation(checklistInput2);
 
-    // 新しい順序でレポートが生成されることを確認
-    expect(report_3.report_items[0].item_name).toBe("売上");
-    expect(report_3.report_items[0].item_value).toBe(10000000);
-    expect(report_3.report_items[1].item_name).toBe("粗利益率");
-    expect(report_3.report_items[1].item_value).toBe(40.0);
-    expect(report_3.report_items[2].item_name).toBe("原価");
-    expect(report_3.report_items[2].item_value).toBe(6000000);
-    expect(report_3.report_items[3].item_name).toBe("粗利益");
-    expect(report_3.report_items[3].item_value).toBe(4000000);
+    expect(result2.success).toBe(true);
+    expect(result2.checklist.checkItems[0].minValue).toBe(100.00);
+    expect(result2.checklist.checkItems[0].maxValue).toBe(100.00);
 
-    // 計算ロジックが引き続き正しく動作していることを確認
-    const report_4 = generateMonthlySummaryReport({
-      template_id: template_id,
-      monthly_data: sample_data_2,
-    });
+    // エラーケース1: 下限値>上限値の場合、バリデーションエラーが発生する
+    const checklistInput3 = {
+      name: '無効な範囲テスト',
+      checkItems: [
+        {
+          itemType: '数値範囲',
+          minValue: 1000000.00,
+          maxValue: -1000000.00,
+        },
+      ],
+    };
 
-    expect(report_4.report_items[0].item_value).toBe(25000000);
-    expect(report_4.report_items[1].item_value).toBe(70.0);
-    expect(report_4.report_items[2].item_value).toBe(7500000);
-    expect(report_4.report_items[3].item_value).toBe(17500000);
+    const result3 = createQualityChecklistWithBoundaryValidation(checklistInput3);
+
+    expect(result3.success).toBe(false);
+    expect(result3.error).toMatch(/下限値/);
+
+    // エラーケース2: チェックリスト名が空の場合
+    const checklistInput4 = {
+      name: '',
+      checkItems: [
+        {
+          itemType: '数値範囲',
+          minValue: 0,
+          maxValue: 100,
+        },
+      ],
+    };
+
+    const result4 = createQualityChecklistWithBoundaryValidation(checklistInput4);
+
+    expect(result4.success).toBe(false);
+    expect(result4.error).toMatch(/チェックリスト名/);
+
+    // エラーケース3: チェック項目が空配列の場合
+    const checklistInput5 = {
+      name: 'テスト',
+      checkItems: [],
+    };
+
+    const result5 = createQualityChecklistWithBoundaryValidation(checklistInput5);
+
+    expect(result5.success).toBe(false);
+    expect(result5.error).toMatch(/チェック項目/);
+
+    // 極端な値での正常系: 非常に大きい数値と小さい数値の範囲
+    const checklistInput6 = {
+      name: '極端値テスト',
+      checkItems: [
+        {
+          itemType: '数値範囲',
+          minValue: -999999999.99,
+          maxValue: 999999999.99,
+        },
+      ],
+    };
+
+    const result6 = createQualityChecklistWithBoundaryValidation(checklistInput6);
+
+    expect(result6.success).toBe(true);
+    expect(result6.checklist.checkItems[0].minValue).toBe(-999999999.99);
+    expect(result6.checklist.checkItems[0].maxValue).toBe(999999999.99);
+
+    // 精度検証: 小数点以下の桁数が正確に保持される
+    const checklistInput7 = {
+      name: '精度テスト',
+      checkItems: [
+        {
+          itemType: '数値範囲',
+          minValue: -123.456,
+          maxValue: 789.012,
+        },
+      ],
+    };
+
+    const result7 = createQualityChecklistWithBoundaryValidation(checklistInput7);
+
+    expect(result7.success).toBe(true);
+    expect(result7.checklist.checkItems[0].minValue).toBe(-123.456);
+    expect(result7.checklist.checkItems[0].maxValue).toBe(789.012);
   });
 });

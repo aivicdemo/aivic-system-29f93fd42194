@@ -1,223 +1,142 @@
-import { describe, test, expect } from '@jest/globals';
-import { extractContractAndBillingTimeseries } from '../../src/logic/it-1781935279444-2-2-1';
+import { calculateContractChangeVerificationDeadline } from "../../src/logic/it-1-1-1";
 
-const fetchMock = require('jest-fetch-mock');
-
-describe('契約履歴と請求データの時系列抽出機能', () => {
-  test('SCEN-865: 存在しない顧客IDで検索した場合に空のデータセットが返される', async () => {
-    fetchMock.resetMocks();
-
-    const nonexistentCustomerId = 'CUST-99999999';
-    const targetPeriodStartDate = '2024-01-01';
-    const targetPeriodEndDate = '2024-12-31';
-
-    fetchMock.mockResponseOnce(
-      JSON.stringify({
-        statusCode: 200,
-        data: [],
-        message: null,
-      }),
-      { status: 200 }
-    );
-
-    const result = await extractContractAndBillingTimeseries({
-      customerId: nonexistentCustomerId,
-      periodStartDate: targetPeriodStartDate,
-      periodEndDate: targetPeriodEndDate,
+describe("営業成果データの自動検証ルール定義と異常検出機能", () => {
+  test("SCEN-865: 契約変更検証期限自動計算機能 - 契約変更通知受領時に検証完了期限が正しく計算される", () => {
+    // ========================================
+    // テストケース 1: 新規契約（契約タイプ: NEW）
+    // ========================================
+    // 入力: 契約変更通知受領日時 2024-01-15T09:00:00Z, 契約タイプ NEW
+    // 業務ルール: 新規契約は受領日から営業日ベース 3 日以内に検証完了
+    // 期待値計算:
+    //   - 受領日: 2024-01-15（月曜）
+    //   - +1営業日: 2024-01-16（火曜）
+    //   - +2営業日: 2024-01-17（水曜）
+    //   - +3営業日: 2024-01-18（木曜）
+    //   - 期限: 2024-01-18T23:59:59Z
+    const result_new = calculateContractChangeVerificationDeadline({
+      notificationReceivedAt: new Date("2024-01-15T09:00:00Z"),
+      contractType: "NEW",
     });
 
-    expect(result.statusCode).toBe(200);
-    expect(Array.isArray(result.data)).toBe(true);
-    expect(result.data.length).toBe(0);
-    expect(result.message).toBeNull();
-  });
+    expect(result_new.deadline).toEqual(new Date("2024-01-18T23:59:59Z"));
+    expect(result_new.businessDaysAllowed).toBe(3);
+    expect(result_new.contractType).toBe("NEW");
 
-  test('SCEN-865: 存在しない顧客IDで検索時に404ステータスコードが返される場合', async () => {
-    fetchMock.resetMocks();
-
-    const nonexistentCustomerId = 'CUST-99999999';
-    const targetPeriodStartDate = '2024-01-01';
-    const targetPeriodEndDate = '2024-12-31';
-
-    fetchMock.mockResponseOnce(
-      JSON.stringify({
-        statusCode: 404,
-        data: null,
-        message: '指定された顧客IDが見つかりません',
-      }),
-      { status: 404 }
-    );
-
-    const result = await extractContractAndBillingTimeseries({
-      customerId: nonexistentCustomerId,
-      periodStartDate: targetPeriodStartDate,
-      periodEndDate: targetPeriodEndDate,
+    // ========================================
+    // テストケース 2: 契約更新（契約タイプ: UPDATE）
+    // ========================================
+    // 入力: 契約変更通知受領日時 2024-01-15T10:30:00Z, 契約タイプ UPDATE
+    // 業務ルール: 契約更新は受領日から営業日ベース 2 日以内に検証完了
+    // 期待値計算:
+    //   - 受領日: 2024-01-15（月曜）
+    //   - +1営業日: 2024-01-16（火曜）
+    //   - +2営業日: 2024-01-17（水曜）
+    //   - 期限: 2024-01-17T23:59:59Z
+    const result_update = calculateContractChangeVerificationDeadline({
+      notificationReceivedAt: new Date("2024-01-15T10:30:00Z"),
+      contractType: "UPDATE",
     });
 
-    expect(result.statusCode).toBe(404);
-    expect(result.data).toBeNull();
-    expect(result.message).toMatch(/顧客ID/);
-  });
+    expect(result_update.deadline).toEqual(new Date("2024-01-17T23:59:59Z"));
+    expect(result_update.businessDaysAllowed).toBe(2);
+    expect(result_update.contractType).toBe("UPDATE");
 
-  test('SCEN-865: 有効な顧客IDで検索した場合に契約と請求データが時系列で返される', async () => {
-    fetchMock.resetMocks();
-
-    const validCustomerId = 'CUST-2024-001';
-    const targetPeriodStartDate = '2024-01-01';
-    const targetPeriodEndDate = '2024-12-31';
-
-    const expectedTimseriesData = [
-      {
-        eventType: 'contract_created',
-        eventDate: '2024-01-15',
-        contractId: 'CTR-2024-001',
-        amount: 100000,
-      },
-      {
-        eventType: 'billing_issued',
-        eventDate: '2024-02-01',
-        billingId: 'BIL-2024-001',
-        amount: 50000,
-      },
-      {
-        eventType: 'contract_modified',
-        eventDate: '2024-06-10',
-        contractId: 'CTR-2024-001',
-        amount: 120000,
-      },
-    ];
-
-    fetchMock.mockResponseOnce(
-      JSON.stringify({
-        statusCode: 200,
-        data: expectedTimseriesData,
-        message: null,
-      }),
-      { status: 200 }
-    );
-
-    const result = await extractContractAndBillingTimeseries({
-      customerId: validCustomerId,
-      periodStartDate: targetPeriodStartDate,
-      periodEndDate: targetPeriodEndDate,
+    // ========================================
+    // テストケース 3: 契約変更（契約タイプ: CHANGE）
+    // ========================================
+    // 入力: 契約変更通知受領日時 2024-01-15T14:00:00Z, 契約タイプ CHANGE
+    // 業務ルール: 契約変更は受領日から営業日ベース 2 日以内に検証完了
+    // 期待値計算:
+    //   - 受領日: 2024-01-15（月曜）
+    //   - +1営業日: 2024-01-16（火曜）
+    //   - +2営業日: 2024-01-17（水曜）
+    //   - 期限: 2024-01-17T23:59:59Z
+    const result_change = calculateContractChangeVerificationDeadline({
+      notificationReceivedAt: new Date("2024-01-15T14:00:00Z"),
+      contractType: "CHANGE",
     });
 
-    expect(result.statusCode).toBe(200);
-    expect(Array.isArray(result.data)).toBe(true);
-    expect(result.data.length).toBe(3);
-    expect(result.data[0].eventType).toBe('contract_created');
-    expect(result.data[0].eventDate).toBe('2024-01-15');
-    expect(result.data[0].contractId).toBe('CTR-2024-001');
-    expect(result.data[0].amount).toBe(100000);
-    expect(result.data[1].eventType).toBe('billing_issued');
-    expect(result.data[1].eventDate).toBe('2024-02-01');
-    expect(result.data[1].billingId).toBe('BIL-2024-001');
-    expect(result.data[1].amount).toBe(50000);
-    expect(result.data[2].eventType).toBe('contract_modified');
-    expect(result.data[2].eventDate).toBe('2024-06-10');
-    expect(result.data[2].contractId).toBe('CTR-2024-001');
-    expect(result.data[2].amount).toBe(120000);
-    expect(result.message).toBeNull();
-  });
+    expect(result_change.deadline).toEqual(new Date("2024-01-17T23:59:59Z"));
+    expect(result_change.businessDaysAllowed).toBe(2);
+    expect(result_change.contractType).toBe("CHANGE");
 
-  test('SCEN-865: 期間指定で抽出されたデータが時系列でソートされている', async () => {
-    fetchMock.resetMocks();
-
-    const validCustomerId = 'CUST-2024-002';
-    const targetPeriodStartDate = '2024-04-01';
-    const targetPeriodEndDate = '2024-08-31';
-
-    const expectedTimseriesData = [
-      {
-        eventType: 'billing_issued',
-        eventDate: '2024-04-15',
-        billingId: 'BIL-2024-002',
-        amount: 75000,
-      },
-      {
-        eventType: 'contract_modified',
-        eventDate: '2024-06-20',
-        contractId: 'CTR-2024-002',
-        amount: 110000,
-      },
-      {
-        eventType: 'billing_issued',
-        eventDate: '2024-08-01',
-        billingId: 'BIL-2024-003',
-        amount: 55000,
-      },
-    ];
-
-    fetchMock.mockResponseOnce(
-      JSON.stringify({
-        statusCode: 200,
-        data: expectedTimseriesData,
-        message: null,
-      }),
-      { status: 200 }
-    );
-
-    const result = await extractContractAndBillingTimeseries({
-      customerId: validCustomerId,
-      periodStartDate: targetPeriodStartDate,
-      periodEndDate: targetPeriodEndDate,
+    // ========================================
+    // テストケース 4: 金曜日受領の場合の営業日計算
+    // ========================================
+    // 入力: 契約変更通知受領日時 2024-01-19T09:00:00Z（金曜日）, 契約タイプ UPDATE
+    // 業務ルール: 契約更新は受領日から営業日ベース 2 日以内に検証完了
+    // 期待値計算:
+    //   - 受領日: 2024-01-19（金曜日）
+    //   - +1営業日: 2024-01-22（月曜日、土日をスキップ）
+    //   - +2営業日: 2024-01-23（火曜日）
+    //   - 期限: 2024-01-23T23:59:59Z
+    const result_friday = calculateContractChangeVerificationDeadline({
+      notificationReceivedAt: new Date("2024-01-19T09:00:00Z"),
+      contractType: "UPDATE",
     });
 
-    expect(result.statusCode).toBe(200);
-    expect(result.data.length).toBe(3);
-    expect(result.data[0].eventDate).toBe('2024-04-15');
-    expect(result.data[1].eventDate).toBe('2024-06-20');
-    expect(result.data[2].eventDate).toBe('2024-08-01');
-    const dates = result.data.map((item) => new Date(item.eventDate).getTime());
-    expect(dates[0] < dates[1] && dates[1] < dates[2]).toBe(true);
-  });
+    expect(result_friday.deadline).toEqual(new Date("2024-01-23T23:59:59Z"));
+    expect(result_friday.businessDaysAllowed).toBe(2);
 
-  test('SCEN-865: APIエラー時に例外を発生させずにエラーレスポンスを返す', async () => {
-    fetchMock.resetMocks();
+    // ========================================
+    // テストケース 5: 祝日を含む期間の営業日計算
+    // ========================================
+    // 入力: 契約変更通知受領日時 2024-01-08T09:00:00Z（月曜）, 契約タイプ NEW
+    // 注: 2024-01-08 は成人の日（祝日）とする
+    // 業務ルール: 新規契約は受領日から営業日ベース 3 日以内に検証完了
+    // 期待値計算:
+    //   - 受領日: 2024-01-08（月曜、祝日）
+    //   - +1営業日: 2024-01-09（火曜）
+    //   - +2営業日: 2024-01-10（水曜）
+    //   - +3営業日: 2024-01-11（木曜）
+    //   - 期限: 2024-01-11T23:59:59Z
+    const result_holiday = calculateContractChangeVerificationDeadline({
+      notificationReceivedAt: new Date("2024-01-08T09:00:00Z"),
+      contractType: "NEW",
+      holidays: [new Date("2024-01-08")],
+    });
 
-    const validCustomerId = 'CUST-2024-003';
-    const targetPeriodStartDate = '2024-01-01';
-    const targetPeriodEndDate = '2024-12-31';
+    expect(result_holiday.deadline).toEqual(new Date("2024-01-11T23:59:59Z"));
+    expect(result_holiday.businessDaysAllowed).toBe(3);
 
-    fetchMock.mockRejectOnce(new Error('Network error'));
-
-    try {
-      await extractContractAndBillingTimeseries({
-        customerId: validCustomerId,
-        periodStartDate: targetPeriodStartDate,
-        periodEndDate: targetPeriodEndDate,
+    // ========================================
+    // テストケース 6: エラーケース - 無効な契約タイプ
+    // ========================================
+    // 入力: 無効な契約タイプ "INVALID"
+    // 期待: エラーをスロー、メッセージに "契約タイプ" を含む
+    expect(() => {
+      calculateContractChangeVerificationDeadline({
+        notificationReceivedAt: new Date("2024-01-15T09:00:00Z"),
+        contractType: "INVALID",
       });
-      expect(true).toBe(false);
-    } catch (error: any) {
-      expect(error.message).toMatch(/Network/);
-    }
-  });
+    }).toThrow(/契約タイプ/);
 
-  test('SCEN-865: 顧客IDが存在するが対象期間にデータがない場合は空配列を返す', async () => {
-    fetchMock.resetMocks();
+    // ========================================
+    // テストケース 7: エラーケース - 無効な受領日時
+    // ========================================
+    // 入力: 不正な受領日時（null または undefined）
+    // 期待: エラーをスロー、メッセージに "受領日時" を含む
+    expect(() => {
+      calculateContractChangeVerificationDeadline({
+        notificationReceivedAt: null as any,
+        contractType: "UPDATE",
+      });
+    }).toThrow(/受領日時/);
 
-    const validCustomerId = 'CUST-2024-004';
-    const targetPeriodStartDate = '2025-01-01';
-    const targetPeriodEndDate = '2025-12-31';
-
-    fetchMock.mockResponseOnce(
-      JSON.stringify({
-        statusCode: 200,
-        data: [],
-        message: null,
-      }),
-      { status: 200 }
-    );
-
-    const result = await extractContractAndBillingTimeseries({
-      customerId: validCustomerId,
-      periodStartDate: targetPeriodStartDate,
-      periodEndDate: targetPeriodEndDate,
+    // ========================================
+    // テストケース 8: 返却値の構造検証
+    // ========================================
+    // 期限計算結果が正しい構造を持つことを確認
+    const result_structure = calculateContractChangeVerificationDeadline({
+      notificationReceivedAt: new Date("2024-01-15T09:00:00Z"),
+      contractType: "NEW",
     });
 
-    expect(result.statusCode).toBe(200);
-    expect(Array.isArray(result.data)).toBe(true);
-    expect(result.data.length).toBe(0);
-    expect(result.message).toBeNull();
+    expect(result_structure).toHaveProperty("deadline");
+    expect(result_structure).toHaveProperty("businessDaysAllowed");
+    expect(result_structure).toHaveProperty("contractType");
+    expect(result_structure.deadline).toBeInstanceOf(Date);
+    expect(typeof result_structure.businessDaysAllowed).toBe("number");
+    expect(typeof result_structure.contractType).toBe("string");
   });
 });

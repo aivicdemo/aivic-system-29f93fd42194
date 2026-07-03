@@ -1,48 +1,102 @@
-import { validateReportApprovalCriteria } from '../../src/logic/it-1781935279444-2-1-1';
+import { validateValidationRule } from "../../src/logic/it-1781935279444-2-1-1";
 
-describe('レポート内容承認基準判定機能', () => {
-  test('SCEN-654: 複数チェック項目のうち1項目のみ境界値で合格した場合に全体として承認可と判定される', () => {
-    // Arrange: テスト環境初期化、複数のチェック項目を設定
-    const checkItems = [
-      {
-        itemId: 'check_001',
-        itemName: 'アポ数集計完全性',
-        minThreshold: 50,
-        actualValue: 40, // 境界値50より下、不合格
-        isRequired: true,
-      },
-      {
-        itemId: 'check_002',
-        itemName: '成約数集計完全性',
-        minThreshold: 30,
-        actualValue: 20, // 境界値30より下、不合格
-        isRequired: true,
-      },
-      {
-        itemId: 'check_003',
-        itemName: '金額計算正確性',
-        minThreshold: 100,
-        actualValue: 100, // 境界値ちょうど、合格条件
-        isRequired: true,
-      },
-    ];
+describe("営業データ入力時の品質検証ルール定義・実行機能", () => {
+  // SCEN-654: [error] 営業データ異常値・漏れデータ自動検出機能 - 不正な検証ルール定義が与えられた場合、エラーが適切に発生する
+  test("不正な検証ルール定義が入力された場合、適切なエラーメッセージが表示され、ルール定義がシステムに保存されないこと", () => {
+    // ケース1: 空の条件式
+    const emptyConditionRule = {
+      ruleId: "RULE_001",
+      fieldName: "customer_name",
+      operator: "required",
+      condition: "",
+      errorMessage: "顧客名は必須です",
+    };
+    expect(() => validateValidationRule(emptyConditionRule)).toThrow(/条件式/);
 
-    // Act: レポート内容承認基準判定機能を実行
-    const result = validateReportApprovalCriteria({
-      reportId: 'report_2024_01',
-      checkItems: checkItems,
-      approvalThresholdCount: 1, // 最低1項目が合格基準を満たしていれば承認可
+    // ケース2: 無効な演算子
+    const invalidOperatorRule = {
+      ruleId: "RULE_002",
+      fieldName: "amount",
+      operator: "invalid_op",
+      condition: "100",
+      errorMessage: "金額は100以上である必要があります",
+    };
+    expect(() => validateValidationRule(invalidOperatorRule)).toThrow(/演算子/);
+
+    // ケース3: 存在しないフィールド参照
+    const invalidFieldRule = {
+      ruleId: "RULE_003",
+      fieldName: "nonexistent_field",
+      operator: "required",
+      condition: "true",
+      errorMessage: "フィールドが見つかりません",
+    };
+    expect(() => validateValidationRule(invalidFieldRule)).toThrow(/フィールド/);
+
+    // ケース4: 正常な検証ルール定義は正常に処理されることを確認
+    const validRule = {
+      ruleId: "RULE_004",
+      fieldName: "contact_date",
+      operator: "type",
+      condition: "date",
+      errorMessage: "接触日時は日付形式である必要があります",
+    };
+    const result = validateValidationRule(validRule);
+    expect(result).toEqual({
+      isValid: true,
+      ruleId: "RULE_004",
+      fieldName: "contact_date",
+      operator: "type",
+      condition: "date",
+      errorMessage: "接触日時は日付形式である必要があります",
     });
 
-    // Assert: 複数チェック項目のうち1項目のみが境界値で合格している場合、
-    // 全体の承認判定結果が「承認可」となることを検証
-    expect(result.isApprovalPermitted).toBe(true);
-    expect(result.passedItemCount).toBe(1);
-    expect(result.failedItemCount).toBe(2);
-    expect(result.passedItems).toEqual(['check_003']);
-    expect(result.failedItems).toEqual(['check_001', 'check_002']);
-    expect(result.approvalReason).toBe('最低承認基準を満たしています');
-    expect(result.evaluationTimestamp).toBeDefined();
-    expect(typeof result.evaluationTimestamp).toBe('string');
+    // ケース5: 複数の不正要素を持つルール定義
+    const multipleErrorsRule = {
+      ruleId: "RULE_005",
+      fieldName: "",
+      operator: "unknown_operator",
+      condition: "",
+      errorMessage: "",
+    };
+    expect(() => validateValidationRule(multipleErrorsRule)).toThrow(/フィールド/);
+
+    // ケース6: nullやundefinedを含むルール定義
+    const nullFieldRule = {
+      ruleId: "RULE_006",
+      fieldName: null,
+      operator: "required",
+      condition: "true",
+      errorMessage: "フィールド名が未指定です",
+    };
+    expect(() => validateValidationRule(nullFieldRule as any)).toThrow(/フィールド/);
+
+    // ケース7: 範囲演算子の不正な条件値
+    const invalidRangeRule = {
+      ruleId: "RULE_007",
+      fieldName: "sales_amount",
+      operator: "range",
+      condition: "invalid_range",
+      errorMessage: "売上額は指定された範囲内である必要があります",
+    };
+    expect(() => validateValidationRule(invalidRangeRule)).toThrow(/範囲|条件値/);
+
+    // ケース8: 正常系の複数フィールド検証
+    const validComplexRule = {
+      ruleId: "RULE_008",
+      fieldName: "appointment_status",
+      operator: "enum",
+      condition: "confirmed,pending,cancelled",
+      errorMessage: "アポ確定状況は有効な値である必要があります",
+    };
+    const complexResult = validateValidationRule(validComplexRule);
+    expect(complexResult).toEqual({
+      isValid: true,
+      ruleId: "RULE_008",
+      fieldName: "appointment_status",
+      operator: "enum",
+      condition: "confirmed,pending,cancelled",
+      errorMessage: "アポ確定状況は有効な値である必要があります",
+    });
   });
 });

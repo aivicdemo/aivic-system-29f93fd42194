@@ -1,37 +1,49 @@
-import { isVersionValid } from "../../src/logic/it-1781935279444-1-1-1";
+import { filterMaterialsBySearchCriteria } from "../../src/logic/it-1781935279444-2-2-1";
 
-describe("営業データ項目のメタデータ管理機能", () => {
-  test("SCEN-771: 顧客別・案件別・資料種別バージョン有効性自動判定機能 - 有効期限の開始日時と終了日時の境界値で正確に判定される", () => {
-    const versionRecord = {
-      id: "v001",
-      customerId: "cust_001",
-      projectId: "proj_001",
-      documentType: "contract",
-      versionNumber: 1,
-      startDateTime: new Date("2024-01-01T00:00:00Z"),
-      endDateTime: new Date("2024-01-31T23:59:59Z"),
-      createdAt: new Date("2023-12-25T00:00:00Z"),
-      updatedAt: new Date("2024-01-01T00:00:00Z"),
+describe("資料検索フィルタリング機能", () => {
+  // SCEN-771
+  test("検索条件に合致する資料が0件の場合に空配列が返却される", () => {
+    // 初期化: サンプル資料データセット
+    const sampleMaterials = [
+      {
+        id: "mat_001",
+        name: "基本契約書_2024",
+        keyword: "基本契約",
+        version: "1.0",
+        createdAt: "2024-01-15",
+      },
+      {
+        id: "mat_002",
+        name: "提案資料_営業代行",
+        keyword: "提案資料",
+        version: "2.1",
+        createdAt: "2024-02-20",
+      },
+      {
+        id: "mat_003",
+        name: "契約変更通知_顧客A",
+        keyword: "契約変更",
+        version: "1.5",
+        createdAt: "2024-03-10",
+      },
+    ];
+
+    // 検索条件: 存在しないキーワード
+    const searchCriteria = {
+      keyword: "XXXXXX_NOT_EXISTS",
+      materials: sampleMaterials,
     };
 
-    // 開始当日（2024年1月1日00:00:00）の判定 → true
-    const onStartDay = new Date("2024-01-01T00:00:00Z");
-    expect(isVersionValid(versionRecord, onStartDay)).toBe(true);
+    // フィルタリング処理を実行
+    const result = filterMaterialsBySearchCriteria(searchCriteria);
 
-    // 開始前日（2023年12月31日23:59:59）の判定 → false
-    const beforeStartDay = new Date("2023-12-31T23:59:59Z");
-    expect(isVersionValid(versionRecord, beforeStartDay)).toBe(false);
+    // 返却された結果の型を確認
+    expect(Array.isArray(result)).toBe(true);
 
-    // 終了前日（2024年1月30日23:59:59）の判定 → true
-    const beforeEndDay = new Date("2024-01-30T23:59:59Z");
-    expect(isVersionValid(versionRecord, beforeEndDay)).toBe(true);
+    // 返却された結果の要素数を確認
+    expect(result.length).toBe(0);
 
-    // 終了当日（2024年1月31日23:59:59）の判定 → true
-    const onEndDay = new Date("2024-01-31T23:59:59Z");
-    expect(isVersionValid(versionRecord, onEndDay)).toBe(true);
-
-    // 終了翌日（2024年2月1日00:00:00）の判定 → false
-    const afterEndDay = new Date("2024-02-01T00:00:00Z");
-    expect(isVersionValid(versionRecord, afterEndDay)).toBe(false);
+    // 返却結果が空配列であることを確認
+    expect(result).toEqual([]);
   });
 });

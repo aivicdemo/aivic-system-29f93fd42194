@@ -1,102 +1,184 @@
-import { detectSalesDataAnomalies } from '../../src/logic/it-1781935279444-2-2-1';
+import { searchSalesActivityByPermission } from '../../src/logic/it-1781935279444-1-1-1';
 
-describe('営業データの完全性・正確性を自動検証し、不足データ・誤りを検出・通知する機能', () => {
-  // SCEN-638: [edge] 営業データ品質異常検出・補正指示生成機能 - 複数の異常が同一レコードに存在する場合、すべての異常が検出され個別の補正指示が生成される
-  test('should detect all anomalies in a single record and generate individual correction instructions without duplication', () => {
-    // Prepare test data with multiple anomalies in a single record
-    // Anomalies: customer_name is empty, email_address format is invalid, phone_number is empty, amount is negative
-    const anomalousRecord = {
-      id: 'REC001',
-      customer_name: '', // Anomaly 1: Required field is empty
-      email_address: 'invalid-email-format', // Anomaly 2: Invalid email format
-      phone_number: '', // Anomaly 3: Required field is empty
-      amount: -5000, // Anomaly 4: Negative amount (invalid range)
-      transaction_date: '2024-01-15',
-      service_type: 'consulting',
+describe('営業活動データの権限ベース検索・抽出機能', () => {
+  // SCEN-638
+  test('ユーザー権限に基づき指定期間・顧客・営業担当者単位のデータが正確に抽出される', () => {
+    // === 前提: テストユーザーでシステムにログインする ===
+    const logged_in_user_id = 'user_sales_manager_001';
+    const user_permission_level = 'sales_manager'; // 営業管理者権限
+
+    // === ユーザーの権限レベルを確認する ===
+    // 営業管理者は、自分の部門配下の全営業担当者と全顧客の営業活動データにアクセス可能
+    // ※ システム管理者は全データ、営業担当者は自分のデータのみアクセス可能
+    const user_department_id = 'dept_sales_001';
+    const accessible_staff_ids = ['staff_001', 'staff_002', 'staff_003']; // 部門配下の3名
+
+    // === 検索画面で指定期間を設定する ===
+    const search_start_date = new Date('2024-01-01T00:00:00Z');
+    const search_end_date = new Date('2024-01-31T23:59:59Z');
+
+    // === 検索画面で対象顧客を選択する ===
+    const search_customer_id = 'customer_001';
+
+    // === 検索画面で営業担当者を選択する ===
+    const search_staff_id = 'staff_001';
+
+    // === Mock データの準備: 営業活動データベース ===
+    const all_sales_activities = [
+      {
+        activity_id: 'activity_001',
+        activity_date: new Date('2024-01-15T10:00:00Z'),
+        customer_id: 'customer_001',
+        staff_id: 'staff_001',
+        contact_type: 'appointment',
+        outcome: 'confirmed',
+        department_id: 'dept_sales_001',
+      },
+      {
+        activity_id: 'activity_002',
+        activity_date: new Date('2024-01-20T14:30:00Z'),
+        customer_id: 'customer_001',
+        staff_id: 'staff_001',
+        contact_type: 'follow_up',
+        outcome: 'deal_closed',
+        department_id: 'dept_sales_001',
+      },
+      {
+        activity_id: 'activity_003',
+        activity_date: new Date('2024-01-25T09:15:00Z'),
+        customer_id: 'customer_001',
+        staff_id: 'staff_002',
+        contact_type: 'proposal',
+        outcome: 'pending',
+        department_id: 'dept_sales_001',
+      },
+      {
+        activity_id: 'activity_004',
+        activity_date: new Date('2024-01-10T11:00:00Z'),
+        customer_id: 'customer_002',
+        staff_id: 'staff_001',
+        contact_type: 'appointment',
+        outcome: 'confirmed',
+        department_id: 'dept_sales_001',
+      },
+      {
+        activity_id: 'activity_005',
+        activity_date: new Date('2024-02-05T13:00:00Z'), // 検索期間外
+        customer_id: 'customer_001',
+        staff_id: 'staff_001',
+        contact_type: 'appointment',
+        outcome: 'confirmed',
+        department_id: 'dept_sales_001',
+      },
+      {
+        activity_id: 'activity_006',
+        activity_date: new Date('2024-01-18T10:30:00Z'),
+        customer_id: 'customer_001',
+        staff_id: 'staff_004', // 権限外スタッフ
+        contact_type: 'appointment',
+        outcome: 'confirmed',
+        department_id: 'dept_sales_002', // 異なる部門
+      },
+    ];
+
+    // === 検索条件を確定して検索実行ボタンをクリックする ===
+    const search_conditions = {
+      user_id: logged_in_user_id,
+      permission_level: user_permission_level,
+      department_id: user_department_id,
+      accessible_staff_ids: accessible_staff_ids,
+      start_date: search_start_date,
+      end_date: search_end_date,
+      customer_id: search_customer_id,
+      staff_id: search_staff_id,
     };
 
-    // Execute anomaly detection
-    const result = detectSalesDataAnomalies([anomalousRecord]);
-
-    // Verify that exactly 4 anomalies are detected
-    expect(result.anomalyCount).toBe(4);
-
-    // Verify that the anomalies array contains all detected anomalies
-    expect(result.anomalies).toHaveLength(4);
-
-    // Verify that each anomaly has a unique field and correction instruction
-    const anomalyFieldSet = new Set(result.anomalies.map((a) => a.field));
-    expect(anomalyFieldSet.size).toBe(4); // No duplicate fields
-
-    // Verify correction instructions are generated for each anomaly
-    expect(result.correctionInstructions).toHaveLength(4);
-
-    // Verify that correction instructions do not contain duplicates
-    const instructionSet = new Set(result.correctionInstructions.map((ci) => ci.field));
-    expect(instructionSet.size).toBe(4); // No duplicate instructions
-
-    // Verify each anomaly is correctly detected and mapped
-    const customerNameAnomaly = result.anomalies.find(
-      (a) => a.field === 'customer_name'
+    // === 関数呼び出し: 権限ベース検索実行 ===
+    const extracted_data = searchSalesActivityByPermission(
+      search_conditions,
+      all_sales_activities
     );
-    expect(customerNameAnomaly).toBeDefined();
-    expect(customerNameAnomaly?.type).toBe('missing_required_field');
-    expect(customerNameAnomaly?.recordId).toBe('REC001');
 
-    const emailAnomaly = result.anomalies.find((a) => a.field === 'email_address');
-    expect(emailAnomaly).toBeDefined();
-    expect(emailAnomaly?.type).toBe('invalid_format');
-    expect(emailAnomaly?.value).toBe('invalid-email-format');
+    // === 抽出されたデータを確認する ===
+    // 期待される抽出データ: activity_001 と activity_002 のみ
+    // (activity_001: 2024-01-15, customer_001, staff_001)
+    // (activity_002: 2024-01-20, customer_001, staff_001)
+    // ※ activity_003 は staff_002 (除外), activity_004 は customer_002 (除外)
+    // ※ activity_005 は日付範囲外 (除外), activity_006 は権限外スタッフ (除外)
 
-    const phoneAnomaly = result.anomalies.find((a) => a.field === 'phone_number');
-    expect(phoneAnomaly).toBeDefined();
-    expect(phoneAnomaly?.type).toBe('missing_required_field');
-
-    const amountAnomaly = result.anomalies.find((a) => a.field === 'amount');
-    expect(amountAnomaly).toBeDefined();
-    expect(amountAnomaly?.type).toBe('out_of_range');
-    expect(amountAnomaly?.value).toBe(-5000);
-
-    // Verify correction instruction for customer_name
-    const customerNameInstruction = result.correctionInstructions.find(
-      (ci) => ci.field === 'customer_name'
-    );
-    expect(customerNameInstruction).toBeDefined();
-    expect(customerNameInstruction?.instruction).toContain('顧客名は必須項目');
-    expect(customerNameInstruction?.recordId).toBe('REC001');
-
-    // Verify correction instruction for email_address
-    const emailInstruction = result.correctionInstructions.find(
-      (ci) => ci.field === 'email_address'
-    );
-    expect(emailInstruction).toBeDefined();
-    expect(emailInstruction?.instruction).toContain('メールアドレスは正しい形式で入力');
-
-    // Verify correction instruction for phone_number
-    const phoneInstruction = result.correctionInstructions.find(
-      (ci) => ci.field === 'phone_number'
-    );
-    expect(phoneInstruction).toBeDefined();
-    expect(phoneInstruction?.instruction).toContain('電話番号は必須項目');
-
-    // Verify correction instruction for amount
-    const amountInstruction = result.correctionInstructions.find(
-      (ci) => ci.field === 'amount'
-    );
-    expect(amountInstruction).toBeDefined();
-    expect(amountInstruction?.instruction).toContain('金額は正の値で入力');
-    expect(amountInstruction?.allowedRange).toEqual({ min: 0, max: null });
-
-    // Verify all field mappings are accurate
-    result.correctionInstructions.forEach((instruction) => {
-      expect(instruction.recordId).toBe('REC001');
-      expect(instruction.field).toBeTruthy();
-      expect(instruction.instruction).toBeTruthy();
+    // === 抽出データが権限範囲内であることを検証する ===
+    extracted_data.forEach((activity: any) => {
+      expect(accessible_staff_ids).toContain(activity.staff_id);
+      expect(activity.department_id).toBe('dept_sales_001');
     });
 
-    // Verify no anomaly is duplicated in the result
-    const allAnomalyIds = result.anomalies.map((a) => `${a.recordId}_${a.field}`);
-    const uniqueAnomalyIds = new Set(allAnomalyIds);
-    expect(uniqueAnomalyIds.size).toBe(allAnomalyIds.length);
+    // === 抽出データが指定期間内であることを検証する ===
+    extracted_data.forEach((activity: any) => {
+      const activity_date = new Date(activity.activity_date);
+      expect(activity_date.getTime()).toBeGreaterThanOrEqual(
+        search_start_date.getTime()
+      );
+      expect(activity_date.getTime()).toBeLessThanOrEqual(
+        search_end_date.getTime()
+      );
+    });
+
+    // === 抽出データが指定顧客のみであることを検証する ===
+    extracted_data.forEach((activity: any) => {
+      expect(activity.customer_id).toBe('customer_001');
+    });
+
+    // === 抽出データが指定営業担当者のみであることを検証する ===
+    extracted_data.forEach((activity: any) => {
+      expect(activity.staff_id).toBe('staff_001');
+    });
+
+    // === 権限外のデータが含まれていないことを確認する ===
+    const extracted_activity_ids = extracted_data.map(
+      (activity: any) => activity.activity_id
+    );
+    expect(extracted_activity_ids).not.toContain('activity_003'); // staff_002
+    expect(extracted_activity_ids).not.toContain('activity_004'); // customer_002
+    expect(extracted_activity_ids).not.toContain('activity_005'); // 期間外
+    expect(extracted_activity_ids).not.toContain('activity_006'); // 権限外スタッフ
+
+    // === データの件数が正確であることを確認する ===
+    expect(extracted_data.length).toBe(2);
+
+    // === 具体的な抽出データの内容を検証する ===
+    expect(extracted_data[0]).toEqual({
+      activity_id: 'activity_001',
+      activity_date: new Date('2024-01-15T10:00:00Z'),
+      customer_id: 'customer_001',
+      staff_id: 'staff_001',
+      contact_type: 'appointment',
+      outcome: 'confirmed',
+      department_id: 'dept_sales_001',
+    });
+
+    expect(extracted_data[1]).toEqual({
+      activity_id: 'activity_002',
+      activity_date: new Date('2024-01-20T14:30:00Z'),
+      customer_id: 'customer_001',
+      staff_id: 'staff_001',
+      contact_type: 'follow_up',
+      outcome: 'deal_closed',
+      department_id: 'dept_sales_001',
+    });
+
+    // === 最終確認: 期待結果が満たされていることを統合検証 ===
+    expect(extracted_data.length).toBe(2);
+    expect(extracted_data.every((a: any) => a.customer_id === 'customer_001'))
+      .toBe(true);
+    expect(extracted_data.every((a: any) => a.staff_id === 'staff_001')).toBe(
+      true
+    );
+    expect(
+      extracted_data.every(
+        (a: any) =>
+          new Date(a.activity_date) >= search_start_date &&
+          new Date(a.activity_date) <= search_end_date
+      )
+    ).toBe(true);
   });
 });

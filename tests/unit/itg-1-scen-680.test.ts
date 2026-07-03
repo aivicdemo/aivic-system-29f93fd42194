@@ -1,252 +1,183 @@
-import { validateSalesData } from "../../src/logic/it-1781935279444-2-2-1";
+import { generateMonthlySummaryReport } from "../../src/logic/it-1-br-1781935279444-1-2-1";
 
-describe("営業データの完全性・正確性を自動検証し、不足データ・誤りを検出・通知する機能", () => {
-  // SCEN-680: [normal] 営業データ品質検証ルール実行機能 - 必須項目すべてが正しく入力された営業データが検証に合格する
-  test("すべての必須項目が正しく入力されているため、検証に合格し、成功ステータス（pass）が表示される", () => {
-    const sales_data = {
-      customer_name: "株式会社ABC",
-      sales_person: "営業太郎",
-      transaction_date: "2024-01-15",
-      amount: 150000,
-      product_code: "PROD-001",
-      billing_address: "東京都渋谷区1-1-1",
+describe("月次サマリーテンプレートの定義・管理機能", () => {
+  // SCEN-680: [normal] 月次成果レポート自動集計機能 - レポート生成完了後、配信可能な状態に遷移する
+  test("レポート生成完了後、ステータスが配信可能に遷移し、配信機能から選択可能になること", () => {
+    const input = {
+      salesDataList: [
+        {
+          customerId: "CUST001",
+          serviceId: "SVC001",
+          appointmentCount: 5,
+          contractCount: 2,
+          customerFeedback: "positive",
+          recordDate: "2024-01-15",
+        },
+        {
+          customerId: "CUST002",
+          serviceId: "SVC002",
+          appointmentCount: 3,
+          contractCount: 1,
+          customerFeedback: "neutral",
+          recordDate: "2024-01-16",
+        },
+      ],
+      templateId: "TMPL001",
+      reportPeriod: {
+        startDate: "2024-01-01",
+        endDate: "2024-01-31",
+      },
+      generatedBy: "USER001",
+      generatedAt: new Date("2024-02-01T09:00:00Z"),
     };
 
-    const result = validateSalesData(sales_data);
+    const result = generateMonthlySummaryReport(input);
 
     expect(result).toEqual({
-      status: "pass",
-      errors: [],
-      warnings: [],
+      reportId: expect.any(String),
+      templateId: "TMPL001",
+      status: "配信可能",
+      reportPeriod: {
+        startDate: "2024-01-01",
+        endDate: "2024-01-31",
+      },
+      generatedAt: new Date("2024-02-01T09:00:00Z"),
+      generatedBy: "USER001",
+      totalAppointments: 8,
+      totalContracts: 3,
+      customerSummaries: [
+        {
+          customerId: "CUST001",
+          serviceId: "SVC001",
+          appointmentCount: 5,
+          contractCount: 2,
+          feedbackType: "positive",
+        },
+        {
+          customerId: "CUST002",
+          serviceId: "SVC002",
+          appointmentCount: 3,
+          contractCount: 1,
+          feedbackType: "neutral",
+        },
+      ],
+      isDistributable: true,
+      canSelectForDistribution: true,
+      distributionReadyAt: expect.any(Date),
     });
-    expect(result.status).toBe("pass");
-    expect(Array.isArray(result.errors)).toBe(true);
-    expect(result.errors.length).toBe(0);
-    expect(Array.isArray(result.warnings)).toBe(true);
-    expect(result.warnings.length).toBe(0);
+
+    expect(result.status).toBe("配信可能");
+    expect(result.isDistributable).toBe(true);
+    expect(result.canSelectForDistribution).toBe(true);
   });
 
-  test("顧客名が空文字列の場合、検証に不合格となり、エラーメッセージが返される", () => {
-    const sales_data = {
-      customer_name: "",
-      sales_person: "営業太郎",
-      transaction_date: "2024-01-15",
-      amount: 150000,
-      product_code: "PROD-001",
-      billing_address: "東京都渋谷区1-1-1",
+  test("営業データが存在しない場合、エラーを投げる", () => {
+    const input = {
+      salesDataList: [],
+      templateId: "TMPL001",
+      reportPeriod: {
+        startDate: "2024-01-01",
+        endDate: "2024-01-31",
+      },
+      generatedBy: "USER001",
+      generatedAt: new Date("2024-02-01T09:00:00Z"),
     };
 
-    const result = validateSalesData(sales_data);
-
-    expect(result.status).toBe("fail");
-    expect(result.errors.length).toBeGreaterThan(0);
-    expect(result.errors.some((err: string) => err.includes("顧客名"))).toBe(
-      true
-    );
+    expect(() => generateMonthlySummaryReport(input)).toThrow(/営業データ/);
   });
 
-  test("営業担当者が未定義の場合、検証に不合格となり、エラーメッセージが返される", () => {
-    const sales_data = {
-      customer_name: "株式会社ABC",
-      sales_person: undefined,
-      transaction_date: "2024-01-15",
-      amount: 150000,
-      product_code: "PROD-001",
-      billing_address: "東京都渋谷区1-1-1",
+  test("テンプレートIDが未指定の場合、エラーを投げる", () => {
+    const input = {
+      salesDataList: [
+        {
+          customerId: "CUST001",
+          serviceId: "SVC001",
+          appointmentCount: 5,
+          contractCount: 2,
+          customerFeedback: "positive",
+          recordDate: "2024-01-15",
+        },
+      ],
+      templateId: "",
+      reportPeriod: {
+        startDate: "2024-01-01",
+        endDate: "2024-01-31",
+      },
+      generatedBy: "USER001",
+      generatedAt: new Date("2024-02-01T09:00:00Z"),
     };
 
-    const result = validateSalesData(sales_data);
-
-    expect(result.status).toBe("fail");
-    expect(result.errors.length).toBeGreaterThan(0);
-    expect(
-      result.errors.some((err: string) => err.includes("営業担当者"))
-    ).toBe(true);
+    expect(() => generateMonthlySummaryReport(input)).toThrow(/テンプレート/);
   });
 
-  test("取引日が無効な形式の場合、検証に不合格となり、形式エラーが返される", () => {
-    const sales_data = {
-      customer_name: "株式会社ABC",
-      sales_person: "営業太郎",
-      transaction_date: "2024/01/15",
-      amount: 150000,
-      product_code: "PROD-001",
-      billing_address: "東京都渋谷区1-1-1",
+  test("レポート期間が不正な場合、エラーを投げる", () => {
+    const input = {
+      salesDataList: [
+        {
+          customerId: "CUST001",
+          serviceId: "SVC001",
+          appointmentCount: 5,
+          contractCount: 2,
+          customerFeedback: "positive",
+          recordDate: "2024-01-15",
+        },
+      ],
+      templateId: "TMPL001",
+      reportPeriod: {
+        startDate: "2024-01-31",
+        endDate: "2024-01-01",
+      },
+      generatedBy: "USER001",
+      generatedAt: new Date("2024-02-01T09:00:00Z"),
     };
 
-    const result = validateSalesData(sales_data);
-
-    expect(result.status).toBe("fail");
-    expect(result.errors.length).toBeGreaterThan(0);
-    expect(result.errors.some((err: string) => err.includes("取引日"))).toBe(
-      true
-    );
+    expect(() => generateMonthlySummaryReport(input)).toThrow(/期間/);
   });
 
-  test("金額が負の値の場合、検証に不合格となり、範囲エラーが返される", () => {
-    const sales_data = {
-      customer_name: "株式会社ABC",
-      sales_person: "営業太郎",
-      transaction_date: "2024-01-15",
-      amount: -50000,
-      product_code: "PROD-001",
-      billing_address: "東京都渋谷区1-1-1",
+  test("複数顧客・複数サービスのデータが正確に集計され、配信可能ステータスになること", () => {
+    const input = {
+      salesDataList: [
+        {
+          customerId: "CUST001",
+          serviceId: "SVC001",
+          appointmentCount: 10,
+          contractCount: 4,
+          customerFeedback: "positive",
+          recordDate: "2024-01-10",
+        },
+        {
+          customerId: "CUST001",
+          serviceId: "SVC002",
+          appointmentCount: 6,
+          contractCount: 2,
+          customerFeedback: "positive",
+          recordDate: "2024-01-12",
+        },
+        {
+          customerId: "CUST002",
+          serviceId: "SVC001",
+          appointmentCount: 8,
+          contractCount: 3,
+          customerFeedback: "neutral",
+          recordDate: "2024-01-15",
+        },
+      ],
+      templateId: "TMPL002",
+      reportPeriod: {
+        startDate: "2024-01-01",
+        endDate: "2024-01-31",
+      },
+      generatedBy: "USER002",
+      generatedAt: new Date("2024-02-01T10:30:00Z"),
     };
 
-    const result = validateSalesData(sales_data);
+    const result = generateMonthlySummaryReport(input);
 
-    expect(result.status).toBe("fail");
-    expect(result.errors.length).toBeGreaterThan(0);
-    expect(result.errors.some((err: string) => err.includes("金額"))).toBe(
-      true
-    );
-  });
-
-  test("金額が数値でない場合、検証に不合格となり、型エラーが返される", () => {
-    const sales_data = {
-      customer_name: "株式会社ABC",
-      sales_person: "営業太郎",
-      transaction_date: "2024-01-15",
-      amount: "150000",
-      product_code: "PROD-001",
-      billing_address: "東京都渋谷区1-1-1",
-    };
-
-    const result = validateSalesData(sales_data);
-
-    expect(result.status).toBe("fail");
-    expect(result.errors.length).toBeGreaterThan(0);
-    expect(result.errors.some((err: string) => err.includes("金額"))).toBe(
-      true
-    );
-  });
-
-  test("商品コードが空文字列の場合、検証に不合格となり、エラーメッセージが返される", () => {
-    const sales_data = {
-      customer_name: "株式会社ABC",
-      sales_person: "営業太郎",
-      transaction_date: "2024-01-15",
-      amount: 150000,
-      product_code: "",
-      billing_address: "東京都渋谷区1-1-1",
-    };
-
-    const result = validateSalesData(sales_data);
-
-    expect(result.status).toBe("fail");
-    expect(result.errors.length).toBeGreaterThan(0);
-    expect(
-      result.errors.some((err: string) => err.includes("商品コード"))
-    ).toBe(true);
-  });
-
-  test("請求先住所が空文字列の場合、検証に不合格となり、エラーメッセージが返される", () => {
-    const sales_data = {
-      customer_name: "株式会社ABC",
-      sales_person: "営業太郎",
-      transaction_date: "2024-01-15",
-      amount: 150000,
-      product_code: "PROD-001",
-      billing_address: "",
-    };
-
-    const result = validateSalesData(sales_data);
-
-    expect(result.status).toBe("fail");
-    expect(result.errors.length).toBeGreaterThan(0);
-    expect(
-      result.errors.some((err: string) => err.includes("請求先住所"))
-    ).toBe(true);
-  });
-
-  test("複数の必須項目が欠落している場合、すべてのエラーが列挙される", () => {
-    const sales_data = {
-      customer_name: "",
-      sales_person: "",
-      transaction_date: "2024-01-15",
-      amount: 150000,
-      product_code: "",
-      billing_address: "東京都渋谷区1-1-1",
-    };
-
-    const result = validateSalesData(sales_data);
-
-    expect(result.status).toBe("fail");
-    expect(result.errors.length).toBeGreaterThanOrEqual(3);
-    expect(result.errors.some((err: string) => err.includes("顧客名"))).toBe(
-      true
-    );
-    expect(
-      result.errors.some((err: string) => err.includes("営業担当者"))
-    ).toBe(true);
-    expect(
-      result.errors.some((err: string) => err.includes("商品コード"))
-    ).toBe(true);
-  });
-
-  test("金額が0の場合、検証に合格する（0は有効な値）", () => {
-    const sales_data = {
-      customer_name: "株式会社ABC",
-      sales_person: "営業太郎",
-      transaction_date: "2024-01-15",
-      amount: 0,
-      product_code: "PROD-001",
-      billing_address: "東京都渋谷区1-1-1",
-    };
-
-    const result = validateSalesData(sales_data);
-
-    expect(result.status).toBe("pass");
-    expect(result.errors.length).toBe(0);
-  });
-
-  test("金額が大きな数値の場合、検証に合格する", () => {
-    const sales_data = {
-      customer_name: "株式会社ABC",
-      sales_person: "営業太郎",
-      transaction_date: "2024-01-15",
-      amount: 999999999,
-      product_code: "PROD-001",
-      billing_address: "東京都渋谷区1-1-1",
-    };
-
-    const result = validateSalesData(sales_data);
-
-    expect(result.status).toBe("pass");
-    expect(result.errors.length).toBe(0);
-  });
-
-  test("取引日が有効なISO形式の場合、検証に合格する", () => {
-    const sales_data = {
-      customer_name: "株式会社ABC",
-      sales_person: "営業太郎",
-      transaction_date: "2024-12-31",
-      amount: 150000,
-      product_code: "PROD-001",
-      billing_address: "東京都渋谷区1-1-1",
-    };
-
-    const result = validateSalesData(sales_data);
-
-    expect(result.status).toBe("pass");
-    expect(result.errors.length).toBe(0);
-  });
-
-  test("すべての項目が正しく入力され、長い文字列を含む場合、検証に合格する", () => {
-    const sales_data = {
-      customer_name:
-        "株式会社ABCDefghijklmnopqrstuvwxyz0123456789営業部営業チーム",
-      sales_person: "営業太郎営業花子営業次郎",
-      transaction_date: "2024-01-15",
-      amount: 500000,
-      product_code: "PROD-001-ALPHA-BETA",
-      billing_address:
-        "東京都渋谷区1-1-1 渋谷ビジネスセンタービル10階営業部営業課",
-    };
-
-    const result = validateSalesData(sales_data);
-
-    expect(result.status).toBe("pass");
-    expect(result.errors.length).toBe(0);
+    expect(result.status).toBe("配信可能");
+    expect(result.totalAppointments).toBe(24);
+    expect(result.totalContracts).toBe(9);
+    expect(result.customerSummaries.length).toBe(3);
+    expect(result.isDistributable).toBe(true);
+    expect(result.canSelectForDistribution).toBe(true);
   });
 });

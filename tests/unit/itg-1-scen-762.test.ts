@@ -1,74 +1,116 @@
-import { validateContractChangeContradiction } from "../../src/logic/it-1781935279444-2-1-1";
+import { determineActiveContractVersion } from '../../src/logic/it-1781935279444-2-1-1';
 
-describe("営業データ入力時の品質検証ルール定義・実行機能", () => {
-  // SCEN-762: [error] 契約書・提案資料変更内容妥当性判定機能 - 変更内容が既存契約と矛盾している場合にエラーとして検出される
-  test("既存契約と矛盾する変更内容が検出されエラーレスポンスが返される", () => {
-    // 既存契約情報
-    const existingContract = {
-      contractId: "CTR-2024-001",
-      contractAmount: 1000000,
-      contractPeriodStart: new Date("2024-01-01"),
-      contractPeriodEnd: new Date("2024-12-31"),
-      deliverables: "営業支援システム構築、月次レポート生成機能",
-      serviceType: "システム開発",
-    };
+describe('営業データ入力時の品質検証ルール定義・実行機能', () => {
+  // SCEN-762: [normal] 顧客別・案件別の有効版自動判定
+  test('指定顧客・案件・有効期限から最新の有効バージョンが正確に特定される', () => {
+    // テストデータセットアップ: 顧客A・案件X に対して複数バージョンを定義
+    const versionData = [
+      {
+        customerId: 'CUST-001',
+        projectId: 'PROJ-X',
+        versionNumber: 1,
+        effectiveStartDate: new Date('2024-01-01T00:00:00Z'),
+        effectiveEndDate: new Date('2024-02-28T23:59:59Z'),
+        status: 'archived',
+      },
+      {
+        customerId: 'CUST-001',
+        projectId: 'PROJ-X',
+        versionNumber: 2,
+        effectiveStartDate: new Date('2024-02-15T00:00:00Z'),
+        effectiveEndDate: new Date('2024-04-30T23:59:59Z'),
+        status: 'active',
+      },
+      {
+        customerId: 'CUST-001',
+        projectId: 'PROJ-X',
+        versionNumber: 3,
+        effectiveStartDate: new Date('2024-04-01T00:00:00Z'),
+        effectiveEndDate: new Date('2024-12-31T23:59:59Z'),
+        status: 'active',
+      },
+    ];
 
-    // 新しい契約書から抽出した変更内容
-    const changeContent = {
-      contractId: "CTR-2024-001",
-      newContractAmount: 500000, // 既存: 1,000,000 → 新規: 500,000（50%削減 - 矛盾）
-      newContractPeriodStart: new Date("2024-01-01"),
-      newContractPeriodEnd: new Date("2023-12-31"), // 終了日が開始日より前 - 矛盾
-      newDeliverables: "営業支援システム構築のみ、月次レポート機能は対象外", // 納入物削減 - 矛盾
-      newServiceType: "コンサルティング", // サービス種別変更 - 矛盾
-    };
+    // ケース1: 複数バージョンが有効期限範囲に該当する日時（2024-04-15）での判定
+    // 有効期限に該当するバージョン: v2（2024-02-15～2024-04-30）, v3（2024-04-01～2024-12-31）
+    // 期待: 最新バージョン（v3）が返される
+    const resultCase1 = determineActiveContractVersion(
+      versionData,
+      'CUST-001',
+      'PROJ-X',
+      new Date('2024-04-15T10:00:00Z')
+    );
+    expect(resultCase1).toEqual({
+      customerId: 'CUST-001',
+      projectId: 'PROJ-X',
+      versionNumber: 3,
+      effectiveStartDate: new Date('2024-04-01T00:00:00Z'),
+      effectiveEndDate: new Date('2024-12-31T23:59:59Z'),
+      status: 'active',
+    });
 
-    // 関数実行
-    let result;
-    try {
-      result = validateContractChangeContradiction(existingContract, changeContent);
-    } catch (error: unknown) {
-      // エラー検証
-      if (error instanceof Error) {
-        expect(error.message).toMatch(/CONTRACT_CONTRADICTION_ERROR/);
-        expect(error.message).toMatch(/契約金額/);
-        expect(error.message).toMatch(/契約期間/);
-        expect(error.message).toMatch(/納入物/);
-        expect(error.message).toMatch(/サービス種別/);
-      }
-      return;
-    }
+    // ケース2: 単一バージョンのみ有効期限内である日時（2024-03-01）での判定
+    // 有効期限に該当するバージョン: v2（2024-02-15～2024-04-30）
+    // 期待: そのバージョン（v2）が返される
+    const resultCase2 = determineActiveContractVersion(
+      versionData,
+      'CUST-001',
+      'PROJ-X',
+      new Date('2024-03-01T10:00:00Z')
+    );
+    expect(resultCase2).toEqual({
+      customerId: 'CUST-001',
+      projectId: 'PROJ-X',
+      versionNumber: 2,
+      effectiveStartDate: new Date('2024-02-15T00:00:00Z'),
+      effectiveEndDate: new Date('2024-04-30T23:59:59Z'),
+      status: 'active',
+    });
 
-    // 成功時の検証（もし例外が発生しない場合）
-    if (result && typeof result === "object" && "errorCode" in result) {
-      expect(result.errorCode).toBe("CONTRACT_CONTRADICTION_ERROR");
-      expect(result).toHaveProperty("errorMessage");
-      expect(result.errorMessage).toMatch(/矛盾/);
-      expect(result).toHaveProperty("contradictionItems");
-      expect(Array.isArray(result.contradictionItems)).toBe(true);
-      expect(result.contradictionItems.length).toBeGreaterThan(0);
+    // ケース3: 複数バージョンの有効期限外である日時（2023-12-15）での判定
+    // 有効期限に該当するバージョン: なし
+    // 期待: null または エラーが返される
+    const resultCase3 = determineActiveContractVersion(
+      versionData,
+      'CUST-001',
+      'PROJ-X',
+      new Date('2023-12-15T10:00:00Z')
+    );
+    expect(resultCase3).toBeNull();
 
-      // 矛盾項目の検証
-      const contradictionItems = result.contradictionItems as Array<{
-        field: string;
-        existingValue: unknown;
-        newValue: unknown;
-      }>;
-      const fieldNames = contradictionItems.map((item) => item.field);
-      expect(fieldNames).toContain("contractAmount");
-      expect(fieldNames).toContain("contractPeriod");
-      expect(fieldNames).toContain("deliverables");
-      expect(fieldNames).toContain("serviceType");
+    // ケース4: 異なる顧客データでの判定結果が分離されることを確認
+    // 顧客Bのデータセットアップ
+    const versionDataCustomerB = [
+      {
+        customerId: 'CUST-002',
+        projectId: 'PROJ-Y',
+        versionNumber: 1,
+        effectiveStartDate: new Date('2024-05-01T00:00:00Z'),
+        effectiveEndDate: new Date('2024-06-30T23:59:59Z'),
+        status: 'active',
+      },
+    ];
 
-      // 対比情報の検証
-      expect(result).toHaveProperty("comparison");
-      const comparisonItem = contradictionItems.find(
-        (item) => item.field === "contractAmount"
-      );
-      if (comparisonItem) {
-        expect(comparisonItem.existingValue).toBe(1000000);
-        expect(comparisonItem.newValue).toBe(500000);
-      }
-    }
+    const resultCase4 = determineActiveContractVersion(
+      versionDataCustomerB,
+      'CUST-002',
+      'PROJ-Y',
+      new Date('2024-05-15T10:00:00Z')
+    );
+    expect(resultCase4).toEqual({
+      customerId: 'CUST-002',
+      projectId: 'PROJ-Y',
+      versionNumber: 1,
+      effectiveStartDate: new Date('2024-05-01T00:00:00Z'),
+      effectiveEndDate: new Date('2024-06-30T23:59:59Z'),
+      status: 'active',
+    });
+
+    // ケース5: 顧客A・案件XでのCase1の判定結果と
+    // 顧客B・案件YでのCase4の判定結果が異なることを確認（分離確認）
+    expect(resultCase1.versionNumber).toBe(3);
+    expect(resultCase4.versionNumber).toBe(1);
+    expect(resultCase1.customerId).not.toBe(resultCase4.customerId);
+    expect(resultCase1.projectId).not.toBe(resultCase4.projectId);
   });
 });

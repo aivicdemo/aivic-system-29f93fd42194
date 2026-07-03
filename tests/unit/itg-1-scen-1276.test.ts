@@ -1,176 +1,65 @@
-import { extractAndAggregateBillingItems } from '../../src/logic/it-1-2-1';
+import { retryAccountingSystemApi } from "../../src/logic/it-1-2-1";
 
-describe('請求対象項目の自動抽出・顧客別サービス別請求額集計', () => {
-  // SCEN-1276
-  test('契約書の抽出ルールに基づいて営業データから請求対象項目を自動判定し、顧客ごと・サービスごとの請求額を正確に集計する', () => {
-    // テストデータセットアップ
-    const contracts = [
-      {
-        contractId: 'C001',
-        customerId: 'CUST001',
-        serviceType: 'service_a',
-        extractionRule: 'amount_gt_10000',
-        unitPrice: 1000,
-        quantity: 1,
-      },
-      {
-        contractId: 'C002',
-        customerId: 'CUST001',
-        serviceType: 'service_b',
-        extractionRule: 'status_eq_completed',
-        unitPrice: 500,
-        quantity: 1,
-      },
-      {
-        contractId: 'C003',
-        customerId: 'CUST002',
-        serviceType: 'service_a',
-        extractionRule: 'amount_gt_5000',
-        unitPrice: 800,
-        quantity: 1,
-      },
-      {
-        contractId: 'C004',
-        customerId: 'CUST002',
-        serviceType: 'service_b',
-        extractionRule: 'status_eq_completed',
-        unitPrice: 1200,
-        quantity: 1,
-      },
-    ];
+const fetchMock = require("jest-fetch-mock");
 
-    const salesData = [
-      {
-        salesDataId: 'SD001',
-        customerId: 'CUST001',
-        serviceType: 'service_a',
-        amount: 15000,
-        status: 'completed',
-        billingTarget: true,
-      },
-      {
-        salesDataId: 'SD002',
-        customerId: 'CUST001',
-        serviceType: 'service_a',
-        amount: 8000,
-        status: 'completed',
-        billingTarget: false,
-      },
-      {
-        salesDataId: 'SD003',
-        customerId: 'CUST001',
-        serviceType: 'service_b',
-        amount: 5000,
-        status: 'completed',
-        billingTarget: true,
-      },
-      {
-        salesDataId: 'SD004',
-        customerId: 'CUST001',
-        serviceType: 'service_b',
-        amount: 3000,
-        status: 'pending',
-        billingTarget: false,
-      },
-      {
-        salesDataId: 'SD005',
-        customerId: 'CUST002',
-        serviceType: 'service_a',
-        amount: 7500,
-        status: 'completed',
-        billingTarget: true,
-      },
-      {
-        salesDataId: 'SD006',
-        customerId: 'CUST002',
-        serviceType: 'service_a',
-        amount: 3000,
-        status: 'completed',
-        billingTarget: false,
-      },
-      {
-        salesDataId: 'SD007',
-        customerId: 'CUST002',
-        serviceType: 'service_b',
-        amount: 6000,
-        status: 'completed',
-        billingTarget: true,
-      },
-      {
-        salesDataId: 'SD008',
-        customerId: 'CUST002',
-        serviceType: 'service_b',
-        amount: 4000,
-        status: 'draft',
-        billingTarget: false,
-      },
-    ];
+describe("営業成果データから請求対象項目を自動抽出し、顧客ごと・サービスごとの請求額を集計する機能", () => {
+  // SCEN-1276: [error] 会計システムAPI連携機能 - 連続再試行失敗時にアラート通知が送信される
+  test("連続3回のAPI再試行がすべて失敗した場合、アラート通知がシステム管理者に送信される", async () => {
+    fetchMock.resetMocks();
 
-    // 実行: 自動抽出・集計機能を実行
-    const result = extractAndAggregateBillingItems(contracts, salesData);
+    // 会計システムAPIをモック化し、すべてのリクエストに対してタイムアウトエラーを返す
+    const timeoutError = new Error("Request timeout");
+    timeoutError.name = "TimeoutError";
 
-    // 検証: 抽出ルールエンジンが契約書定義に基づいて請求対象項目を判定
-    expect(result).toBeDefined();
-    expect(result).toHaveProperty('extractedItems');
-    expect(result).toHaveProperty('customerAggregation');
-    expect(result).toHaveProperty('serviceAggregation');
-    expect(result).toHaveProperty('crossTabulation');
+    fetchMock.mockRejectOnce(timeoutError);
+    fetchMock.mockRejectOnce(timeoutError);
+    fetchMock.mockRejectOnce(timeoutError);
 
-    // 検証: 請求対象と判定されたデータのみが集計対象に含まれる
-    const extractedItems = result.extractedItems;
-    expect(extractedItems.length).toBe(4);
-    expect(
-      extractedItems.every((item: any) => item.billingTarget === true)
-    ).toBe(true);
+    const testData = {
+      dataId: "DATA-20240115-001",
+      customerId: "CUST-A001",
+      serviceId: "SVC-SALES",
+      billingAmount: 150000,
+      billingDate: new Date("2024-01-15T09:00:00Z"),
+    };
 
-    // 検証: 顧客ごとの請求額合計が正確に計算されている
-    // CUST001: SD001 (15000) + SD003 (5000) = 20000
-    // CUST002: SD005 (7500) + SD007 (6000) = 13500
-    const customerAggregation = result.customerAggregation;
-    expect(customerAggregation['CUST001']).toBe(20000);
-    expect(customerAggregation['CUST002']).toBe(13500);
+    const result = await retryAccountingSystemApi({
+      billingData: testData,
+      maxRetries: 3,
+      retryDelayMs: 100,
+    });
 
-    // 検証: サービス種別ごとの請求額合計が正確に計算されている
-    // service_a: SD001 (15000) + SD005 (7500) = 22500
-    // service_b: SD003 (5000) + SD007 (6000) = 11000
-    const serviceAggregation = result.serviceAggregation;
-    expect(serviceAggregation['service_a']).toBe(22500);
-    expect(serviceAggregation['service_b']).toBe(11000);
+    // API連携が最大再試行回数(3回)すべて失敗したことを確認
+    expect(result.success).toBe(false);
+    expect(result.retryCount).toBe(3);
+    expect(result.lastError).toMatch(/timeout/i);
 
-    // 検証: 顧客・サービス別クロス集計結果が期待値と一致
-    const crossTab = result.crossTabulation;
-    expect(crossTab['CUST001']['service_a']).toBe(15000);
-    expect(crossTab['CUST001']['service_b']).toBe(5000);
-    expect(crossTab['CUST002']['service_a']).toBe(7500);
-    expect(crossTab['CUST002']['service_b']).toBe(6000);
+    // アラート通知が生成されたことを確認
+    expect(result.alertNotification).toBeDefined();
+    expect(result.alertNotification.recipientType).toBe("system_admin");
+    expect(result.alertNotification.severity).toBe("critical");
 
-    // 検証: 請求対象外の項目が集計から除外されている
-    expect(extractedItems.find((i: any) => i.salesDataId === 'SD002')).toBeUndefined();
-    expect(extractedItems.find((i: any) => i.salesDataId === 'SD004')).toBeUndefined();
-    expect(extractedItems.find((i: any) => i.salesDataId === 'SD006')).toBeUndefined();
-    expect(extractedItems.find((i: any) => i.salesDataId === 'SD008')).toBeUndefined();
+    // アラート通知にエラーの詳細情報が含まれていることを確認
+    const alertContent = result.alertNotification.content;
+    expect(alertContent).toContain(testData.dataId);
+    expect(alertContent).toContain("3");
+    expect(alertContent).toMatch(/timeout/i);
 
-    // 検証: 複数顧客・複数サービスの組み合わせで集計結果の整合性を検証
-    const totalBillingAmount =
-      customerAggregation['CUST001'] + customerAggregation['CUST002'];
-    expect(totalBillingAmount).toBe(33500);
-
-    const totalByService =
-      serviceAggregation['service_a'] + serviceAggregation['service_b'];
-    expect(totalByService).toBe(33500);
-
-    // 整合性: クロス集計の合計がカスタマー合計と一致
-    const crossTabTotal = Object.values(crossTab).reduce(
-      (custSum: number, services: any) => {
-        return (
-          custSum +
-          Object.values(services).reduce((svcSum: number, amount: any) => {
-            return svcSum + (typeof amount === 'number' ? amount : 0);
-          }, 0)
-        );
-      },
-      0
+    // 通知のタイムスタンプが記録されていることを確認
+    expect(result.alertNotification.timestamp).toBeDefined();
+    const notificationTime = new Date(result.alertNotification.timestamp);
+    expect(notificationTime.getTime()).toBeGreaterThan(0);
+    expect(notificationTime.getTime()).toBeLessThanOrEqual(
+      new Date().getTime()
     );
-    expect(crossTabTotal).toBe(33500);
+
+    // 失敗回数がアラート通知に正確に記録されていることを確認
+    expect(result.alertNotification.retryAttempts).toBe(3);
+    expect(result.alertNotification.dataId).toBe(testData.dataId);
+    expect(result.alertNotification.customerId).toBe(testData.customerId);
+
+    // アラート通知が送信対象のシステム管理者に指定されていることを確認
+    expect(result.alertNotification.recipientEmail).toBeDefined();
+    expect(result.alertNotification.recipientEmail).toMatch(/@/);
   });
 });

@@ -1,150 +1,222 @@
-import { validateSalesDataRatioDeviation } from "../../src/logic/it-1781935279444-2-2-1";
+import { searchSalesActivities } from "../../src/logic/it-1781935279444-1-1-1";
 
-describe("レポート内異常値・矛盾検出 - 売上数量と売上金額の比率検証", () => {
-  // SCEN-1157
-  test("売上数量と売上金額の比率が業界標準から逸脱している場合、矛盾として検出される", () => {
-    // 業界標準: 1単位当たり平均単価 = 10000円（許容偏差 ±20%）
-    const industry_standard_unit_price = 10000;
-    const industry_standard_deviation_percent = 20;
+describe("営業活動データ検索・抽出機能", () => {
+  test("SCEN-1157: 複合検索条件で正しくAND/OR演算が適用される", () => {
+    // ========== ハッピーパス: 複合条件 (営業担当者='田中太郎' AND ステータス='成約') OR (金額>=100万円 OR 金額<=50万円) ==========
 
-    // テストデータ: 複数行の営業データ
-    const report_data = [
-      {
-        row_number: 1,
-        sales_quantity: 10,
-        sales_amount: 100000,
-        customer_id: "CUST001",
-        service_type: "service_A"
-      },
-      // 売上単価 = 100000 / 10 = 10000（正常、標準値）
-      {
-        row_number: 2,
-        sales_quantity: 20,
-        sales_amount: 175000,
-        customer_id: "CUST002",
-        service_type: "service_B"
-      },
-      // 売上単価 = 175000 / 20 = 8750（正常、許容範囲内 -12.5%）
-      {
-        row_number: 3,
-        sales_quantity: 15,
-        sales_amount: 300000,
-        customer_id: "CUST003",
-        service_type: "service_A"
-      },
-      // 売上単価 = 300000 / 15 = 20000（逸脱、+100%）
-      {
-        row_number: 4,
-        sales_quantity: 25,
-        sales_amount: 150000,
-        customer_id: "CUST004",
-        service_type: "service_C"
-      },
-      // 売上単価 = 150000 / 25 = 6000（逸脱、-40%）
-      {
-        row_number: 5,
-        sales_quantity: 5,
-        sales_amount: 52500,
-        customer_id: "CUST005",
-        service_type: "service_B"
-      }
-      // 売上単価 = 52500 / 5 = 10500（正常、許容範囲内 +5%）
-    ];
+    // 第1条件グループ: 営業担当者='田中太郎' AND ステータス='成約'
+    // 第2条件グループ: 金額>=100万円 OR 金額<=50万円
+    // 全体: 第1グループ OR 第2グループ
 
-    const result = validateSalesDataRatioDeviation({
-      report_data: report_data,
-      industry_standard_unit_price: industry_standard_unit_price,
-      industry_standard_deviation_percent: industry_standard_deviation_percent
+    const result = searchSalesActivities({
+      filters: [
+        {
+          operator: "AND",
+          conditions: [
+            { field: "salesRepName", condition: "equals", value: "田中太郎" },
+            { field: "status", condition: "equals", value: "成約" }
+          ]
+        },
+        {
+          operator: "OR",
+          conditions: [
+            { field: "amount", condition: "greaterThanOrEqual", value: 1000000 },
+            { field: "amount", condition: "lessThanOrEqual", value: 500000 }
+          ]
+        }
+      ],
+      topLevelOperator: "OR"
     });
 
-    // 期待結果: 全行検証完了
-    expect(result.validation_status).toBe("completed");
+    // 検証1: 返却データが配列であること
+    expect(Array.isArray(result.data)).toBe(true);
 
-    // 期待結果: 異常検出数 = 2件（row_number 3と4）
-    expect(result.anomaly_count).toBe(2);
-
-    // 期待結果: 正常行数 = 3件（row_number 1,2,5）
-    expect(result.valid_row_count).toBe(3);
-
-    // 期待結果: 検出されたデータが正確に特定される
-    expect(result.detected_anomalies).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          row_number: 3,
-          sales_quantity: 15,
-          sales_amount: 300000,
-          calculated_unit_price: 20000,
-          deviation_percent: 100,
-          deviation_status: "exceeds_upper_threshold",
-          is_anomaly: true
-        }),
-        expect.objectContaining({
-          row_number: 4,
-          sales_quantity: 25,
-          sales_amount: 150000,
-          calculated_unit_price: 6000,
-          deviation_percent: -40,
-          deviation_status: "exceeds_lower_threshold",
-          is_anomaly: true
-        })
-      ])
+    // 検証2: AND条件内で営業担当者と成約ステータスが両方満たされるデータのみが含まれること
+    const andGroupResults = result.data.filter(
+      (record: any) => record.salesRepName === "田中太郎" && record.status === "成約"
     );
+    expect(andGroupResults.length).toBeGreaterThan(0);
 
-    // 期待結果: 各異常データに対して矛盾フラグが付与される
-    const row_3_anomaly = result.detected_anomalies.find(
-      (a) => a.row_number === 3
+    // 検証3: OR条件で金額>=100万円 または 金額<=50万円のデータが含まれること
+    const orGroupResults = result.data.filter(
+      (record: any) => record.amount >= 1000000 || record.amount <= 500000
     );
-    expect(row_3_anomaly?.is_anomaly).toBe(true);
-    expect(row_3_anomaly?.anomaly_flag).toBe("ratio_deviation_detected");
+    expect(orGroupResults.length).toBeGreaterThan(0);
 
-    const row_4_anomaly = result.detected_anomalies.find(
-      (a) => a.row_number === 4
-    );
-    expect(row_4_anomaly?.is_anomaly).toBe(true);
-    expect(row_4_anomaly?.anomaly_flag).toBe("ratio_deviation_detected");
+    // 検証4: 複合条件の論理構造を検証
+    // 各レコードが第1グループ条件 OR 第2グループ条件を満たすことを確認
+    result.data.forEach((record: any) => {
+      const satisfiesFirstGroup =
+        record.salesRepName === "田中太郎" && record.status === "成約";
+      const satisfiesSecondGroup =
+        record.amount >= 1000000 || record.amount <= 500000;
+      expect(satisfiesFirstGroup || satisfiesSecondGroup).toBe(true);
+    });
 
-    // 期待結果: 矛盾検出の詳細情報がレポートに記録される
-    expect(result.detection_details).toEqual(
-      expect.objectContaining({
-        standard_unit_price: 10000,
-        standard_deviation_tolerance_lower: 8000,
-        standard_deviation_tolerance_upper: 12000,
-        total_rows_processed: 5,
-        anomaly_threshold_percent: 20
+    // 検証5: 生成SQL文が正しい構造を持つこと
+    expect(result.generatedSQL).toContain("WHERE");
+    expect(result.generatedSQL.toUpperCase()).toContain("AND");
+    expect(result.generatedSQL.toUpperCase()).toContain("OR");
+    // 括弧による優先度が反映されていることを確認
+    expect(result.generatedSQL).toContain("(");
+    expect(result.generatedSQL).toContain(")");
+
+    // ========== パターン2: AND優先で複数条件を組み合わせる ==========
+    const resultPattern2 = searchSalesActivities({
+      filters: [
+        {
+          operator: "AND",
+          conditions: [
+            { field: "salesRepName", condition: "equals", value: "鈴木花子" },
+            { field: "period", condition: "greaterThanOrEqual", value: "2024-01-01" },
+            { field: "period", condition: "lessThanOrEqual", value: "2024-12-31" }
+          ]
+        }
+      ],
+      topLevelOperator: "AND"
+    });
+
+    // パターン2検証1: AND条件内のすべての条件が満たされるデータのみが返却されること
+    resultPattern2.data.forEach((record: any) => {
+      expect(record.salesRepName).toBe("鈴木花子");
+      expect(record.period).toGreaterThanOrEqual("2024-01-01");
+      expect(record.period).toBeLessThanOrEqual("2024-12-31");
+    });
+
+    // パターン2検証2: 生成SQLにおいてAND演算子が複数含まれること
+    const andCount = (resultPattern2.generatedSQL.match(/\bAND\b/gi) || []).length;
+    expect(andCount).toBeGreaterThanOrEqual(2);
+
+    // ========== パターン3: OR優先で複数条件を組み合わせる ==========
+    const resultPattern3 = searchSalesActivities({
+      filters: [
+        {
+          operator: "OR",
+          conditions: [
+            { field: "status", condition: "equals", value: "成約" },
+            { field: "status", condition: "equals", value: "提案中" },
+            { field: "status", condition: "equals", value: "アポ確定" }
+          ]
+        }
+      ],
+      topLevelOperator: "OR"
+    });
+
+    // パターン3検証1: OR条件内のいずれかの条件が満たされるデータが返却されること
+    resultPattern3.data.forEach((record: any) => {
+      const statusMatches =
+        record.status === "成約" ||
+        record.status === "提案中" ||
+        record.status === "アポ確定";
+      expect(statusMatches).toBe(true);
+    });
+
+    // パターン3検証2: 生成SQLにおいてOR演算子が複数含まれること
+    const orCount = (resultPattern3.generatedSQL.match(/\bOR\b/gi) || []).length;
+    expect(orCount).toBeGreaterThanOrEqual(2);
+
+    // ========== パターン4: 複雑な入れ子構造 (AND条件グループ) OR (AND条件グループ) ==========
+    const resultPattern4 = searchSalesActivities({
+      filters: [
+        {
+          operator: "AND",
+          conditions: [
+            { field: "salesRepName", condition: "equals", value: "田中太郎" },
+            { field: "status", condition: "equals", value: "成約" }
+          ]
+        },
+        {
+          operator: "AND",
+          conditions: [
+            { field: "salesRepName", condition: "equals", value: "鈴木花子" },
+            { field: "status", condition: "equals", value: "成約" }
+          ]
+        }
+      ],
+      topLevelOperator: "OR"
+    });
+
+    // パターン4検証1: 第1グループ（田中太郎&成約）または第2グループ（鈴木花子&成約）のいずれかが満たされること
+    resultPattern4.data.forEach((record: any) => {
+      const satisfiesFirstGroup =
+        record.salesRepName === "田中太郎" && record.status === "成約";
+      const satisfiesSecondGroup =
+        record.salesRepName === "鈴木花子" && record.status === "成約";
+      expect(satisfiesFirstGroup || satisfiesSecondGroup).toBe(true);
+    });
+
+    // パターン4検証2: 生成SQLにおいて複数の括弧が含まれ、論理構造が保持されていること
+    const openParenCount = (resultPattern4.generatedSQL.match(/\(/g) || []).length;
+    expect(openParenCount).toBeGreaterThanOrEqual(2);
+    const closeParenCount = (resultPattern4.generatedSQL.match(/\)/g) || []).length;
+    expect(closeParenCount).toBe(openParenCount);
+
+    // ========== エラー系: AND/OR演算子を明示的に指定しないと例外 ==========
+    expect(() =>
+      searchSalesActivities({
+        filters: [
+          {
+            operator: undefined as any,
+            conditions: [{ field: "salesRepName", condition: "equals", value: "田中太郎" }]
+          }
+        ],
+        topLevelOperator: "OR"
       })
-    );
+    ).toThrow(/演算子/);
 
-    // 期待結果: アラート通知が生成される
-    expect(result.alert_notification).toEqual(
-      expect.objectContaining({
-        alert_type: "data_ratio_anomaly",
-        severity_level: "high",
-        affected_row_count: 2,
-        affected_rows: [3, 4],
-        timestamp: expect.any(String),
-        message: expect.stringContaining("売上単価")
+    // ========== エラー系: 無効な比較演算子を使用すると例外 ==========
+    expect(() =>
+      searchSalesActivities({
+        filters: [
+          {
+            operator: "AND",
+            conditions: [
+              {
+                field: "amount",
+                condition: "invalid_operator" as any,
+                value: 1000000
+              }
+            ]
+          }
+        ],
+        topLevelOperator: "AND"
       })
-    );
+    ).toThrow(/比較演算子/);
 
-    // 期待結果: 通知には具体的な逸脱率が含まれる
-    expect(result.alert_notification.details).toContainEqual({
-      row_number: 3,
-      deviation_percent: 100,
-      expected_range: "8000-12000",
-      actual_unit_price: 20000
-    });
+    // ========== エラー系: 存在しないフィールドを指定すると例外 ==========
+    expect(() =>
+      searchSalesActivities({
+        filters: [
+          {
+            operator: "AND",
+            conditions: [
+              { field: "nonexistentField", condition: "equals", value: "value" }
+            ]
+          }
+        ],
+        topLevelOperator: "AND"
+      })
+    ).toThrow(/フィールド/);
 
-    expect(result.alert_notification.details).toContainEqual({
-      row_number: 4,
-      deviation_percent: -40,
-      expected_range: "8000-12000",
-      actual_unit_price: 6000
-    });
+    // ========== エラー系: 空の検索条件を渡すと例外 ==========
+    expect(() =>
+      searchSalesActivities({
+        filters: [],
+        topLevelOperator: "AND"
+      })
+    ).toThrow(/条件/);
 
-    // 期待結果: 正常行は検出対象から除外される
-    const normal_rows = result.detected_anomalies.filter(
-      (a) => a.row_number === 1 || a.row_number === 2 || a.row_number === 5
-    );
-    expect(normal_rows.length).toBe(0);
+    // ========== エラー系: 条件内が空配列だと例外 ==========
+    expect(() =>
+      searchSalesActivities({
+        filters: [
+          {
+            operator: "AND",
+            conditions: []
+          }
+        ],
+        topLevelOperator: "AND"
+      })
+    ).toThrow(/条件/);
   });
 });

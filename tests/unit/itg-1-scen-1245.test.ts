@@ -1,272 +1,381 @@
-import { describe, test, expect, beforeEach, afterEach } from "@jest/globals";
-import { recordContractChangeApproval } from "../../src/logic/it-1781935279444-2-1-1";
+import { describe, it, expect, beforeEach } from "@jest/globals";
+import { validateMonthlyBusinessData } from "../../src/logic/it-1781935279444-2-2-1";
 
-const fetchMock = require("jest-fetch-mock");
-fetchMock.enableMocks();
-
-describe("営業データ入力時の品質検証ルール定義・実行機能", () => {
+describe("月次営業データの完全性・正確性検証", () => {
   beforeEach(() => {
-    fetchMock.resetMocks();
-  });
-
-  afterEach(() => {
     jest.clearAllMocks();
   });
 
-  // SCEN-1245: [edge] 契約変更承認・署名記録機能 - 複数の承認者がいる場合、全承認者の承認記録が保存される
-  test("複数承認者による契約変更承認時に全承認者の承認記録がシステムに保存される", async () => {
-    // テストデータ: 3人の承認者が設定された契約変更申請
-    const contractChangeId = "CC-2024-001";
-    const approver_a = {
-      userId: "approver-a-001",
-      userName: "承認者A",
-      email: "approver.a@company.com",
-    };
-    const approver_b = {
-      userId: "approver-b-001",
-      userName: "承認者B",
-      email: "approver.b@company.com",
-    };
-    const approver_c = {
-      userId: "approver-c-001",
-      userName: "承認者C",
-      email: "approver.c@company.com",
-    };
-    const approversList = [approver_a, approver_b, approver_c];
-
-    const contractChangeContent = {
-      contractId: "CONTRACT-2024-100",
-      changeType: "renewal",
-      previousTerms: "Standard Plan",
-      newTerms: "Premium Plan",
-      effectiveDate: "2024-02-01",
-    };
-
-    // Mock API: 承認者A の承認記録を保存
-    const approvalTimestampA = new Date("2024-01-15T09:00:00Z");
-    const signatureDataA = "SIGNATURE_A_BASE64_ENCODED";
-    const approvalRecordA = {
-      contractChangeId,
-      approverId: approver_a.userId,
-      approverName: approver_a.userName,
-      approvalTimestamp: approvalTimestampA.toISOString(),
-      signature: signatureDataA,
-      approvalDateTime: new Date("2024-01-15T09:00:00Z").toISOString(),
-      status: "approved",
-      sequenceNumber: 1,
+  // SCEN-1245
+  it("すべての必須項目が揃い、データ型と値の範囲が正常な場合、集計完了判定を返す", () => {
+    const monthlyBusinessData = {
+      records: [
+        {
+          business_date: "2024-01-15",
+          business_person_id: "BP001",
+          customer_id: "CUST001",
+          sales_amount: 50000,
+          product_code: "PROD-A",
+          quantity: 10,
+          billing_category: "standard",
+        },
+        {
+          business_date: "2024-01-16",
+          business_person_id: "BP002",
+          customer_id: "CUST002",
+          sales_amount: 75000,
+          product_code: "PROD-B",
+          quantity: 5,
+          billing_category: "premium",
+        },
+        {
+          business_date: "2024-01-17",
+          business_person_id: "BP001",
+          customer_id: "CUST003",
+          sales_amount: 120000,
+          product_code: "PROD-C",
+          quantity: 20,
+          billing_category: "standard",
+        },
+      ],
     };
 
-    fetchMock.mockResponseOnce(JSON.stringify(approvalRecordA), { status: 201 });
+    const result = validateMonthlyBusinessData(monthlyBusinessData);
 
-    const resultA = await recordContractChangeApproval({
-      contractChangeId,
-      approverId: approver_a.userId,
-      approverName: approver_a.userName,
-      approvalTimestamp: approvalTimestampA,
-      signature: signatureDataA,
-      changeContent: contractChangeContent,
-      sequenceNumber: 1,
-    });
+    expect(result.status).toBe("complete");
+    expect(result.error_code).toBe(0);
+    expect(result.message).toBe("月次営業データの検証が完了しました");
+    expect(result.aggregation_target_count).toBe(3);
+    expect(result.aggregation_complete_count).toBe(3);
+    expect(result.validation_errors).toEqual([]);
+    expect(result.validation_warnings).toEqual([]);
+  });
 
-    expect(resultA).toEqual(approvalRecordA);
-    expect(fetchMock).toHaveBeenCalledWith(
-      expect.stringContaining("/contract-change/approval"),
-      expect.objectContaining({ method: "POST" })
+  // SCEN-1245 - 境界値: 売上金額が最小値0の場合
+  it("売上金額が0（最小値）の場合、集計完了判定を返す", () => {
+    const monthlyBusinessData = {
+      records: [
+        {
+          business_date: "2024-01-15",
+          business_person_id: "BP001",
+          customer_id: "CUST001",
+          sales_amount: 0,
+          product_code: "PROD-A",
+          quantity: 1,
+          billing_category: "standard",
+        },
+      ],
+    };
+
+    const result = validateMonthlyBusinessData(monthlyBusinessData);
+
+    expect(result.status).toBe("complete");
+    expect(result.error_code).toBe(0);
+    expect(result.aggregation_target_count).toBe(1);
+    expect(result.aggregation_complete_count).toBe(1);
+  });
+
+  // SCEN-1245 - 境界値: 数量が最小値1の場合
+  it("数量が1（最小値）の場合、集計完了判定を返す", () => {
+    const monthlyBusinessData = {
+      records: [
+        {
+          business_date: "2024-01-15",
+          business_person_id: "BP001",
+          customer_id: "CUST001",
+          sales_amount: 30000,
+          product_code: "PROD-A",
+          quantity: 1,
+          billing_category: "standard",
+        },
+      ],
+    };
+
+    const result = validateMonthlyBusinessData(monthlyBusinessData);
+
+    expect(result.status).toBe("complete");
+    expect(result.error_code).toBe(0);
+    expect(result.aggregation_complete_count).toBe(1);
+  });
+
+  // SCEN-1245 - エラー: 必須項目欠落（営業日付）
+  it("営業日付が欠落している場合、エラーコードを返す", () => {
+    const monthlyBusinessData = {
+      records: [
+        {
+          business_person_id: "BP001",
+          customer_id: "CUST001",
+          sales_amount: 50000,
+          product_code: "PROD-A",
+          quantity: 10,
+          billing_category: "standard",
+        },
+      ],
+    };
+
+    expect(() => validateMonthlyBusinessData(monthlyBusinessData)).toThrow(
+      /営業日付/
     );
+  });
 
-    // Mock API: 承認者B の承認記録を保存
-    const approvalTimestampB = new Date("2024-01-15T10:30:00Z");
-    const signatureDataB = "SIGNATURE_B_BASE64_ENCODED";
-    const approvalRecordB = {
-      contractChangeId,
-      approverId: approver_b.userId,
-      approverName: approver_b.userName,
-      approvalTimestamp: approvalTimestampB.toISOString(),
-      signature: signatureDataB,
-      approvalDateTime: new Date("2024-01-15T10:30:00Z").toISOString(),
-      status: "approved",
-      sequenceNumber: 2,
+  // SCEN-1245 - エラー: 必須項目欠落（営業担当者ID）
+  it("営業担当者IDが欠落している場合、エラーコードを返す", () => {
+    const monthlyBusinessData = {
+      records: [
+        {
+          business_date: "2024-01-15",
+          customer_id: "CUST001",
+          sales_amount: 50000,
+          product_code: "PROD-A",
+          quantity: 10,
+          billing_category: "standard",
+        },
+      ],
     };
 
-    fetchMock.resetMocks();
-    fetchMock.mockResponseOnce(JSON.stringify(approvalRecordB), { status: 201 });
+    expect(() => validateMonthlyBusinessData(monthlyBusinessData)).toThrow(
+      /営業担当者/
+    );
+  });
 
-    const resultB = await recordContractChangeApproval({
-      contractChangeId,
-      approverId: approver_b.userId,
-      approverName: approver_b.userName,
-      approvalTimestamp: approvalTimestampB,
-      signature: signatureDataB,
-      changeContent: contractChangeContent,
-      sequenceNumber: 2,
-    });
-
-    expect(resultB).toEqual(approvalRecordB);
-
-    // Mock API: 承認者C の承認記録を保存
-    const approvalTimestampC = new Date("2024-01-15T11:45:00Z");
-    const signatureDataC = "SIGNATURE_C_BASE64_ENCODED";
-    const approvalRecordC = {
-      contractChangeId,
-      approverId: approver_c.userId,
-      approverName: approver_c.userName,
-      approvalTimestamp: approvalTimestampC.toISOString(),
-      signature: signatureDataC,
-      approvalDateTime: new Date("2024-01-15T11:45:00Z").toISOString(),
-      status: "approved",
-      sequenceNumber: 3,
+  // SCEN-1245 - エラー: 必須項目欠落（顧客ID）
+  it("顧客IDが欠落している場合、エラーコードを返す", () => {
+    const monthlyBusinessData = {
+      records: [
+        {
+          business_date: "2024-01-15",
+          business_person_id: "BP001",
+          sales_amount: 50000,
+          product_code: "PROD-A",
+          quantity: 10,
+          billing_category: "standard",
+        },
+      ],
     };
 
-    fetchMock.resetMocks();
-    fetchMock.mockResponseOnce(JSON.stringify(approvalRecordC), { status: 201 });
-
-    const resultC = await recordContractChangeApproval({
-      contractChangeId,
-      approverId: approver_c.userId,
-      approverName: approver_c.userName,
-      approvalTimestamp: approvalTimestampC,
-      signature: signatureDataC,
-      changeContent: contractChangeContent,
-      sequenceNumber: 3,
-    });
-
-    expect(resultC).toEqual(approvalRecordC);
-
-    // Mock API: 承認履歴一覧を取得
-    const allApprovalRecords = [approvalRecordA, approvalRecordB, approvalRecordC];
-
-    fetchMock.resetMocks();
-    fetchMock.mockResponseOnce(
-      JSON.stringify({ approvalRecords: allApprovalRecords, totalCount: 3 }),
-      { status: 200 }
+    expect(() => validateMonthlyBusinessData(monthlyBusinessData)).toThrow(
+      /顧客/
     );
+  });
 
-    // 承認履歴を取得してすべての承認記録が存在することを検証
-    const response = await fetch(
-      `https://api.example.com/contract-change/${contractChangeId}/approval-history`,
-      { method: "GET" }
+  // SCEN-1245 - エラー: 必須項目欠落（売上金額）
+  it("売上金額が欠落している場合、エラーコードを返す", () => {
+    const monthlyBusinessData = {
+      records: [
+        {
+          business_date: "2024-01-15",
+          business_person_id: "BP001",
+          customer_id: "CUST001",
+          product_code: "PROD-A",
+          quantity: 10,
+          billing_category: "standard",
+        },
+      ],
+    };
+
+    expect(() => validateMonthlyBusinessData(monthlyBusinessData)).toThrow(
+      /売上/
     );
-    const historyData = await response.json();
+  });
 
-    expect(historyData.approvalRecords).toHaveLength(3);
-    expect(historyData.totalCount).toBe(3);
+  // SCEN-1245 - エラー: 必須項目欠落（商品コード）
+  it("商品コードが欠落している場合、エラーコードを返す", () => {
+    const monthlyBusinessData = {
+      records: [
+        {
+          business_date: "2024-01-15",
+          business_person_id: "BP001",
+          customer_id: "CUST001",
+          sales_amount: 50000,
+          quantity: 10,
+          billing_category: "standard",
+        },
+      ],
+    };
 
-    // 各承認記録の完全性を検証
-    expect(historyData.approvalRecords[0]).toEqual({
-      contractChangeId,
-      approverId: approver_a.userId,
-      approverName: "承認者A",
-      approvalTimestamp: "2024-01-15T09:00:00.000Z",
-      signature: signatureDataA,
-      approvalDateTime: "2024-01-15T09:00:00.000Z",
-      status: "approved",
-      sequenceNumber: 1,
-    });
-
-    expect(historyData.approvalRecords[1]).toEqual({
-      contractChangeId,
-      approverId: approver_b.userId,
-      approverName: "承認者B",
-      approvalTimestamp: "2024-01-15T10:30:00.000Z",
-      signature: signatureDataB,
-      approvalDateTime: "2024-01-15T10:30:00.000Z",
-      status: "approved",
-      sequenceNumber: 2,
-    });
-
-    expect(historyData.approvalRecords[2]).toEqual({
-      contractChangeId,
-      approverId: approver_c.userId,
-      approverName: "承認者C",
-      approvalTimestamp: "2024-01-15T11:45:00.000Z",
-      signature: signatureDataC,
-      approvalDateTime: "2024-01-15T11:45:00.000Z",
-      status: "approved",
-      sequenceNumber: 3,
-    });
-
-    // Mock API: データベースクエリ - 承認記録テーブルから3件すべてが存在することを確認
-    fetchMock.resetMocks();
-    fetchMock.mockResponseOnce(
-      JSON.stringify({
-        records: [
-          {
-            id: "approval-record-1",
-            contractChangeId,
-            approverId: approver_a.userId,
-            approverName: "承認者A",
-            approvalTimestamp: "2024-01-15T09:00:00Z",
-            signature: signatureDataA,
-            approvalDateTime: "2024-01-15T09:00:00Z",
-            status: "approved",
-          },
-          {
-            id: "approval-record-2",
-            contractChangeId,
-            approverId: approver_b.userId,
-            approverName: "承認者B",
-            approvalTimestamp: "2024-01-15T10:30:00Z",
-            signature: signatureDataB,
-            approvalDateTime: "2024-01-15T10:30:00Z",
-            status: "approved",
-          },
-          {
-            id: "approval-record-3",
-            contractChangeId,
-            approverId: approver_c.userId,
-            approverName: "承認者C",
-            approvalTimestamp: "2024-01-15T11:45:00Z",
-            signature: signatureDataC,
-            approvalDateTime: "2024-01-15T11:45:00Z",
-            status: "approved",
-          },
-        ],
-        recordCount: 3,
-      }),
-      { status: 200 }
+    expect(() => validateMonthlyBusinessData(monthlyBusinessData)).toThrow(
+      /商品/
     );
+  });
 
-    const dbQueryResponse = await fetch(
-      `https://api.example.com/database/approval-records?contractChangeId=${contractChangeId}`,
-      { method: "GET" }
+  // SCEN-1245 - エラー: 必須項目欠落（数量）
+  it("数量が欠落している場合、エラーコードを返す", () => {
+    const monthlyBusinessData = {
+      records: [
+        {
+          business_date: "2024-01-15",
+          business_person_id: "BP001",
+          customer_id: "CUST001",
+          sales_amount: 50000,
+          product_code: "PROD-A",
+          billing_category: "standard",
+        },
+      ],
+    };
+
+    expect(() => validateMonthlyBusinessData(monthlyBusinessData)).toThrow(
+      /数量/
     );
-    const dbData = await dbQueryResponse.json();
+  });
 
-    expect(dbData.recordCount).toBe(3);
-    expect(dbData.records).toHaveLength(3);
+  // SCEN-1245 - エラー: 必須項目欠落（請求区分）
+  it("請求区分が欠落している場合、エラーコードを返す", () => {
+    const monthlyBusinessData = {
+      records: [
+        {
+          business_date: "2024-01-15",
+          business_person_id: "BP001",
+          customer_id: "CUST001",
+          sales_amount: 50000,
+          product_code: "PROD-A",
+          quantity: 10,
+        },
+      ],
+    };
 
-    // 各承認記録の詳細が正確に保存されていることを検証
-    const recordFromDb1 = dbData.records[0];
-    expect(recordFromDb1.approverId).toBe(approver_a.userId);
-    expect(recordFromDb1.approverName).toBe("承認者A");
-    expect(recordFromDb1.signature).toBe(signatureDataA);
-    expect(recordFromDb1.approvalTimestamp).toBe("2024-01-15T09:00:00Z");
-    expect(recordFromDb1.status).toBe("approved");
+    expect(() => validateMonthlyBusinessData(monthlyBusinessData)).toThrow(
+      /請求/
+    );
+  });
 
-    const recordFromDb2 = dbData.records[1];
-    expect(recordFromDb2.approverId).toBe(approver_b.userId);
-    expect(recordFromDb2.approverName).toBe("承認者B");
-    expect(recordFromDb2.signature).toBe(signatureDataB);
-    expect(recordFromDb2.approvalTimestamp).toBe("2024-01-15T10:30:00Z");
-    expect(recordFromDb2.status).toBe("approved");
+  // SCEN-1245 - エラー: データ型不正（営業日付が不正形式）
+  it("営業日付のデータ型が不正な場合、エラーを返す", () => {
+    const monthlyBusinessData = {
+      records: [
+        {
+          business_date: "2024/01/15",
+          business_person_id: "BP001",
+          customer_id: "CUST001",
+          sales_amount: 50000,
+          product_code: "PROD-A",
+          quantity: 10,
+          billing_category: "standard",
+        },
+      ],
+    };
 
-    const recordFromDb3 = dbData.records[2];
-    expect(recordFromDb3.approverId).toBe(approver_c.userId);
-    expect(recordFromDb3.approverName).toBe("承認者C");
-    expect(recordFromDb3.signature).toBe(signatureDataC);
-    expect(recordFromDb3.approvalTimestamp).toBe("2024-01-15T11:45:00Z");
-    expect(recordFromDb3.status).toBe("approved");
+    expect(() => validateMonthlyBusinessData(monthlyBusinessData)).toThrow(
+      /日付形式/
+    );
+  });
 
-    // 全承認者による承認が完全に記録されたことを確認
-    expect(historyData.approvalRecords.map((r: any) => r.approverName)).toEqual([
-      "承認者A",
-      "承認者B",
-      "承認者C",
-    ]);
-    expect(
-      historyData.approvalRecords.every(
-        (r: any) => r.status === "approved" && r.signature
-      )
-    ).toBe(true);
+  // SCEN-1245 - エラー: データ型不正（売上金額が負の値）
+  it("売上金額が負の値の場合、エラーを返す", () => {
+    const monthlyBusinessData = {
+      records: [
+        {
+          business_date: "2024-01-15",
+          business_person_id: "BP001",
+          customer_id: "CUST001",
+          sales_amount: -10000,
+          product_code: "PROD-A",
+          quantity: 10,
+          billing_category: "standard",
+        },
+      ],
+    };
+
+    expect(() => validateMonthlyBusinessData(monthlyBusinessData)).toThrow(
+      /売上/
+    );
+  });
+
+  // SCEN-1245 - エラー: データ型不正（数量が0以下）
+  it("数量が0以下の場合、エラーを返す", () => {
+    const monthlyBusinessData = {
+      records: [
+        {
+          business_date: "2024-01-15",
+          business_person_id: "BP001",
+          customer_id: "CUST001",
+          sales_amount: 50000,
+          product_code: "PROD-A",
+          quantity: 0,
+          billing_category: "standard",
+        },
+      ],
+    };
+
+    expect(() => validateMonthlyBusinessData(monthlyBusinessData)).toThrow(
+      /数量/
+    );
+  });
+
+  // SCEN-1245 - エラー: データ型不正（数量が小数）
+  it("数量が小数の場合、エラーを返す", () => {
+    const monthlyBusinessData = {
+      records: [
+        {
+          business_date: "2024-01-15",
+          business_person_id: "BP001",
+          customer_id: "CUST001",
+          sales_amount: 50000,
+          product_code: "PROD-A",
+          quantity: 10.5,
+          billing_category: "standard",
+        },
+      ],
+    };
+
+    expect(() => validateMonthlyBusinessData(monthlyBusinessData)).toThrow(
+      /整数/
+    );
+  });
+
+  // SCEN-1245 - 複数件検証で部分的エラー
+  it("複数件中の一部がエラー条件を満たす場合、集計完了件数が減少する", () => {
+    const monthlyBusinessData = {
+      records: [
+        {
+          business_date: "2024-01-15",
+          business_person_id: "BP001",
+          customer_id: "CUST001",
+          sales_amount: 50000,
+          product_code: "PROD-A",
+          quantity: 10,
+          billing_category: "standard",
+        },
+        {
+          business_date: "2024-01-16",
+          business_person_id: "BP002",
+          customer_id: "CUST002",
+          sales_amount: -5000,
+          product_code: "PROD-B",
+          quantity: 5,
+          billing_category: "premium",
+        },
+        {
+          business_date: "2024-01-17",
+          business_person_id: "BP001",
+          customer_id: "CUST003",
+          sales_amount: 120000,
+          product_code: "PROD-C",
+          quantity: 20,
+          billing_category: "standard",
+        },
+      ],
+    };
+
+    const result = validateMonthlyBusinessData(monthlyBusinessData);
+
+    expect(result.status).toBe("incomplete");
+    expect(result.error_code).toBeGreaterThan(0);
+    expect(result.aggregation_target_count).toBe(3);
+    expect(result.aggregation_complete_count).toBe(2);
+    expect(result.validation_errors.length).toBeGreaterThan(0);
+  });
+
+  // SCEN-1245 - 空レコード
+  it("レコードが空の場合、集計完了件数が0となる", () => {
+    const monthlyBusinessData = {
+      records: [],
+    };
+
+    const result = validateMonthlyBusinessData(monthlyBusinessData);
+
+    expect(result.status).toBe("complete");
+    expect(result.error_code).toBe(0);
+    expect(result.aggregation_target_count).toBe(0);
+    expect(result.aggregation_complete_count).toBe(0);
   });
 });

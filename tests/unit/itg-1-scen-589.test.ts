@@ -1,218 +1,114 @@
-import { extractBillingItems } from "../../src/logic/it-1-2-1";
+import { it, describe, beforeEach, afterEach } from "@jest/globals";
+import { determineMonthlyCutoffPeriod } from "../../src/logic/it-1-1-1";
 
-describe("請求対象項目の抽出と分類", () => {
-  // SCEN-589
-  test("品質検証を通過した営業データが顧客ごと・サービスごとに正確に分類され請求額計算用の入力データとして確定される", () => {
-    // テストデータ: 品質検証を通過した営業データ（複数顧客、複数サービス種別）
-    const validatedSalesData = [
+describe("営業成果データの自動検証ルール定義と異常検出機能", () => {
+  // SCEN-589: [normal] 月次集計期間確定機能 - 月次締め日の営業データから集計対象期間が正確に確定される
+  it("should correctly determine monthly cutoff period from sales activity data", () => {
+    // 準備: テストデータの営業活動レコード
+    const sales_activity_records = [
       {
-        salesDataId: "SD001",
-        customerId: "CUST001",
-        serviceType: "basic",
-        appointmentCount: 10,
-        contractAmount: 50000,
-        unitPrice: 5000,
-        quantity: 10,
-        applicationPeriodStart: "2024-01-01",
-        applicationPeriodEnd: "2024-01-31",
-        status: "validated",
+        id: 1,
+        activity_date: new Date("2024-01-05T09:00:00Z"),
+        customer_id: "CUST001",
+        activity_type: "appointment",
+        quantity: 1,
       },
       {
-        salesDataId: "SD002",
-        customerId: "CUST001",
-        serviceType: "option",
-        appointmentCount: 3,
-        contractAmount: 15000,
-        unitPrice: 5000,
-        quantity: 3,
-        applicationPeriodStart: "2024-01-01",
-        applicationPeriodEnd: "2024-01-31",
-        status: "validated",
+        id: 2,
+        activity_date: new Date("2024-01-15T14:30:00Z"),
+        customer_id: "CUST002",
+        activity_type: "contract",
+        quantity: 1,
       },
       {
-        salesDataId: "SD003",
-        customerId: "CUST002",
-        serviceType: "basic",
-        appointmentCount: 8,
-        contractAmount: 40000,
-        unitPrice: 5000,
-        quantity: 8,
-        applicationPeriodStart: "2024-01-01",
-        applicationPeriodEnd: "2024-01-31",
-        status: "validated",
-      },
-      {
-        salesDataId: "SD004",
-        customerId: "CUST002",
-        serviceType: "addon",
-        appointmentCount: 2,
-        contractAmount: 10000,
-        unitPrice: 5000,
+        id: 3,
+        activity_date: new Date("2024-01-31T23:59:00Z"),
+        customer_id: "CUST001",
+        activity_type: "appointment",
         quantity: 2,
-        applicationPeriodStart: "2024-01-01",
-        applicationPeriodEnd: "2024-01-31",
-        status: "validated",
+      },
+      {
+        id: 4,
+        activity_date: new Date("2024-02-01T08:00:00Z"),
+        customer_id: "CUST003",
+        activity_type: "contract",
+        quantity: 1,
+      },
+      {
+        id: 5,
+        activity_date: new Date("2023-12-31T10:00:00Z"),
+        customer_id: "CUST002",
+        activity_type: "appointment",
+        quantity: 1,
       },
     ];
 
-    // 請求対象項目抽出モジュールに入力
-    const result = extractBillingItems(validatedSalesData);
+    // 実行: 月次集計期間確定機能を実行（2024年1月の月末日を基準日として）
+    const cutoff_date = new Date("2024-01-31T23:59:59Z");
+    const result = determineMonthlyCutoffPeriod(
+      sales_activity_records,
+      cutoff_date
+    );
 
-    // 顧客IDごとにデータが分類されていることを確認
-    expect(result.classifiedByCustomer).toHaveProperty("CUST001");
-    expect(result.classifiedByCustomer).toHaveProperty("CUST002");
-    expect(Object.keys(result.classifiedByCustomer)).toEqual([
-      "CUST001",
-      "CUST002",
+    // 検証1: 集計対象期間の開始日が2024年1月1日であることを確認
+    expect(result.period_start_date).toEqual(new Date("2024-01-01T00:00:00Z"));
+
+    // 検証2: 集計対象期間の終了日が2024年1月31日であることを確認
+    expect(result.period_end_date).toEqual(new Date("2024-01-31T23:59:59Z"));
+
+    // 検証3: 集計対象期間内のデータレコード数が正確に計算されていることを確認
+    // 2024-01-05, 2024-01-15, 2024-01-31 の3件が該当
+    expect(result.record_count_in_period).toBe(3);
+
+    // 検証4: 月末日を超えるデータが集計対象外になっていることを確認
+    // 2024-02-01 のデータは集計対象外
+    expect(result.excluded_records).toEqual([
+      {
+        id: 4,
+        activity_date: new Date("2024-02-01T08:00:00Z"),
+        customer_id: "CUST003",
+        activity_type: "contract",
+        quantity: 1,
+      },
+      {
+        id: 5,
+        activity_date: new Date("2023-12-31T10:00:00Z"),
+        customer_id: "CUST002",
+        activity_type: "appointment",
+        quantity: 1,
+      },
     ]);
 
-    // 顧客CUST001のデータ確認
-    expect(result.classifiedByCustomer.CUST001).toHaveLength(2);
-    expect(result.classifiedByCustomer.CUST001[0].serviceType).toBe("basic");
-    expect(result.classifiedByCustomer.CUST001[1].serviceType).toBe("option");
+    // 検証5: 集計期間確定のステータスが「確定済み」に更新されていることを確認
+    expect(result.status).toBe("確定済み");
 
-    // 顧客CUST002のデータ確認
-    expect(result.classifiedByCustomer.CUST002).toHaveLength(2);
-    expect(result.classifiedByCustomer.CUST002[0].serviceType).toBe("basic");
-    expect(result.classifiedByCustomer.CUST002[1].serviceType).toBe("addon");
+    // 検証6: 集計対象期間内のレコード詳細が正確に把握できることを確認
+    expect(result.included_records).toEqual([
+      {
+        id: 1,
+        activity_date: new Date("2024-01-05T09:00:00Z"),
+        customer_id: "CUST001",
+        activity_type: "appointment",
+        quantity: 1,
+      },
+      {
+        id: 2,
+        activity_date: new Date("2024-01-15T14:30:00Z"),
+        customer_id: "CUST002",
+        activity_type: "contract",
+        quantity: 1,
+      },
+      {
+        id: 3,
+        activity_date: new Date("2024-01-31T23:59:00Z"),
+        customer_id: "CUST001",
+        activity_type: "appointment",
+        quantity: 2,
+      },
+    ]);
 
-    // 各顧客内でサービス種別ごとにデータが分類されていることを確認
-    expect(result.classifiedByService).toHaveProperty("CUST001");
-    expect(result.classifiedByService.CUST001).toHaveProperty("basic");
-    expect(result.classifiedByService.CUST001).toHaveProperty("option");
-    expect(result.classifiedByService.CUST002).toHaveProperty("basic");
-    expect(result.classifiedByService.CUST002).toHaveProperty("addon");
-
-    // CUST001のbasicサービス確認
-    expect(result.classifiedByService.CUST001.basic).toHaveLength(1);
-    expect(result.classifiedByService.CUST001.basic[0].salesDataId).toBe(
-      "SD001"
-    );
-
-    // CUST001のoptionサービス確認
-    expect(result.classifiedByService.CUST001.option).toHaveLength(1);
-    expect(result.classifiedByService.CUST001.option[0].salesDataId).toBe(
-      "SD002"
-    );
-
-    // 分類されたデータの請求額計算に必要な項目が漏れなく含まれていることを確認
-    const cust001BasicItem = result.classifiedByCustomer.CUST001.find(
-      (item: { serviceType: string }) => item.serviceType === "basic"
-    );
-    expect(cust001BasicItem).toHaveProperty("unitPrice");
-    expect(cust001BasicItem).toHaveProperty("quantity");
-    expect(cust001BasicItem).toHaveProperty("applicationPeriodStart");
-    expect(cust001BasicItem).toHaveProperty("applicationPeriodEnd");
-    expect(cust001BasicItem.unitPrice).toBe(5000);
-    expect(cust001BasicItem.quantity).toBe(10);
-
-    // 分類結果が請求額計算モジュールの入力データ形式に適合していることを確認
-    expect(result.schema).toEqual({
-      customerId: "string",
-      salesDataId: "string",
-      serviceType: "string",
-      unitPrice: "number",
-      quantity: "number",
-      applicationPeriodStart: "string",
-      applicationPeriodEnd: "string",
-      contractAmount: "number",
-    });
-
-    // 各アイテムがスキーマに適合していることを確認
-    result.classifiedByCustomer.CUST001.forEach(
-      (item: { [key: string]: unknown }) => {
-        expect(typeof item.customerId).toBe("string");
-        expect(typeof item.salesDataId).toBe("string");
-        expect(typeof item.serviceType).toBe("string");
-        expect(typeof item.unitPrice).toBe("number");
-        expect(typeof item.quantity).toBe("number");
-        expect(typeof item.applicationPeriodStart).toBe("string");
-        expect(typeof item.applicationPeriodEnd).toBe("string");
-        expect(typeof item.contractAmount).toBe("number");
-      }
-    );
-
-    // 同一顧客・同一サービスの重複データが存在しないことを確認
-    const duplicationCheck = new Map<string, number>();
-    Object.entries(result.classifiedByService).forEach(([customerId, services]) => {
-      Object.entries(services as Record<string, unknown[]>).forEach(([serviceType, items]) => {
-        const key = `${customerId}-${serviceType}`;
-        const count = (items as unknown[]).length;
-        if (duplicationCheck.has(key)) {
-          const existingCount = duplicationCheck.get(key)!;
-          expect(count).toBe(existingCount);
-        }
-        duplicationCheck.set(key, count);
-      });
-    });
-
-    // 検証済みデータのみが含まれていることを確認
-    result.classifiedByCustomer.CUST001.forEach(
-      (item: { status?: string }) => {
-        expect(item.status).toBe("validated");
-      }
-    );
-
-    // 分類完了ステータスが正常に更新されていることを確認
-    expect(result.status).toBe("classified");
-    expect(result.totalRecordsProcessed).toBe(4);
-    expect(result.totalCustomers).toBe(2);
-    expect(result.totalServices).toBe(4);
-
-    // 請求額計算に必要な集計情報が生成されていることを確認
-    expect(result.billingInputForCUST001).toEqual({
-      customerId: "CUST001",
-      totalBillingAmount: 65000,
-      serviceBreakdown: [
-        {
-          serviceType: "basic",
-          amount: 50000,
-          quantity: 10,
-          unitPrice: 5000,
-        },
-        {
-          serviceType: "option",
-          amount: 15000,
-          quantity: 3,
-          unitPrice: 5000,
-        },
-      ],
-    });
-
-    expect(result.billingInputForCUST002).toEqual({
-      customerId: "CUST002",
-      totalBillingAmount: 50000,
-      serviceBreakdown: [
-        {
-          serviceType: "basic",
-          amount: 40000,
-          quantity: 8,
-          unitPrice: 5000,
-        },
-        {
-          serviceType: "addon",
-          amount: 10000,
-          quantity: 2,
-          unitPrice: 5000,
-        },
-      ],
-    });
-
-    // 分類結果が請求額計算入力フォーマットに適合していることを確認
-    expect(Array.isArray(result.billingItems)).toBe(true);
-    expect(result.billingItems).toHaveLength(4);
-    result.billingItems.forEach(
-      (item: {
-        customerId: string;
-        serviceType: string;
-        calculableAmount: number;
-      }) => {
-        expect(item).toHaveProperty("customerId");
-        expect(item).toHaveProperty("serviceType");
-        expect(item).toHaveProperty("calculableAmount");
-        expect(typeof item.calculableAmount).toBe("number");
-        expect(item.calculableAmount).toBeGreaterThan(0);
-      }
-    );
+    // 検証7: 月次集計期間情報の完全性を確認
+    expect(result.month).toBe(1);
+    expect(result.year).toBe(2024);
   });
 });

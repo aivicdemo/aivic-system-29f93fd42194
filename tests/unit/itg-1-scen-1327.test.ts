@@ -1,137 +1,137 @@
-import { defineMetadataLogic } from "../../src/logic/it-1781935279444-1-1-1";
+import { describe, it, expect, beforeEach, afterEach } from "@jest/globals";
+import {
+  createValidationRuleForMandatoryField,
+  type ValidationRule,
+  type DataItemDefinition,
+} from "../../src/logic/it-1781935279444-2-1-1";
 
-describe("営業データ項目メタデータ管理機能", () => {
-  // SCEN-1327: [normal] 営業データ項目メタデータ管理 - メタデータで定義された項目名・単位・データ型・計算ロジックが検証・抽出処理に正しく適用される
-  test("メタデータ定義の項目名・単位・データ型・計算ロジックがすべての検証・抽出処理に正しく適用される", () => {
-    // テストデータベースに営業データ項目メタデータを事前登録
-    // 項目名：売上金額、単位：円、データ型：数値、計算ロジック：単価×数量
-    const metadata = {
-      item_id: "MTD-001",
-      item_name: "売上金額",
-      unit: "円",
-      data_type: "number",
-      calculation_logic: "unit_price * quantity",
+describe("営業データ品質基準・検証ルール定義 - 必須フラグ自動検証ルール生成", () => {
+  let mockDataItem: DataItemDefinition;
+  let generatedRule: ValidationRule;
+
+  beforeEach(() => {
+    mockDataItem = {
+      itemId: "item_001",
+      itemName: "顧客名",
+      dataType: "string",
+      unit: "件",
+      isMandatory: true,
+      minValue: undefined,
+      maxValue: undefined,
+      allowedValues: undefined,
+    };
+  });
+
+  afterEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it("SCEN-1327: 必須フラグが True のデータ項目に対して Null チェック検証ルールが自動生成される", () => {
+    // Arrange: 必須フラグ True のデータ項目を準備
+    const dataItem: DataItemDefinition = {
+      itemId: "item_cust_name",
+      itemName: "顧客名",
+      dataType: "string",
+      unit: "件",
+      isMandatory: true,
+      minValue: undefined,
+      maxValue: undefined,
+      allowedValues: undefined,
     };
 
-    // メタデータ管理画面から登録したメタデータを確認
-    const result_1 = defineMetadataLogic({
-      metadata_id: metadata.item_id,
-      item_name: metadata.item_name,
-      unit: metadata.unit,
-      data_type: metadata.data_type,
-      calculation_logic: metadata.calculation_logic,
+    // Act: 検証ルール生成関数を実行
+    generatedRule = createValidationRuleForMandatoryField(dataItem);
+
+    // Assert 1: 検証ルール ID が生成されている
+    expect(generatedRule.ruleId).toBeDefined();
+    expect(typeof generatedRule.ruleId).toBe("string");
+    expect(generatedRule.ruleId.length).toBeGreaterThan(0);
+
+    // Assert 2: 検証ルール名が "[項目名] - Null チェック" 形式である
+    expect(generatedRule.ruleName).toBe("顧客名 - Null チェック");
+
+    // Assert 3: 検証ルール説明に「当該項目の値が Null でないこと」が含まれている
+    expect(generatedRule.ruleDescription).toContain(
+      "当該項目の値が Null でないこと"
+    );
+
+    // Assert 4: 検証ルール種別が "NULL_CHECK" である
+    expect(generatedRule.ruleType).toBe("NULL_CHECK");
+
+    // Assert 5: 検証対象項目 ID が一致している
+    expect(generatedRule.targetItemId).toBe("item_cust_name");
+
+    // Assert 6: 検証ルールの条件に NOT_NULL が含まれている
+    expect(generatedRule.conditions).toBeDefined();
+    expect(Array.isArray(generatedRule.conditions)).toBe(true);
+    expect(generatedRule.conditions.length).toBeGreaterThan(0);
+    expect(generatedRule.conditions[0]).toEqual({
+      conditionId: expect.any(String),
+      conditionType: "NOT_NULL",
+      operator: "is_not_null",
+      value: null,
     });
 
-    // すべての定義情報が正しく表示されることを確認
-    expect(result_1).toEqual({
-      metadata_id: "MTD-001",
-      item_name: "売上金額",
-      unit: "円",
-      data_type: "number",
-      calculation_logic: "unit_price * quantity",
-      status: "registered",
-      created_at: expect.any(String),
-    });
+    // Assert 7: 検証ルールが有効化된 상태이다
+    expect(generatedRule.isActive).toBe(true);
 
-    // テスト用営業データ（単価：1000円、数量：5個）を検証処理に入力
-    const test_data_1 = {
-      record_id: "REC-001",
-      unit_price: 1000,
-      quantity: 5,
+    // Assert 8: 検証ルール適용 시점이 "INPUT" 이다
+    expect(generatedRule.executionTiming).toBe("INPUT");
+
+    // Assert 9: エラーメッセージが適切に設定されている
+    expect(generatedRule.errorMessage).toContain("顧客名");
+    expect(generatedRule.errorMessage).toContain("必須項目");
+
+    // Assert 10: 생성 일시가 記錄されている
+    expect(generatedRule.createdAt).toBeDefined();
+    expect(generatedRule.createdAt instanceof Date).toBe(true);
+
+    // Assert 11: 必須フラグが False の場合は検証ルールが生成されない（エラーが発生）
+    const nonMandatoryItem: DataItemDefinition = {
+      itemId: "item_optional",
+      itemName: "備考",
+      dataType: "string",
+      unit: "件",
+      isMandatory: false,
+      minValue: undefined,
+      maxValue: undefined,
+      allowedValues: undefined,
     };
 
-    // 検証処理を実行し、メタデータ定義の項目名・単位・データ型が正しく適用されたかを検証
-    const validation_result_1 = defineMetadataLogic({
-      metadata_id: metadata.item_id,
-      item_name: metadata.item_name,
-      unit: metadata.unit,
-      data_type: metadata.data_type,
-      calculation_logic: metadata.calculation_logic,
-      record_data: test_data_1,
-      operation: "validate",
+    expect(() => {
+      createValidationRuleForMandatoryField(nonMandatoryItem);
+    }).toThrow(/必須/);
+
+    // Assert 12: データ項目が null の場合はエラーが発生
+    expect(() => {
+      createValidationRuleForMandatoryField(null as any);
+    }).toThrow(/項目/);
+
+    // Assert 13: 検証ルール作成者が「システム自動」として記録される
+    expect(generatedRule.createdBy).toBe("SYSTEM_AUTO");
+
+    // Assert 14: 検証ルールに紐付くデータ項目の情報が保持されている
+    expect(generatedRule.relatedDataItem).toEqual({
+      itemId: "item_cust_name",
+      itemName: "顧客名",
+      dataType: "string",
     });
 
-    // 検証処理の実行結果ログを確認
-    expect(validation_result_1).toEqual({
-      metadata_id: "MTD-001",
-      item_name: "売上金額",
-      unit: "円",
-      data_type: "number",
-      record_id: "REC-001",
-      validation_status: "passed",
-      extracted_value: 5000,
-      extracted_unit: "円",
-      extracted_data_type: "number",
-    });
-
-    // 計算ロジック（単価×数量=5000円）が正しく実行されたかを確認
-    expect(validation_result_1.extracted_value).toBe(5000);
-
-    // 抽出処理実行画面でメタデータを指定して抽出処理を実行
-    const extraction_result_1 = defineMetadataLogic({
-      metadata_id: metadata.item_id,
-      item_name: metadata.item_name,
-      unit: metadata.unit,
-      data_type: metadata.data_type,
-      calculation_logic: metadata.calculation_logic,
-      record_data: test_data_1,
-      operation: "extract",
-    });
-
-    // 抽出結果として、売上金額が「5000」（単位：円、データ型：数値）で抽出されたことを確認
-    expect(extraction_result_1).toEqual({
-      metadata_id: "MTD-001",
-      item_name: "売上金額",
-      unit: "円",
-      data_type: "number",
-      extracted_value: 5000,
-      extracted_unit: "円",
-      extracted_data_type: "number",
-    });
-
-    // 複数の営業データレコードに対して同様の検証・抽出処理を繰り返し実行
-    // テスト用営業データ2：単価：2000円、数量：3個
-    const test_data_2 = {
-      record_id: "REC-002",
-      unit_price: 2000,
-      quantity: 3,
+    // Assert 15: 複数の必須フラグ True データ項目に対して独立して検証ルールが生成される
+    const secondItem: DataItemDefinition = {
+      itemId: "item_deal_status",
+      itemName: "成約ステータス",
+      dataType: "string",
+      unit: "件",
+      isMandatory: true,
+      minValue: undefined,
+      maxValue: undefined,
+      allowedValues: ["成約", "失注", "保留中"],
     };
 
-    const validation_result_2 = defineMetadataLogic({
-      metadata_id: metadata.item_id,
-      item_name: metadata.item_name,
-      unit: metadata.unit,
-      data_type: metadata.data_type,
-      calculation_logic: metadata.calculation_logic,
-      record_data: test_data_2,
-      operation: "validate",
-    });
-
-    // すべてのレコードでメタデータが正しく適用されることを確認
-    expect(validation_result_2.extracted_value).toBe(6000);
-    expect(validation_result_2.extracted_unit).toBe("円");
-    expect(validation_result_2.extracted_data_type).toBe("number");
-
-    // テスト用営業データ3：単価：1500円、数量：8個
-    const test_data_3 = {
-      record_id: "REC-003",
-      unit_price: 1500,
-      quantity: 8,
-    };
-
-    const extraction_result_3 = defineMetadataLogic({
-      metadata_id: metadata.item_id,
-      item_name: metadata.item_name,
-      unit: metadata.unit,
-      data_type: metadata.data_type,
-      calculation_logic: metadata.calculation_logic,
-      record_data: test_data_3,
-      operation: "extract",
-    });
-
-    // 複数レコードでもメタデータが正しく適用される
-    expect(extraction_result_3.extracted_value).toBe(12000);
-    expect(extraction_result_3.extracted_unit).toBe("円");
-    expect(extraction_result_3.extracted_data_type).toBe("number");
+    const secondRule = createValidationRuleForMandatoryField(secondItem);
+    expect(secondRule.ruleName).toBe("成約ステータス - Null チェック");
+    expect(secondRule.targetItemId).toBe("item_deal_status");
+    expect(secondRule.ruleId).not.toBe(generatedRule.ruleId);
   });
 });

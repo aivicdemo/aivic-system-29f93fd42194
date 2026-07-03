@@ -1,27 +1,27 @@
-import { extractAndAggregateChargeableItems } from "../../src/logic/it-1781935279444-1-1-1";
+import { determineContractVersionByCustomer } from '../../src/logic/it-1781935279444-1-1-1';
 
-describe("営業データ項目のメタデータ管理機能 - 請求対象項目自動抽出・集計", () => {
-  // SCEN-1059: [edge] 請求ルールに合致する営業データが存在しない場合、請求額 0 が返される
-  test("請求ルールに合致する営業データが存在しない場合、請求額として0が返されること", () => {
-    // テストデータ: 営業データなし（空配列）
-    const salesData = [];
+describe('営業データ項目のメタデータ管理機能 - 契約書バージョン自動判定', () => {
+  test('SCEN-1059: 該当顧客に対する有効な契約書が存在しない場合、エラーが適切に返却される', () => {
+    const nonExistentCustomerId = 'CUST_NONEXISTENT_99999';
 
-    // 請求ルール定義
-    const chargeRule = {
-      customer_id: "CUST-001",
-      service_id: "SVC-PREMIUM",
-      period_start: new Date("2024-01-01T00:00:00Z"),
-      period_end: new Date("2024-01-31T23:59:59Z"),
-      customer_type: "enterprise",
-    };
+    expect(() => {
+      determineContractVersionByCustomer({
+        customer_id: nonExistentCustomerId,
+        reference_date: new Date('2024-01-15T11:00:00Z'),
+      });
+    }).toThrow(/契約書/);
 
-    // 請求対象項目自動抽出・集計機能を実行
-    const result = extractAndAggregateChargeableItems(salesData, chargeRule);
+    try {
+      determineContractVersionByCustomer({
+        customer_id: nonExistentCustomerId,
+        reference_date: new Date('2024-01-15T11:00:00Z'),
+      });
+    } catch (error: unknown) {
+      const err = error as { message: string; code: string; status_code: number };
 
-    // 期待結果: 請求額が0で返されること
-    expect(result.total_charge_amount).toBe(0);
-    expect(result.charge_items).toEqual([]);
-    expect(result.charge_count).toBe(0);
-    expect(result.rule_matched).toBe(false);
+      expect(err.message).toMatch(/見つかりません/);
+      expect(err.code).toBe('CONTRACT_NOT_FOUND');
+      expect([400, 404, 500]).toContain(err.status_code);
+    }
   });
 });

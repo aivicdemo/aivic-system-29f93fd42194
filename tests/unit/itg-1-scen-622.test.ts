@@ -1,116 +1,213 @@
-import { calculateBillingAmount } from '../../src/logic/it-1-2-1';
+import { generateMonthlySummary } from '../../src/logic/it-1-br-1781935279444-1-2-1';
 
-describe('請求額確定フロー - 複数の請求対象項目を含む請求内容が承認時に一括確定される', () => {
-  test('SCEN-622: 複数の請求対象項目を含む請求内容が承認時に一括で確定され、請求書が自動生成される', () => {
-    // 複数の請求対象項目を定義
-    const billingItems = [
+describe('月次サマリーテンプレート定義・生成機能', () => {
+  test('SCEN-622: 定義済みテンプレートに基づいて月次営業成果データから顧客ごと・サービスごとの請求額と月次サマリーが自動生成される', () => {
+    // テンプレート定義: 顧客別・サービス別の集計項目、単価、計算式を含む
+    const templateDefinition = {
+      templateId: 'tpl_202401',
+      templateName: '月次成果サマリー_2024年01月',
+      companyId: 'corp_001',
+      aggregationLevels: ['customer', 'service'],
+      items: [
+        {
+          itemId: 'item_001',
+          itemName: '基本料金',
+          dataSourceField: 'base_fee',
+          calculationType: 'sum',
+          unitPrice: 50000,
+          displayOrder: 1,
+        },
+        {
+          itemId: 'item_002',
+          itemName: '成果報酬_アポ数',
+          dataSourceField: 'appointment_count',
+          calculationType: 'multiply',
+          unitPrice: 5000,
+          displayOrder: 2,
+        },
+        {
+          itemId: 'item_003',
+          itemName: '成果報酬_成約数',
+          dataSourceField: 'deal_count',
+          calculationType: 'multiply',
+          unitPrice: 25000,
+          displayOrder: 3,
+        },
+      ],
+      discountRule: {
+        ruleId: 'disc_001',
+        discountRate: 0.1,
+        applicableServices: ['service_A', 'service_B'],
+      },
+      periodStartDate: '2024-01-01',
+      periodEndDate: '2024-01-31',
+      createdAt: '2024-01-01T00:00:00Z',
+      createdBy: 'operator_001',
+    };
+
+    // 当月の営業成果データ: 顧客1, サービスA/B と 顧客2, サービスA の組み合わせ
+    const monthlySalesData = [
       {
-        itemId: 'ITEM001',
-        itemName: '商品A',
-        quantity: 10,
-        unitPrice: 5000,
-        taxRate: 0.10,
-        appliedFromDate: '2024-01-01',
-        appliedToDate: '2024-01-31',
+        dataId: 'data_001',
+        customerId: 'customer_001',
+        customerName: '顧客A株式会社',
+        serviceId: 'service_A',
+        serviceName: 'サービスA',
+        base_fee: 50000,
+        appointment_count: 8,
+        deal_count: 2,
+        recordDate: '2024-01-15',
       },
       {
-        itemId: 'ITEM002',
-        itemName: '商品B',
-        quantity: 5,
-        unitPrice: 8000,
-        taxRate: 0.10,
-        appliedFromDate: '2024-01-01',
-        appliedToDate: '2024-01-31',
+        dataId: 'data_002',
+        customerId: 'customer_001',
+        customerName: '顧客A株式会社',
+        serviceId: 'service_B',
+        serviceName: 'サービスB',
+        base_fee: 50000,
+        appointment_count: 5,
+        deal_count: 1,
+        recordDate: '2024-01-20',
       },
       {
-        itemId: 'ITEM003',
-        itemName: 'サービスC',
-        quantity: 1,
-        unitPrice: 20000,
-        taxRate: 0.10,
-        appliedFromDate: '2024-01-01',
-        appliedToDate: '2024-01-31',
+        dataId: 'data_003',
+        customerId: 'customer_002',
+        customerName: '顧客B企業',
+        serviceId: 'service_A',
+        serviceName: 'サービスA',
+        base_fee: 50000,
+        appointment_count: 10,
+        deal_count: 3,
+        recordDate: '2024-01-18',
       },
     ];
 
-    // 請求内容を作成
-    const billingRequest = {
-      billingId: 'BIL202401001',
-      customerId: 'CUST001',
-      serviceId: 'SVC001',
-      items: billingItems,
-      status: 'pending_approval',
-      createdAt: '2024-01-15T09:00:00Z',
-      approvedAt: null,
-      approverUserId: null,
-    };
+    // 月次サマリー自動生成を実行
+    const generatedSummary = generateMonthlySummary(
+      templateDefinition,
+      monthlySalesData
+    );
 
-    // 請求額を計算
-    // 商品A: 10 * 5000 = 50000, 税金: 50000 * 0.10 = 5000
-    // 商品B: 5 * 8000 = 40000, 税金: 40000 * 0.10 = 4000
-    // サービスC: 1 * 20000 = 20000, 税金: 20000 * 0.10 = 2000
-    // 小計: 50000 + 40000 + 20000 = 110000
-    // 合計税金: 5000 + 4000 + 2000 = 11000
-    // 合計金額: 110000 + 11000 = 121000
+    // 生成されたサマリーが存在することを確認
+    expect(generatedSummary).toBeDefined();
+    expect(generatedSummary.summaryId).toBeDefined();
+    expect(generatedSummary.templateId).toBe('tpl_202401');
+    expect(generatedSummary.periodStartDate).toBe('2024-01-01');
+    expect(generatedSummary.periodEndDate).toBe('2024-01-31');
 
-    const calculatedResult = calculateBillingAmount(billingRequest);
+    // 生成されたサマリーが顧客ごとに正しく集計されていることを確認
+    expect(generatedSummary.customerSummaries).toBeDefined();
+    expect(generatedSummary.customerSummaries.length).toBe(2);
 
-    // 小計が正しく計算されていることを確認
-    expect(calculatedResult.subtotal).toBe(110000);
+    // 顧客1（customer_001）の集計
+    const customer1Summary = generatedSummary.customerSummaries.find(
+      (s: any) => s.customerId === 'customer_001'
+    );
+    expect(customer1Summary).toBeDefined();
+    expect(customer1Summary.customerName).toBe('顧客A株式会社');
+    expect(customer1Summary.serviceSummaries.length).toBe(2);
 
-    // 合計税金が正しく計算されていることを確認
-    expect(calculatedResult.totalTax).toBe(11000);
+    // 生成されたサマリーがサービスごとに正しく集計されていることを確認
+    // 顧客1 - サービスA: 基本料金 50,000 + アポ報酬 (8 * 5,000) + 成約報酬 (2 * 25,000) = 50,000 + 40,000 + 50,000 = 140,000
+    // 割引適用: 140,000 * 0.1 = 14,000 割引
+    // 請求額: 140,000 - 14,000 = 126,000
+    const customer1ServiceA = customer1Summary.serviceSummaries.find(
+      (s: any) => s.serviceId === 'service_A'
+    );
+    expect(customer1ServiceA).toBeDefined();
+    expect(customer1ServiceA.serviceName).toBe('サービスA');
+    expect(customer1ServiceA.subtotal).toBe(140000);
+    expect(customer1ServiceA.discountAmount).toBe(14000);
+    expect(customer1ServiceA.billingAmount).toBe(126000);
 
-    // 合計金額が正しく計算されていることを確認
-    expect(calculatedResult.totalAmount).toBe(121000);
+    // 顧客1 - サービスB: 基本料金 50,000 + アポ報酬 (5 * 5,000) + 成約報酬 (1 * 25,000) = 50,000 + 25,000 + 25,000 = 100,000
+    // 割引適用: 100,000 * 0.1 = 10,000 割引
+    // 請求額: 100,000 - 10,000 = 90,000
+    const customer1ServiceB = customer1Summary.serviceSummaries.find(
+      (s: any) => s.serviceId === 'service_B'
+    );
+    expect(customer1ServiceB).toBeDefined();
+    expect(customer1ServiceB.serviceName).toBe('サービスB');
+    expect(customer1ServiceB.subtotal).toBe(100000);
+    expect(customer1ServiceB.discountAmount).toBe(10000);
+    expect(customer1ServiceB.billingAmount).toBe(90000);
 
-    // 請求内容が承認時に承認者情報が追加される
-    const approvalRequest = {
-      ...billingRequest,
-      status: 'approved',
-      approvedAt: '2024-01-15T14:00:00Z',
-      approverUserId: 'USR002',
-    };
+    // 顧客1の合計請求額: 126,000 + 90,000 = 216,000
+    expect(customer1Summary.totalBillingAmount).toBe(216000);
 
-    const approvalResult = calculateBillingAmount(approvalRequest);
+    // 顧客2（customer_002）の集計
+    const customer2Summary = generatedSummary.customerSummaries.find(
+      (s: any) => s.customerId === 'customer_002'
+    );
+    expect(customer2Summary).toBeDefined();
+    expect(customer2Summary.customerName).toBe('顧客B企業');
+    expect(customer2Summary.serviceSummaries.length).toBe(1);
 
-    // 承認後も金額が変わらないことを確認
-    expect(approvalResult.subtotal).toBe(110000);
-    expect(approvalResult.totalTax).toBe(11000);
-    expect(approvalResult.totalAmount).toBe(121000);
+    // 顧客2 - サービスA: 基本料金 50,000 + アポ報酬 (10 * 5,000) + 成約報酬 (3 * 25,000) = 50,000 + 50,000 + 75,000 = 175,000
+    // 割引適用: 175,000 * 0.1 = 17,500 割引
+    // 請求額: 175,000 - 17,500 = 157,500
+    const customer2ServiceA = customer2Summary.serviceSummaries.find(
+      (s: any) => s.serviceId === 'service_A'
+    );
+    expect(customer2ServiceA).toBeDefined();
+    expect(customer2ServiceA.serviceName).toBe('サービスA');
+    expect(customer2ServiceA.subtotal).toBe(175000);
+    expect(customer2ServiceA.discountAmount).toBe(17500);
+    expect(customer2ServiceA.billingAmount).toBe(157500);
 
-    // 承認済み請求内容から確定されたステータスが反映される
-    expect(approvalResult.status).toBe('confirmed');
+    // 顧客2の合計請求額
+    expect(customer2Summary.totalBillingAmount).toBe(157500);
 
-    // すべての請求対象項目が確定状態に変更されたことを確認
-    expect(approvalResult.items).toHaveLength(3);
-    approvalResult.items.forEach((item) => {
-      expect(item.confirmationStatus).toBe('confirmed');
+    // 全体の請求額合計: 216,000 + 157,500 = 373,500
+    expect(generatedSummary.totalBillingAmount).toBe(373500);
+
+    // 各顧客・サービス組み合わせの請求額が正確に計算されていることを確認
+    const allServiceSummaries = generatedSummary.customerSummaries.flatMap(
+      (c: any) => c.serviceSummaries
+    );
+    expect(allServiceSummaries.length).toBe(3);
+    allServiceSummaries.forEach((service: any) => {
+      expect(service.billingAmount).toBeGreaterThan(0);
+      expect(service.discountAmount).toBeGreaterThanOrEqual(0);
+      expect(service.subtotal - service.discountAmount).toBe(
+        service.billingAmount
+      );
     });
 
-    // 生成された請求書が承認前の計算値と一致することを検証
-    const invoiceData = {
-      invoiceId: 'INV202401001',
-      billingId: 'BIL202401001',
-      customerId: 'CUST001',
-      invoiceDate: '2024-01-15',
-      dueDate: '2024-02-15',
-      subtotal: calculatedResult.subtotal,
-      tax: calculatedResult.totalTax,
-      totalAmount: calculatedResult.totalAmount,
-      items: billingItems,
-      status: 'generated',
-    };
+    // 生成されたサマリーがテンプレート定義に従った形式で出力されていることを確認
+    expect(generatedSummary.itemDetails).toBeDefined();
+    expect(generatedSummary.itemDetails.length).toBeGreaterThan(0);
+    generatedSummary.itemDetails.forEach((item: any) => {
+      expect(item.itemId).toBeDefined();
+      expect(item.itemName).toBeDefined();
+      expect(item.displayOrder).toBeDefined();
+    });
 
-    // 請求書の合計金額が請求内容の計算値と一致
-    expect(invoiceData.totalAmount).toBe(approvalResult.totalAmount);
-    expect(invoiceData.subtotal).toBe(approvalResult.subtotal);
-    expect(invoiceData.tax).toBe(approvalResult.totalTax);
+    // 複数顧客・複数サービスの組み合わせが混在する場合でも、データが重複・漏落なく処理されていることを確認
+    const processedDataCount = generatedSummary.customerSummaries.reduce(
+      (sum: number, c: any) =>
+        sum +
+        c.serviceSummaries.reduce(
+          (serviceSum: number) => serviceSum + 1,
+          0
+        ),
+      0
+    );
+    expect(processedDataCount).toBe(3); // 元データ3件が正確に処理されたこと
 
-    // 請求ステータスが「確定」に更新されたことを確認
-    expect(approvalResult.status).toBe('confirmed');
+    // 重複チェック: 各 customer-service 組み合わせが一意であることを確認
+    const uniqueKeys = new Set(
+      generatedSummary.customerSummaries.flatMap((c: any) =>
+        c.serviceSummaries.map(
+          (s: any) => `${c.customerId}_${s.serviceId}`
+        )
+      )
+    );
+    expect(uniqueKeys.size).toBe(3); // 3つの一意な組み合わせ
 
-    // 確定状態で後続フローに進める状態であることを確認
-    expect(approvalResult.canProceedToPayment).toBe(true);
+    // 生成タイムスタンプと生成者情報が記録されていることを確認
+    expect(generatedSummary.generatedAt).toBeDefined();
+    expect(generatedSummary.generatedBy).toBeDefined();
+    expect(generatedSummary.status).toBe('generated');
   });
 });

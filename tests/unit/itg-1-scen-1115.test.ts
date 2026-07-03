@@ -1,96 +1,161 @@
-import { validateSalesDataQuality } from "../../src/logic/it-1781935279444-2-2-1";
+import { describe, it, expect, beforeEach } from "@jest/globals";
+import {
+  validateAggregationLogic,
+} from "../../src/logic/it-1781935279444-1-1-1";
 
-describe("営業データの完全性・正確性を自動検証し、不足データ・誤りを検出・通知する機能", () => {
-  // SCEN-1115
-  test("複数の例外ケースが混在する場合、優先度順に正しくソートされて返却される", () => {
-    // Arrange: 複数の検証ルール定義（異なる優先度レベル：高・中・低）
-    const validationRules = [
+describe("営業データメタデータ管理 - 集計ロジック検証", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  // SCEN-1115: [normal] 営業データメタデータに基づく集計ロジック検証 - 複数の計算ルール（合計・平均・カウント）が混在する場合に正しく適用される
+  it("should correctly apply mixed aggregation rules (sum, average, count) to sales data", () => {
+    // 営業データメタデータ定義：合計・平均・カウントの3つの計算ルール
+    const metadataDefinition = {
+      fields: [
+        {
+          fieldId: "revenue_total",
+          fieldName: "売上金額",
+          unitName: "円",
+          dataType: "number",
+          aggregationType: "sum",
+          description: "月次売上金額の合計",
+        },
+        {
+          fieldId: "revenue_average",
+          fieldName: "平均売上金額",
+          unitName: "円",
+          dataType: "number",
+          aggregationType: "average",
+          description: "顧客1社あたりの平均売上金額",
+        },
+        {
+          fieldId: "customer_count",
+          fieldName: "顧客件数",
+          unitName: "件",
+          dataType: "number",
+          aggregationType: "count",
+          description: "新規顧客数のカウント",
+        },
+      ],
+    };
+
+    // テスト用営業データセット
+    const salesDataset = [
       {
-        ruleId: "rule_001",
-        ruleName: "必須項目チェック",
-        priority: 1, // 高優先度
-        condition: "required_field",
-        errorCode: "ERR_REQUIRED_001",
-        errorMessage: "顧客名は必須項目です",
+        recordId: "rec_001",
+        customerId: "cust_A",
+        revenueAmount: 150000,
+        isNewCustomer: true,
       },
       {
-        ruleId: "rule_002",
-        ruleName: "金額範囲チェック",
-        priority: 2, // 中優先度
-        condition: "amount_range",
-        errorCode: "ERR_AMOUNT_001",
-        errorMessage: "金額が許容範囲外です",
+        recordId: "rec_002",
+        customerId: "cust_B",
+        revenueAmount: 200000,
+        isNewCustomer: true,
       },
       {
-        ruleId: "rule_003",
-        ruleName: "データ型チェック",
-        priority: 3, // 低優先度
-        condition: "data_type",
-        errorCode: "ERR_TYPE_001",
-        errorMessage: "データ型が正しくありません",
+        recordId: "rec_003",
+        customerId: "cust_C",
+        revenueAmount: 175000,
+        isNewCustomer: false,
+      },
+      {
+        recordId: "rec_004",
+        customerId: "cust_D",
+        revenueAmount: 225000,
+        isNewCustomer: true,
+      },
+      {
+        recordId: "rec_005",
+        customerId: "cust_E",
+        revenueAmount: 250000,
+        isNewCustomer: false,
       },
     ];
 
-    // テストデータ：複数の例外ケースが混在
-    const testData = {
-      customerId: "", // 必須項目欠落 → priority 1 (高)
-      amount: 999999999, // 金額異常値 → priority 2 (中)
-      serviceType: 123, // データ型不正 → priority 3 (低)
-      appointmentDate: "2024-01-15",
-      dealStatus: "pending",
-    };
-
-    // Act: 検証実行
-    const result = validateSalesDataQuality({
-      validationRules,
-      salesData: testData,
+    // 集計ロジック実行：合計ルール適用
+    const sumResult = validateAggregationLogic({
+      metadata: metadataDefinition,
+      data: salesDataset,
+      aggregationType: "sum",
+      targetField: "revenueAmount",
     });
 
-    // Assert: 返却された例外ケースが優先度順（高→中→低）にソートされているか検証
-    expect(result.isValid).toBe(false);
-    expect(result.validationErrors).toBeDefined();
-    expect(result.validationErrors.length).toBe(3);
+    // 期待値：150000 + 200000 + 175000 + 225000 + 250000 = 1000000
+    expect(sumResult.value).toBe(1000000);
+    expect(sumResult.aggregationType).toBe("sum");
+    expect(sumResult.isValid).toBe(true);
+    expect(sumResult.appliedFieldId).toBe("revenue_total");
 
-    // 優先度順の正確性を検証（index 0 が最高優先度）
-    expect(result.validationErrors[0].priority).toBe(1);
-    expect(result.validationErrors[0].errorCode).toBe("ERR_REQUIRED_001");
-    expect(result.validationErrors[0].errorMessage).toBe("顧客名は必須項目です");
-    expect(result.validationErrors[0].fieldName).toBe("customerId");
-
-    expect(result.validationErrors[1].priority).toBe(2);
-    expect(result.validationErrors[1].errorCode).toBe("ERR_AMOUNT_001");
-    expect(result.validationErrors[1].errorMessage).toBe("金額が許容範囲外です");
-    expect(result.validationErrors[1].fieldName).toBe("amount");
-
-    expect(result.validationErrors[2].priority).toBe(3);
-    expect(result.validationErrors[2].errorCode).toBe("ERR_TYPE_001");
-    expect(result.validationErrors[2].errorMessage).toBe(
-      "データ型が正しくありません"
-    );
-    expect(result.validationErrors[2].fieldName).toBe("serviceType");
-
-    // 各例外ケースの詳細情報が正確に表示されているか検証
-    result.validationErrors.forEach((error, index) => {
-      expect(error).toHaveProperty("errorCode");
-      expect(error).toHaveProperty("errorMessage");
-      expect(error).toHaveProperty("priority");
-      expect(error).toHaveProperty("fieldName");
-      expect(typeof error.errorCode).toBe("string");
-      expect(typeof error.errorMessage).toBe("string");
-      expect(typeof error.priority).toBe("number");
-      expect(typeof error.fieldName).toBe("string");
-
-      // 優先度が昇順（1 → 2 → 3）であることを検証
-      if (index > 0) {
-        expect(error.priority).toBeGreaterThanOrEqual(
-          result.validationErrors[index - 1].priority
-        );
-      }
+    // 集計ロジック実行：平均ルール適用
+    const averageResult = validateAggregationLogic({
+      metadata: metadataDefinition,
+      data: salesDataset,
+      aggregationType: "average",
+      targetField: "revenueAmount",
     });
 
-    // 検証結果メタデータの妥当性
-    expect(result.totalErrorCount).toBe(3);
-    expect(result.validationTimestamp).toBeDefined();
-    expect(typeof result.validationTimestamp).toBe("string");
+    // 期待値：1000000 / 5 = 200000
+    expect(averageResult.value).toBe(200000);
+    expect(averageResult.aggregationType).toBe("average");
+    expect(averageResult.isValid).toBe(true);
+    expect(averageResult.appliedFieldId).toBe("revenue_average");
+
+    // 集計ロジック実行：カウントルール適用
+    const countResult = validateAggregationLogic({
+      metadata: metadataDefinition,
+      data: salesDataset,
+      aggregationType: "count",
+      targetField: "customerId",
+      filterCondition: { isNewCustomer: true },
+    });
+
+    // 期待値：新規顧客数 = 3（cust_A, cust_B, cust_D）
+    expect(countResult.value).toBe(3);
+    expect(countResult.aggregationType).toBe("count");
+    expect(countResult.isValid).toBe(true);
+    expect(countResult.appliedFieldId).toBe("customer_count");
+
+    // 複数の計算ルールが同時に実行された場合の結果を検証
+    const mixedResult = validateAggregationLogic({
+      metadata: metadataDefinition,
+      data: salesDataset,
+      aggregationTypes: ["sum", "average", "count"],
+      targetField: "revenueAmount",
+    });
+
+    // 各計算ルールの結果が他のルールに影響を与えていないことを確認
+    expect(mixedResult.results).toHaveLength(3);
+    expect(mixedResult.results[0].aggregationType).toBe("sum");
+    expect(mixedResult.results[0].value).toBe(1000000);
+    expect(mixedResult.results[1].aggregationType).toBe("average");
+    expect(mixedResult.results[1].value).toBe(200000);
+    expect(mixedResult.results[2].aggregationType).toBe("count");
+    expect(mixedResult.results[2].value).toBe(3);
+
+    // 計算結果をメタデータの期待値と比較し、正確性を検証
+    expect(mixedResult.isConsistent).toBe(true);
+    expect(mixedResult.validationStatus).toBe("passed");
+
+    // ルール間の干渉や計算ロジックの誤りが発生していないことを確認
+    expect(mixedResult.results[0].isValid).toBe(true);
+    expect(mixedResult.results[1].isValid).toBe(true);
+    expect(mixedResult.results[2].isValid).toBe(true);
+
+    // 各計算ルール結果が正確に計算されていることを最終確認
+    const expectedSumTotal = 1000000;
+    const expectedAverageValue = 200000;
+    const expectedCountNewCustomers = 3;
+
+    expect(mixedResult.results[0].value).toBe(expectedSumTotal);
+    expect(mixedResult.results[1].value).toBe(expectedAverageValue);
+    expect(mixedResult.results[2].value).toBe(expectedCountNewCustomers);
+
+    // メタデータとの整合性を検証
+    expect(mixedResult.metadata.fields).toHaveLength(3);
+    expect(mixedResult.metadata.fields[0].aggregationType).toBe("sum");
+    expect(mixedResult.metadata.fields[1].aggregationType).toBe("average");
+    expect(mixedResult.metadata.fields[2].aggregationType).toBe("count");
   });
 });

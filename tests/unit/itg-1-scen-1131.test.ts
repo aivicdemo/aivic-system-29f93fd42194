@@ -1,90 +1,103 @@
-import { describe, test, expect } from "@jest/globals";
-import { validateSalesData } from "../../src/logic/it-1781935279444-2-2-1";
+import { verifyDistributionList } from '../../src/logic/it-1-2-1';
 
-describe("営業データの完全性・正確性を自動検証し、不足データ・誤りを検出・通知する機能", () => {
-  // SCEN-1131: [error] 営業データ品質検証 - 必須項目が欠落している営業データが検証エラーとして検出される
-  test("必須項目が欠落した営業データが検証エラーとして検出される", () => {
-    // 必須項目: customerName, transactionAmount, transactionDate
-    const invalidDataMissingCustomerName = {
-      customerName: "",
-      transactionAmount: 50000,
-      transactionDate: "2024-01-15",
-      serviceType: "standard"
+describe('営業成果データから請求対象項目を自動抽出し、顧客ごと・サービスごとの請求額を集計する機能', () => {
+  test('SCEN-1131: [normal] 配信リスト妥当性確認 - 配信対象顧客が配信停止フラグなし・契約状態が有効な顧客のみで構成される', () => {
+    // 配信停止フラグなし・契約状態が有効な顧客
+    const validCustomer1 = {
+      customer_id: 'CUST001',
+      customer_name: '顧客A株式会社',
+      distribution_stop_flag: false,
+      contract_status: 'active',
+      contract_id: 'CONT001',
     };
 
-    expect(() => validateSalesData(invalidDataMissingCustomerName)).toThrow(
-      /顧客名/
-    );
-
-    const invalidDataMissingAmount = {
-      customerName: "Company A",
-      transactionAmount: null,
-      transactionDate: "2024-01-15",
-      serviceType: "standard"
+    const validCustomer2 = {
+      customer_id: 'CUST002',
+      customer_name: '顧客B株式会社',
+      distribution_stop_flag: false,
+      contract_status: 'active',
+      contract_id: 'CONT002',
     };
 
-    expect(() => validateSalesData(invalidDataMissingAmount)).toThrow(
-      /取引金額/
-    );
-
-    const invalidDataMissingDate = {
-      customerName: "Company A",
-      transactionAmount: 50000,
-      transactionDate: "",
-      serviceType: "standard"
+    // 配信停止フラグありの顧客（配信リストから除外されるべき）
+    const stoppedCustomer = {
+      customer_id: 'CUST003',
+      customer_name: '顧客C株式会社',
+      distribution_stop_flag: true,
+      contract_status: 'active',
+      contract_id: 'CONT003',
     };
 
-    expect(() => validateSalesData(invalidDataMissingDate)).toThrow(
-      /取引日付/
-    );
-
-    // 成功ケース: すべての必須項目が揃っている
-    const validData = {
-      customerName: "Company A",
-      transactionAmount: 50000,
-      transactionDate: "2024-01-15",
-      serviceType: "standard"
+    // 契約状態が無効な顧客（配信リストから除外されるべき）
+    const inactiveCustomer = {
+      customer_id: 'CUST004',
+      customer_name: '顧客D株式会社',
+      distribution_stop_flag: false,
+      contract_status: 'inactive',
+      contract_id: 'CONT004',
     };
 
-    const result = validateSalesData(validData);
-    expect(result).toEqual({
-      status: "合格",
-      validationErrors: [],
-      errorCount: 0
+    // 配信停止フラグありかつ契約状態が無効な顧客（配信リストから除外されるべき）
+    const invalidCustomer = {
+      customer_id: 'CUST005',
+      customer_name: '顧客E株式会社',
+      distribution_stop_flag: true,
+      contract_status: 'inactive',
+      contract_id: 'CONT005',
+    };
+
+    const allCustomers = [
+      validCustomer1,
+      validCustomer2,
+      stoppedCustomer,
+      inactiveCustomer,
+      invalidCustomer,
+    ];
+
+    const distributionList = verifyDistributionList(allCustomers);
+
+    // 配信リストに正当な顧客のみが含まれていることを確認
+    expect(distributionList).toHaveLength(2);
+
+    // 配信対象の顧客IDが期待値と一致することを確認
+    const distributionCustomerIds = distributionList.map((c: any) => c.customer_id);
+    expect(distributionCustomerIds).toEqual(['CUST001', 'CUST002']);
+
+    // 各顧客について配信停止フラグがfalseであることを確認
+    distributionList.forEach((customer: any) => {
+      expect(customer.distribution_stop_flag).toBe(false);
     });
 
-    // 境界値テスト: 金額が 0 の場合は不合格
-    const invalidDataZeroAmount = {
-      customerName: "Company A",
-      transactionAmount: 0,
-      transactionDate: "2024-01-15",
-      serviceType: "standard"
-    };
+    // 各顧客について契約状態が'active'であることを確認
+    distributionList.forEach((customer: any) => {
+      expect(customer.contract_status).toBe('active');
+    });
 
-    expect(() => validateSalesData(invalidDataZeroAmount)).toThrow(
-      /取引金額/
-    );
+    // 配信停止フラグありの顧客が配信リストに含まれていないことを確認
+    expect(distributionList.some((c: any) => c.customer_id === 'CUST003')).toBe(false);
 
-    // 境界値テスト: 日付形式が不正な場合
-    const invalidDateFormat = {
-      customerName: "Company A",
-      transactionAmount: 50000,
-      transactionDate: "2024/01/15",
-      serviceType: "standard"
-    };
+    // 契約状態が無効の顧客が配信リストに含まれていないことを確認
+    expect(distributionList.some((c: any) => c.customer_id === 'CUST004')).toBe(false);
 
-    expect(() => validateSalesData(invalidDateFormat)).toThrow(/日付/);
+    // 配信停止フラグありかつ契約状態が無効の顧客が配信リストに含まれていないことを確認
+    expect(distributionList.some((c: any) => c.customer_id === 'CUST005')).toBe(false);
 
-    // 複数項目欠落時は最初に検出した項目でエラー
-    const invalidDataMultipleMissing = {
-      customerName: "",
-      transactionAmount: null,
-      transactionDate: "",
-      serviceType: "standard"
-    };
-
-    expect(() => validateSalesData(invalidDataMultipleMissing)).toThrow(
-      /顧客名/
-    );
+    // 配信リストの構造が正しいことを確認
+    expect(distributionList).toEqual([
+      {
+        customer_id: 'CUST001',
+        customer_name: '顧客A株式会社',
+        distribution_stop_flag: false,
+        contract_status: 'active',
+        contract_id: 'CONT001',
+      },
+      {
+        customer_id: 'CUST002',
+        customer_name: '顧客B株式会社',
+        distribution_stop_flag: false,
+        contract_status: 'active',
+        contract_id: 'CONT002',
+      },
+    ]);
   });
 });

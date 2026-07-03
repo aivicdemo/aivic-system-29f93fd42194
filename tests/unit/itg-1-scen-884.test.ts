@@ -1,22 +1,33 @@
-import { describe, test, expect } from '@jest/globals';
-import { validateSalesData } from '../../src/logic/it-1781935279444-2-2-1';
+import { applyBillingRules } from '../../src/logic/it-1-2-1';
 
-describe('営業データの完全性・正確性を自動検証し、不足データ・誤りを検出・通知する機能', () => {
-  // SCEN-884: [normal] 営業データ品質チェック・必須項目検証 - 営業データの必須項目がすべて入力されている場合、チェック結果『正常』が返される
-  test('必須項目がすべて入力されている場合、チェック結果が正常を示す', () => {
-    const sales_data = {
-      customer_name: '株式会社ABC',
-      transaction_date: '2024-01-15',
-      amount: 150000,
-      product_code: 'PROD-001',
-      responsible_person: '営業太郎'
+describe('営業成果データから請求対象項目を自動抽出し、顧客ごと・サービスごとの請求額を集計する機能', () => {
+  // SCEN-884: [edge] 請求ルール適用ロジック機能 - 割引率が0%の場合に割引を適用しない計算が実行される
+  test('割引率が0%の場合、割引額は0円となり、最終請求額は元の請求金額と同じ金額が返されること', () => {
+    // 準備: 割引率が0%に設定された請求データを準備
+    const billingData = {
+      customerId: 'CUST-001',
+      serviceId: 'SVC-A',
+      baseAmount: 100000, // 基本請求金額: 100,000円
+      discountRate: 0, // 割引率: 0%
+      minimumBillingAmount: 0,
+      maximumBillingAmount: 999999999,
     };
 
-    const result = validateSalesData(sales_data);
+    // 実行: 割引率0%の条件で請求ルール適用ロジックを実行
+    const result = applyBillingRules(billingData);
 
-    expect(result.status_code).toBe(200);
-    expect(result.is_valid).toBe(true);
-    expect(result.error_message).toBe('');
-    expect(result.validation_errors).toEqual([]);
+    // 検証: 計算結果の割引額を検証
+    // 割引額 = 100,000 * (0 / 100) = 0円
+    expect(result.discountAmount).toBe(0);
+
+    // 検証: 計算結果の最終請求額を検証
+    // 最終請求額 = 100,000 - 0 = 100,000円
+    expect(result.finalBillingAmount).toBe(100000);
+
+    // 検証: 元の請求金額と最終請求額が同じであることを確認
+    expect(result.finalBillingAmount).toEqual(result.baseAmount);
+
+    // 検証: 割引が適用されていないことを確認（割引額が0円）
+    expect(result.discountAmount).toBe(0);
   });
 });

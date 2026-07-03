@@ -1,119 +1,106 @@
-import { addExceptionCaseToStandardList } from '../../src/logic/it-1-2-1';
+import { describe, test, expect } from "@jest/globals";
+import { validateCalculationResultAgainstStandards } from "../../src/logic/it-1-2-1";
 
-describe('営業成果データから請求対象項目を自動抽出し、顧客ごと・サービスごとの請求額を集計する機能', () => {
-  test('SCEN-960: 過去の請求例外ケースを基準リストに含めて文書化できる', () => {
-    // Arrange: 過去の請求例外ケースデータ
-    const exceptionCase = {
-      caseId: 'EXC-2024-001',
-      customerId: 'CUST-A001',
-      serviceId: 'SVC-001',
-      exceptionType: 'discount_apply',
-      description: '売上30万円以上で5%割引を適用',
-      applicableCondition: 'monthly_revenue >= 300000',
-      discountRate: 0.05,
-      appliedDate: '2024-01-15T09:00:00Z',
-      createdBy: 'operator_001',
-      createdAt: '2024-01-15T09:30:00Z'
+describe("計算結果の手順書照合・検証", () => {
+  test("SCEN-960: 計算結果が1つ以上の基準を満たさない場合、不承認と判定して理由を詳細に返す", () => {
+    // 基準を定義
+    const standardA = {
+      id: "standard_a",
+      name: "基準A",
+      expectedMin: 1000,
+      expectedMax: 5000,
+    };
+    const standardB = {
+      id: "standard_b",
+      name: "基準B",
+      expectedMin: 100,
+      expectedMax: 500,
+    };
+    const standardC = {
+      id: "standard_c",
+      name: "基準C",
+      expectedMin: 50,
+      expectedMax: 200,
+    };
+    const standards = [standardA, standardB, standardC];
+
+    // ケース1: 基準Aのみを満たさないデータ
+    const resultFailA = {
+      customerId: "cust_001",
+      serviceId: "srv_001",
+      amount: 800,
+      unit_b_value: 150,
+      unit_c_value: 75,
     };
 
-    const standardListBefore = {
-      listId: 'STD-LIST-001',
-      version: 1,
-      exceptionCases: [],
-      lastUpdated: '2024-01-14T17:00:00Z',
-      updatedBy: 'system'
+    const responseFailA = validateCalculationResultAgainstStandards(
+      resultFailA,
+      standards
+    );
+
+    expect(responseFailA.status).toBe("不承認");
+    expect(responseFailA.reasons).toHaveLength(1);
+    expect(responseFailA.reasons[0]).toMatchObject({
+      standardId: "standard_a",
+      standardName: "基準A",
+      expectedMin: 1000,
+      expectedMax: 5000,
+      actualValue: 800,
+    });
+    expect(responseFailA.reasons[0].detail).toMatch(/基準A/);
+    expect(responseFailA.reasons[0].detail).toMatch(/1000/);
+    expect(responseFailA.reasons[0].detail).toMatch(/5000/);
+    expect(responseFailA.reasons[0].detail).toMatch(/800/);
+
+    // ケース2: 基準BとCを満たさないデータ
+    const resultFailBC = {
+      customerId: "cust_001",
+      serviceId: "srv_001",
+      amount: 1500,
+      unit_b_value: 600,
+      unit_c_value: 250,
     };
 
-    // Act: 例外ケースを基準リストに追加
-    const result = addExceptionCaseToStandardList(exceptionCase, standardListBefore);
+    const responseFailBC = validateCalculationResultAgainstStandards(
+      resultFailBC,
+      standards
+    );
 
-    // Assert: 基準リストへの追加完了を検証
-    expect(result.exceptionCases).toHaveLength(1);
-    expect(result.exceptionCases[0].caseId).toBe('EXC-2024-001');
-    expect(result.exceptionCases[0].customerId).toBe('CUST-A001');
-    expect(result.exceptionCases[0].serviceId).toBe('SVC-001');
-    expect(result.exceptionCases[0].exceptionType).toBe('discount_apply');
-    expect(result.exceptionCases[0].description).toBe('売上30万円以上で5%割引を適用');
-    expect(result.exceptionCases[0].applicableCondition).toBe('monthly_revenue >= 300000');
-    expect(result.exceptionCases[0].discountRate).toBe(0.05);
-    expect(result.exceptionCases[0].appliedDate).toBe('2024-01-15T09:00:00Z');
-    expect(result.exceptionCases[0].createdBy).toBe('operator_001');
-    expect(result.exceptionCases[0].createdAt).toBe('2024-01-15T09:30:00Z');
+    expect(responseFailBC.status).toBe("不承認");
+    expect(responseFailBC.reasons).toHaveLength(2);
 
-    // Assert: リストのメタデータが更新されたことを確認
-    expect(result.version).toBe(2);
-    expect(result.lastUpdated).toBeTruthy();
-    expect(result.updatedBy).toBe('system');
+    const reasonB = responseFailBC.reasons.find(
+      (r) => r.standardId === "standard_b"
+    );
+    expect(reasonB).toBeDefined();
+    expect(reasonB!.standardName).toBe("基準B");
+    expect(reasonB!.expectedMin).toBe(100);
+    expect(reasonB!.expectedMax).toBe(500);
+    expect(reasonB!.actualValue).toBe(600);
+    expect(reasonB!.detail).toMatch(/基準B/);
+    expect(reasonB!.detail).toMatch(/100/);
+    expect(reasonB!.detail).toMatch(/500/);
+    expect(reasonB!.detail).toMatch(/600/);
 
-    // Assert: 複数の例外ケースを追加するテスト
-    const secondExceptionCase = {
-      caseId: 'EXC-2024-002',
-      customerId: 'CUST-B002',
-      serviceId: 'SVC-002',
-      exceptionType: 'minimum_charge',
-      description: '最小請求額5万円を適用',
-      applicableCondition: 'service_type == premium',
-      minimumCharge: 50000,
-      appliedDate: '2024-01-16T10:00:00Z',
-      createdBy: 'operator_002',
-      createdAt: '2024-01-16T10:15:00Z'
-    };
+    const reasonC = responseFailBC.reasons.find(
+      (r) => r.standardId === "standard_c"
+    );
+    expect(reasonC).toBeDefined();
+    expect(reasonC!.standardName).toBe("基準C");
+    expect(reasonC!.expectedMin).toBe(50);
+    expect(reasonC!.expectedMax).toBe(200);
+    expect(reasonC!.actualValue).toBe(250);
+    expect(reasonC!.detail).toMatch(/基準C/);
+    expect(reasonC!.detail).toMatch(/50/);
+    expect(reasonC!.detail).toMatch(/200/);
+    expect(reasonC!.detail).toMatch(/250/);
 
-    const resultWithSecondCase = addExceptionCaseToStandardList(secondExceptionCase, result);
-
-    expect(resultWithSecondCase.exceptionCases).toHaveLength(2);
-    expect(resultWithSecondCase.exceptionCases[1].caseId).toBe('EXC-2024-002');
-    expect(resultWithSecondCase.exceptionCases[1].exceptionType).toBe('minimum_charge');
-    expect(resultWithSecondCase.exceptionCases[1].minimumCharge).toBe(50000);
-    expect(resultWithSecondCase.version).toBe(3);
-
-    // Assert: 例外ケースが正常に保存されていることを検証
-    expect(resultWithSecondCase.exceptionCases.every(
-      (ec: any) => ec.caseId && ec.customerId && ec.serviceId && ec.applicableCondition
-    )).toBe(true);
-
-    // Assert: エクスポート対応フォーマット検証
-    expect(Array.isArray(resultWithSecondCase.exceptionCases)).toBe(true);
-    expect(resultWithSecondCase.exceptionCases.length).toBeGreaterThan(0);
-
-    // Assert: 各例外ケースが参照・適用可能な状態であることを確認
-    const firstCase = resultWithSecondCase.exceptionCases[0];
-    expect(firstCase.caseId).toBeTruthy();
-    expect(firstCase.applicableCondition).toBeTruthy();
-    expect(firstCase.exceptionType).toBeTruthy();
-
-    // Assert: 例外ケース追加時のエラーハンドリング
-    const invalidExceptionCase = {
-      caseId: '',
-      customerId: 'CUST-C003',
-      serviceId: 'SVC-003',
-      exceptionType: 'discount_apply',
-      description: 'Invalid case without ID',
-      applicableCondition: 'test',
-      appliedDate: '2024-01-17T11:00:00Z',
-      createdBy: 'operator_003',
-      createdAt: '2024-01-17T11:15:00Z'
-    };
-
-    expect(() => {
-      addExceptionCaseToStandardList(invalidExceptionCase, resultWithSecondCase);
-    }).toThrow(/caseId/);
-
-    // Assert: 必須項目チェック
-    const incompleteExceptionCase = {
-      caseId: 'EXC-2024-003',
-      customerId: 'CUST-D004',
-      serviceId: '',
-      exceptionType: 'discount_apply',
-      description: 'Incomplete case',
-      applicableCondition: 'test',
-      appliedDate: '2024-01-18T12:00:00Z',
-      createdBy: 'operator_004',
-      createdAt: '2024-01-18T12:15:00Z'
-    };
-
-    expect(() => {
-      addExceptionCaseToStandardList(incompleteExceptionCase, resultWithSecondCase);
-    }).toThrow(/serviceId/);
+    // エラーメッセージのフォーマット検証
+    expect(responseFailBC.message).toBeDefined();
+    expect(responseFailBC.message).toMatch(/不承認/);
+    expect(responseFailBC.message).toMatch(/基準B/);
+    expect(responseFailBC.message).toMatch(/基準C/);
+    expect(responseFailBC.timestamp).toBeDefined();
+    expect(typeof responseFailBC.timestamp).toBe("string");
   });
 });

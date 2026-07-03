@@ -1,211 +1,216 @@
-import { describe, test, expect, beforeEach } from '@jest/globals';
-import {
-  extractBillableItemsFromSalesData,
-  calculateBillableAggregation,
-  validateBillingRuleApplication,
-} from '../../src/logic/it-1781935279444-1-1-1';
+import { describe, test, expect, beforeEach, afterEach } from "@jest/globals";
+import { validateValidationResultReport } from "../../src/logic/it-1781935279444-2-2-1";
 
-describe('営業データ項目のメタデータ管理機能 - 請求対象項目の自動抽出・集計', () => {
+describe("営業データ検証結果レポート確認・不完全/破損レポート検出", () => {
   beforeEach(() => {
     jest.clearAllMocks();
   });
 
-  // SCEN-1006: [normal] 営業データから請求対象項目の自動抽出・集計
-  test('営業成果データから請求ルールに基づいて請求対象項目が自動判定・抽出される', () => {
-    // ===== 前提条件 =====
-    // 営業システムに記録された営業成果データ（売上金額、商品種別、契約日、顧客区分等）が存在
-    // 請求ルールが定義済み：
-    //   - 売上金額 >= 100,000 円（最小請求額）
-    //   - 商品種別が除外対象外
-    //   - 契約日が当月以前
-    //   - 顧客区分が「対象」
+  afterEach(() => {
+    jest.clearAllMocks();
+  });
 
-    const salesDataList = [
-      {
-        sales_id: 'SALES001',
-        sales_amount: 150000,
-        product_type: 'service_a',
-        contract_date: '2024-01-10',
-        customer_category: 'target',
-        customer_id: 'CUST001',
-        service_id: 'SVC001',
-      },
-      {
-        sales_id: 'SALES002',
-        sales_amount: 50000,
-        product_type: 'service_a',
-        contract_date: '2024-01-15',
-        customer_category: 'target',
-        customer_id: 'CUST002',
-        service_id: 'SVC001',
-      },
-      {
-        sales_id: 'SALES003',
-        sales_amount: 120000,
-        product_type: 'excluded_service',
-        contract_date: '2024-01-20',
-        customer_category: 'target',
-        customer_id: 'CUST001',
-        service_id: 'SVC002',
-      },
-      {
-        sales_id: 'SALES004',
-        sales_amount: 200000,
-        product_type: 'service_b',
-        contract_date: '2024-02-01',
-        customer_category: 'non_target',
-        customer_id: 'CUST003',
-        service_id: 'SVC003',
-      },
-      {
-        sales_id: 'SALES005',
-        sales_amount: 180000,
-        product_type: 'service_b',
-        contract_date: '2024-01-25',
-        customer_category: 'target',
-        customer_id: 'CUST001',
-        service_id: 'SVC002',
-      },
-    ];
-
-    const billingRules = {
-      minimum_amount: 100000,
-      excluded_product_types: ['excluded_service'],
-      max_contract_date: '2024-01-31',
-      target_customer_categories: ['target'],
+  // SCEN-1006
+  test("不完全または破損した検証結果レポートに対して、適切なエラーが検出され、具体的なエラーメッセージが出力される", () => {
+    // ケース1: 必須フィールド欠落（validation_report_id が null）
+    const incomplete_report_1 = {
+      validation_report_id: null,
+      validation_execution_id: "exec_20240115_001",
+      target_data_type: "営業データ",
+      validation_start_datetime: new Date("2024-01-15T09:00:00Z"),
+      validation_end_datetime: new Date("2024-01-15T09:15:00Z"),
+      total_records_checked: 150,
+      passed_records_count: 145,
+      failed_records_count: 5,
+      validation_result_summary: "一部不合格",
+      error_details: [
+        {
+          error_id: "err_001",
+          field_name: "customer_name",
+          error_type: "missing_required_field",
+          affected_record_count: 3,
+          error_description: "顧客名が欠落しています"
+        }
+      ],
+      generated_at: new Date("2024-01-15T09:15:30Z"),
+      generated_by_user_id: "user_rep_001"
     };
 
-    // ===== trigger: 自動抽出・集計機能を実行 =====
-    const extractionResult = extractBillableItemsFromSalesData(
-      salesDataList,
-      billingRules
+    expect(() => validateValidationResultReport(incomplete_report_1)).toThrow(
+      /validation_report_id/
     );
 
-    // ===== 期待結果1: 請求対象項目が正確に抽出される =====
-    // 該当: SALES001（金額150000 >= 100000、商品対象、契約日2024-01-10 <= 2024-01-31、顧客区分target）
-    // 該当: SALES005（金額180000 >= 100000、商品対象、契約日2024-01-25 <= 2024-01-31、顧客区分target）
-    // 除外: SALES002（金額50000 < 100000）
-    // 除外: SALES003（商品タイプ excluded_service）
-    // 除外: SALES004（顧客区分 non_target、契約日2024-02-01 > 2024-01-31）
+    // ケース2: 必須フィールド欠落（validation_execution_id が undefined）
+    const incomplete_report_2 = {
+      validation_report_id: "rep_20240115_001",
+      validation_execution_id: undefined,
+      target_data_type: "営業データ",
+      validation_start_datetime: new Date("2024-01-15T09:00:00Z"),
+      validation_end_datetime: new Date("2024-01-15T09:15:00Z"),
+      total_records_checked: 150,
+      passed_records_count: 145,
+      failed_records_count: 5,
+      validation_result_summary: "一部不合格",
+      error_details: [
+        {
+          error_id: "err_001",
+          field_name: "amount",
+          error_type: "out_of_range",
+          affected_record_count: 2,
+          error_description: "金額が範囲外です"
+        }
+      ],
+      generated_at: new Date("2024-01-15T09:15:30Z"),
+      generated_by_user_id: "user_rep_001"
+    };
 
-    expect(extractionResult.billable_items).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          sales_id: 'SALES001',
-          is_billable: true,
-          applied_rules: [
-            'amount_threshold_met',
-            'product_type_allowed',
-            'contract_date_valid',
-            'customer_category_valid',
-          ],
-        }),
-        expect.objectContaining({
-          sales_id: 'SALES005',
-          is_billable: true,
-          applied_rules: [
-            'amount_threshold_met',
-            'product_type_allowed',
-            'contract_date_valid',
-            'customer_category_valid',
-          ],
-        }),
-      ])
+    expect(() => validateValidationResultReport(incomplete_report_2)).toThrow(
+      /validation_execution_id/
     );
 
-    // ===== 期待結果2: 請求対象外のデータに除外理由が記録される =====
-    const nonBillableItems = extractionResult.billable_items.filter(
-      (item: any) => !item.is_billable
+    // ケース3: データ形式不正（total_records_checked が負数）
+    const corrupted_report_1 = {
+      validation_report_id: "rep_20240115_002",
+      validation_execution_id: "exec_20240115_002",
+      target_data_type: "営業データ",
+      validation_start_datetime: new Date("2024-01-15T10:00:00Z"),
+      validation_end_datetime: new Date("2024-01-15T10:15:00Z"),
+      total_records_checked: -150,
+      passed_records_count: 145,
+      failed_records_count: 5,
+      validation_result_summary: "一部不合格",
+      error_details: [],
+      generated_at: new Date("2024-01-15T10:15:30Z"),
+      generated_by_user_id: "user_rep_002"
+    };
+
+    expect(() => validateValidationResultReport(corrupted_report_1)).toThrow(
+      /total_records_checked/
     );
 
-    expect(nonBillableItems).toContainEqual(
-      expect.objectContaining({
-        sales_id: 'SALES002',
-        is_billable: false,
-        exclusion_reasons: ['amount_below_minimum'],
-      })
+    // ケース4: データ形式不正（passed_records_count > total_records_checked）
+    const corrupted_report_2 = {
+      validation_report_id: "rep_20240115_003",
+      validation_execution_id: "exec_20240115_003",
+      target_data_type: "営業データ",
+      validation_start_datetime: new Date("2024-01-15T11:00:00Z"),
+      validation_end_datetime: new Date("2024-01-15T11:15:00Z"),
+      total_records_checked: 100,
+      passed_records_count: 120,
+      failed_records_count: -20,
+      validation_result_summary: "不正",
+      error_details: [],
+      generated_at: new Date("2024-01-15T11:15:30Z"),
+      generated_by_user_id: "user_rep_003"
+    };
+
+    expect(() => validateValidationResultReport(corrupted_report_2)).toThrow(
+      /passed_records_count/
     );
 
-    expect(nonBillableItems).toContainEqual(
-      expect.objectContaining({
-        sales_id: 'SALES003',
-        is_billable: false,
-        exclusion_reasons: ['product_type_excluded'],
-      })
+    // ケース5: 必須フィールド欠落（error_details が null）
+    const incomplete_report_3 = {
+      validation_report_id: "rep_20240115_004",
+      validation_execution_id: "exec_20240115_004",
+      target_data_type: "営業データ",
+      validation_start_datetime: new Date("2024-01-15T12:00:00Z"),
+      validation_end_datetime: new Date("2024-01-15T12:15:00Z"),
+      total_records_checked: 150,
+      passed_records_count: 145,
+      failed_records_count: 5,
+      validation_result_summary: "一部不合格",
+      error_details: null,
+      generated_at: new Date("2024-01-15T12:15:30Z"),
+      generated_by_user_id: "user_rep_004"
+    };
+
+    expect(() => validateValidationResultReport(incomplete_report_3)).toThrow(
+      /error_details/
     );
 
-    expect(nonBillableItems).toContainEqual(
-      expect.objectContaining({
-        sales_id: 'SALES004',
-        is_billable: false,
-        exclusion_reasons: ['contract_date_invalid', 'customer_category_invalid'],
-      })
+    // ケース6: データ形式不正（validation_start_datetime が無効な日付）
+    const corrupted_report_3 = {
+      validation_report_id: "rep_20240115_005",
+      validation_execution_id: "exec_20240115_005",
+      target_data_type: "営業データ",
+      validation_start_datetime: "invalid_date_string",
+      validation_end_datetime: new Date("2024-01-15T13:15:00Z"),
+      total_records_checked: 150,
+      passed_records_count: 145,
+      failed_records_count: 5,
+      validation_result_summary: "一部不合格",
+      error_details: [
+        {
+          error_id: "err_005",
+          field_name: "contact_date",
+          error_type: "data_type_mismatch",
+          affected_record_count: 1,
+          error_description: "日付形式が不正です"
+        }
+      ],
+      generated_at: new Date("2024-01-15T13:15:30Z"),
+      generated_by_user_id: "user_rep_005"
+    };
+
+    expect(() => validateValidationResultReport(corrupted_report_3)).toThrow(
+      /validation_start_datetime/
     );
 
-    // ===== 期待結果3: 集計結果が正確に計算される =====
-    // 請求対象件数: 2件（SALES001、SALES005）
-    // 対象金額合計: 150,000 + 180,000 = 330,000円
-    // 除外金額合計: 50,000 + 120,000 + 200,000 = 370,000円
+    // ケース7: データ形式不正（end_datetime が start_datetime より前）
+    const corrupted_report_4 = {
+      validation_report_id: "rep_20240115_006",
+      validation_execution_id: "exec_20240115_006",
+      target_data_type: "営業データ",
+      validation_start_datetime: new Date("2024-01-15T14:15:00Z"),
+      validation_end_datetime: new Date("2024-01-15T14:00:00Z"),
+      total_records_checked: 150,
+      passed_records_count: 145,
+      failed_records_count: 5,
+      validation_result_summary: "一部不合格",
+      error_details: [],
+      generated_at: new Date("2024-01-15T14:15:30Z"),
+      generated_by_user_id: "user_rep_006"
+    };
 
-    const aggregation = calculateBillableAggregation(
-      extractionResult.billable_items
+    expect(() => validateValidationResultReport(corrupted_report_4)).toThrow(
+      /validation_end_datetime/
     );
 
-    expect(aggregation.billable_item_count).toBe(2);
-    expect(aggregation.billable_amount_total).toBe(330000);
-    expect(aggregation.non_billable_item_count).toBe(3);
-    expect(aggregation.non_billable_amount_total).toBe(370000);
-    expect(aggregation.total_item_count).toBe(5);
-    expect(aggregation.total_amount).toBe(700000);
+    // ケース8: 正常なレポート（成功ケース）
+    const valid_report = {
+      validation_report_id: "rep_20240115_valid",
+      validation_execution_id: "exec_20240115_valid",
+      target_data_type: "営業データ",
+      validation_start_datetime: new Date("2024-01-15T15:00:00Z"),
+      validation_end_datetime: new Date("2024-01-15T15:15:00Z"),
+      total_records_checked: 200,
+      passed_records_count: 195,
+      failed_records_count: 5,
+      validation_result_summary: "一部不合格",
+      error_details: [
+        {
+          error_id: "err_valid_001",
+          field_name: "sales_amount",
+          error_type: "out_of_range",
+          affected_record_count: 5,
+          error_description: "売上金額が負数です"
+        }
+      ],
+      generated_at: new Date("2024-01-15T15:15:30Z"),
+      generated_by_user_id: "user_rep_valid"
+    };
 
-    // ===== 期待結果4: 顧客ごと・サービスごとの集計 =====
-    // 顧客別：
-    //   CUST001: 150,000（SALES001）+ 180,000（SALES005）= 330,000
-    // サービス別：
-    //   SVC001: 150,000（SALES001）
-    //   SVC002: 180,000（SALES005）
+    const result = validateValidationResultReport(valid_report);
 
-    expect(aggregation.by_customer).toEqual(
-      expect.objectContaining({
-        CUST001: 330000,
-      })
-    );
-
-    expect(aggregation.by_service).toEqual(
-      expect.objectContaining({
-        SVC001: 150000,
-        SVC002: 180000,
-      })
-    );
-
-    // ===== 期待結果5: ルール適用の検証結果が記録される =====
-    const validationResult = validateBillingRuleApplication(
-      extractionResult,
-      billingRules
-    );
-
-    expect(validationResult.validation_status).toBe('passed');
-    expect(validationResult.rules_applied_count).toBe(4);
-    expect(validationResult.items_passed).toBe(2);
-    expect(validationResult.items_excluded).toBe(3);
-    expect(validationResult.is_complete).toBe(true);
-
-    // ===== 期待結果6: 各項目の判定根拠が追跡可能 =====
-    const billableItem = extractionResult.billable_items.find(
-      (item: any) => item.sales_id === 'SALES001'
-    );
-
-    expect(billableItem).toBeDefined();
-    expect(billableItem.applied_rules).toHaveLength(4);
-    expect(billableItem.rule_evaluation_timestamp).toBeDefined();
-    expect(billableItem.rule_evaluation_timestamp).toMatch(
-      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/
-    );
-
-    // ===== 期待結果7: 処理の完全性を確認 =====
-    expect(extractionResult.processing_status).toBe('completed');
-    expect(extractionResult.processed_item_count).toBe(5);
-    expect(extractionResult.processing_timestamp).toBeDefined();
-    expect(extractionResult.billable_items).toHaveLength(5);
+    expect(result).toEqual({
+      is_valid: true,
+      validation_report_id: "rep_20240115_valid",
+      report_status: "completed",
+      passed_record_ratio: 0.975,
+      failed_record_ratio: 0.025,
+      error_count: 1,
+      approval_status: "ready_for_review",
+      message: "検証結果レポートは正常です。確認・承認が可能です。"
+    });
   });
 });

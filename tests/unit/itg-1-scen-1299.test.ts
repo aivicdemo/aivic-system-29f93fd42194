@@ -1,50 +1,111 @@
-import { validateBillingApproval } from '../../src/logic/it-1-2-1';
+import { extractBillableItems } from '../../src/logic/it-1-2-1';
 
-describe('請求情報の最終承認判定機能', () => {
-  // SCEN-1299
-  test('複数の承認基準が同時に不満足となる場合に、優先度順に差戻し理由が記録される', () => {
-    const billing_info = {
-      billing_id: 'BILL20240115001',
-      customer_id: 'CUST00001',
-      service_id: 'SVC00001',
-      amount: 1500000,
-      billing_format_status: 'invalid',
-      customer_credit_score: 30,
-      max_amount_limit: 1000000,
-    };
-
-    const approval_criteria = [
+describe('営業成果データから請求対象項目を自動抽出し、顧客ごと・サービスごとの請求額を集計する機能', () => {
+  // SCEN-1299: [normal] 請求対象項目自動抽出機能 - 営業データに請求対象外の項目が含まれている場合、自動判定により除外される
+  test('請求対象外の項目が含まれるテスト用営業データから、請求対象項目のみが正しく抽出される', () => {
+    const salesData = [
       {
-        criteria_id: 'CRIT001',
-        criteria_name: '金額上限チェック',
-        priority: 1,
-        check_func: (info: typeof billing_info) => info.amount <= info.max_amount_limit,
-        rejection_reason: '金額上限チェック失敗',
+        customerId: 'CUST001',
+        serviceId: 'SVC001',
+        itemName: '営業アポイント数',
+        quantity: 10,
+        unitPrice: 5000,
+        isBillable: true,
       },
       {
-        criteria_id: 'CRIT002',
-        criteria_name: '顧客信用度チェック',
-        priority: 2,
-        check_func: (info: typeof billing_info) => info.customer_credit_score >= 50,
-        rejection_reason: '顧客信用度チェック失敗',
+        customerId: 'CUST001',
+        serviceId: 'SVC001',
+        itemName: 'サンプル品',
+        quantity: 5,
+        unitPrice: 0,
+        isBillable: false,
       },
       {
-        criteria_id: 'CRIT003',
-        criteria_name: '請求書フォーマットチェック',
-        priority: 3,
-        check_func: (info: typeof billing_info) => info.billing_format_status === 'valid',
-        rejection_reason: '請求書フォーマットチェック失敗',
+        customerId: 'CUST001',
+        serviceId: 'SVC002',
+        itemName: '成約数',
+        quantity: 3,
+        unitPrice: 50000,
+        isBillable: true,
+      },
+      {
+        customerId: 'CUST001',
+        serviceId: 'SVC002',
+        itemName: 'キャンペーン特典',
+        quantity: 1,
+        unitPrice: 0,
+        isBillable: false,
+      },
+      {
+        customerId: 'CUST002',
+        serviceId: 'SVC001',
+        itemName: '営業アポイント数',
+        quantity: 8,
+        unitPrice: 5000,
+        isBillable: true,
       },
     ];
 
-    const result = validateBillingApproval(billing_info, approval_criteria);
+    const result = extractBillableItems(salesData);
 
-    expect(result.approval_status).toBe('差戻し');
-    expect(result.rejection_reasons.length).toBe(3);
-    expect(result.rejection_reasons[0]).toBe('金額上限チェック失敗');
-    expect(result.rejection_reasons[1]).toBe('顧客信用度チェック失敗');
-    expect(result.rejection_reasons[2]).toBe('請求書フォーマットチェック失敗');
-    expect(result.billing_id).toBe('BILL20240115001');
-    expect(result.customer_id).toBe('CUST00001');
+    // 請求対象外の項目が除外されていることを検証
+    expect(result.billableItems).toHaveLength(3);
+    
+    // 抽出された項目が正しいことを検証
+    expect(result.billableItems[0]).toEqual({
+      customerId: 'CUST001',
+      serviceId: 'SVC001',
+      itemName: '営業アポイント数',
+      quantity: 10,
+      unitPrice: 5000,
+      amount: 50000,
+    });
+
+    expect(result.billableItems[1]).toEqual({
+      customerId: 'CUST001',
+      serviceId: 'SVC002',
+      itemName: '成約数',
+      quantity: 3,
+      unitPrice: 50000,
+      amount: 150000,
+    });
+
+    expect(result.billableItems[2]).toEqual({
+      customerId: 'CUST002',
+      serviceId: 'SVC001',
+      itemName: '営業アポイント数',
+      quantity: 8,
+      unitPrice: 5000,
+      amount: 40000,
+    });
+
+    // 除外された項目がexcludedItemsに含まれていることを検証
+    expect(result.excludedItems).toHaveLength(2);
+    expect(result.excludedItems[0]).toEqual({
+      customerId: 'CUST001',
+      serviceId: 'SVC001',
+      itemName: 'サンプル品',
+      reason: '請求対象外',
+    });
+
+    expect(result.excludedItems[1]).toEqual({
+      customerId: 'CUST001',
+      serviceId: 'SVC002',
+      itemName: 'キャンペーン特典',
+      reason: '請求対象外',
+    });
+
+    // 顧客ごと・サービスごとの請求額集計が正しいことを検証
+    expect(result.summary).toEqual({
+      'CUST001|SVC001': 50000,
+      'CUST001|SVC002': 150000,
+      'CUST002|SVC001': 40000,
+    });
+
+    // 合計請求額が正しく計算されていることを検証
+    expect(result.totalBillableAmount).toBe(240000);
+
+    // ステータスが成功であることを検証
+    expect(result.status).toBe('success');
   });
 });

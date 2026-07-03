@@ -1,63 +1,18 @@
-import { describe, test, expect, beforeEach } from "@jest/globals";
-import { determineReportDistributionEligibility } from "../../src/logic/it-1-br-1781935279444-1-2-1";
+import { applyDocumentNamingRules } from "../../src/logic/it-1-br-1781935279444-1-2-1";
 
-describe("Report Distribution Rule Judgment - Undefined Rule Handling", () => {
-  beforeEach(() => {
-    jest.clearAllMocks();
-  });
+describe("月次サマリーテンプレートの定義・管理機能", () => {
+  test("SCEN-1063: ドキュメント統一命名規則適用機能 - 規則適用対象のドキュメントが空である場合、適切なエラーが返却される", () => {
+    const emptyDocumentList: object[] = [];
 
-  // SCEN-1063
-  test("should return ineligible status when distribution rule is not defined for customer", () => {
-    const undefinedRuleCustomerId = "CUST-NO-RULE-001";
-    const definedRuleCustomerId = "CUST-WITH-RULE-002";
+    const result = applyDocumentNamingRules(emptyDocumentList);
 
-    const input_undefined = {
-      customerId: undefinedRuleCustomerId,
-      ruleDefinitions: [
-        {
-          customerId: definedRuleCustomerId,
-          distributionChannel: "email",
-          frequency: "monthly",
-          startDate: "2024-01-01",
-          endDate: "2024-12-31",
-          isActive: true,
-        },
-      ],
-      targetMonth: "2024-01",
-    };
-
-    const result_undefined = determineReportDistributionEligibility(
-      input_undefined
-    );
-
-    expect(result_undefined.isEligible).toBe(false);
-    expect(result_undefined.eligibilityStatus).toBe("ineligible");
-    expect(result_undefined.reason).toMatch(/配信ルール未定義/);
-    expect(result_undefined.shouldSkipDistribution).toBe(true);
-
-    const input_defined = {
-      customerId: definedRuleCustomerId,
-      ruleDefinitions: [
-        {
-          customerId: definedRuleCustomerId,
-          distributionChannel: "email",
-          frequency: "monthly",
-          startDate: "2024-01-01",
-          endDate: "2024-12-31",
-          isActive: true,
-        },
-      ],
-      targetMonth: "2024-01",
-    };
-
-    const result_defined = determineReportDistributionEligibility(
-      input_defined
-    );
-
-    expect(result_defined.isEligible).toBe(true);
-    expect(result_defined.eligibilityStatus).toBe("eligible");
-    expect(result_defined.shouldSkipDistribution).toBe(false);
-
-    expect(result_undefined.isEligible).not.toBe(result_defined.isEligible);
+    expect(result).toHaveProperty("error");
+    expect(result.error).toBeDefined();
+    expect(result.error).toHaveProperty("code");
+    expect(result.error).toHaveProperty("message");
+    expect(result.error.message).toMatch(/ドキュメントが存在しません/);
+    expect(result.error).toHaveProperty("statusCode");
+    expect(result.error.statusCode).toBeGreaterThanOrEqual(400);
+    expect(result.error.statusCode).toBeLessThan(500);
   });
 });

@@ -1,47 +1,64 @@
-import { describe, test, expect } from "@jest/globals";
-import { prioritizeContractChanges } from "../../src/logic/it-1781935279444-2-2-1";
+import { calculateBillingAmount } from '../../src/logic/it-1-2-1';
 
-describe("複数契約変更の優先順序判定機能", () => {
-  test("SCEN-1265: メタデータが不完全な場合にエラーが発生すること", () => {
-    // 完全なメタデータを持つ契約変更データ
-    const completeChange = {
-      contractChangeId: "CC-001",
-      customerId: "CUST-123",
-      changeType: "price_update",
-      changedAt: "2024-01-15T09:00:00Z",
-      impactAmount: 50000,
+describe('顧客別・サービス別請求額計算機能', () => {
+  test('SCEN-1265: 割引適用時の請求額が正確に計算される', () => {
+    // 基本料金 + オプション料金
+    const baseAmount = 100000;
+    const optionAmount = 50000;
+    const subtotal = baseAmount + optionAmount; // 150000
+
+    // 割引率
+    const customerDiscountRate = 0.10; // 顧客割引 10%
+    const serviceDiscountRate = 0.05; // サービス割引 5%
+    const earlyPaymentDiscountRate = 0.03; // 早期支払割引 3%
+
+    // 計算式：最終請求額 = （基本料金 + オプション料金） × （1 - 顧客割引率） × （1 - サービス割引率） × （1 - 早期支払割引率）
+    // = 150000 × (1 - 0.10) × (1 - 0.05) × (1 - 0.03)
+    // = 150000 × 0.90 × 0.95 × 0.97
+    // = 150000 × 0.83565
+    // = 125347.5
+    // 小数点以下第2位で四捨五入 => 125347.50
+    const expectedFinalAmount = 125347.5;
+
+    const input = {
+      baseAmount: baseAmount,
+      optionAmount: optionAmount,
+      customerDiscountRate: customerDiscountRate,
+      serviceDiscountRate: serviceDiscountRate,
+      earlyPaymentDiscountRate: earlyPaymentDiscountRate,
     };
 
-    // メタデータが不完全なデータ: customerId が欠損
-    const incompleteChange1 = {
-      contractChangeId: "CC-002",
-      customerId: undefined,
-      changeType: "service_add",
-      changedAt: "2024-01-15T10:00:00Z",
-      impactAmount: 75000,
-    };
+    const result = calculateBillingAmount(input);
 
-    // メタデータが不完全なデータ: changedAt が欠損
-    const incompleteChange2 = {
-      contractChangeId: "CC-003",
-      customerId: "CUST-456",
-      changeType: "schedule_change",
-      changedAt: undefined,
-      impactAmount: 30000,
-    };
+    // 最終請求額の確認
+    expect(result.finalAmount).toBe(expectedFinalAmount);
 
-    // メタデータが不完全なデータ: changeType が欠損
-    const incompleteChange3 = {
-      contractChangeId: "CC-004",
-      customerId: "CUST-789",
-      changeType: undefined,
-      changedAt: "2024-01-15T11:00:00Z",
-      impactAmount: 100000,
-    };
+    // 小数点以下第2位で四捨五入されていることを確認
+    expect(Math.round(result.finalAmount * 100) / 100).toBe(125347.5);
 
-    const mixedChanges = [completeChange, incompleteChange1, incompleteChange2, incompleteChange3];
+    // 計算過程の詳細内訳を確認
+    expect(result.details).toBeDefined();
+    expect(result.details.baseAmount).toBe(baseAmount);
+    expect(result.details.optionAmount).toBe(optionAmount);
+    expect(result.details.subtotal).toBe(subtotal);
 
-    // メタデータが不完全な場合、適切なエラーメッセージとともにエラーが発生することを確認
-    expect(() => prioritizeContractChanges(mixedChanges)).toThrow(/メタデータ/);
+    // 各割引額の計算確認
+    const afterCustomerDiscount = subtotal * (1 - customerDiscountRate); // 135000
+    expect(result.details.customerDiscountAmount).toBe(subtotal - afterCustomerDiscount); // 15000
+
+    const afterServiceDiscount = afterCustomerDiscount * (1 - serviceDiscountRate); // 128250
+    expect(result.details.serviceDiscountAmount).toBe(afterCustomerDiscount - afterServiceDiscount); // 6750
+
+    const afterEarlyPaymentDiscount = afterServiceDiscount * (1 - earlyPaymentDiscountRate); // 125347.5
+    expect(result.details.earlyPaymentDiscountAmount).toBe(afterServiceDiscount - afterEarlyPaymentDiscount); // 3902.5
+
+    // 割引後料金の確認
+    expect(result.details.discountedAmount).toBe(expectedFinalAmount);
+
+    // ログに計算過程が記録されていることを確認
+    expect(result.calculationLog).toBeDefined();
+    expect(result.calculationLog).toContain('基本料金');
+    expect(result.calculationLog).toContain('割引');
+    expect(result.calculationLog).toContain('最終請求額');
   });
 });

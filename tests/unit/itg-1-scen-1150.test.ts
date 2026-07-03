@@ -1,55 +1,43 @@
-import { mapSalesDataToMonthlySummaryTemplate } from '../../src/logic/it-1-br-1781935279444-1-2-1';
+import { validateSalesData } from "../../src/logic/it-1781935279444-2-2-1";
 
-describe('月次サマリーテンプレート定義・管理機能', () => {
-  // SCEN-1150: [edge] 営業データから月次サマリーテンプレートへの自動マッピング - 空の営業データセットに対してマッピングを実行した場合、空のテンプレート構造が正常に生成される
-  test('空の営業データセットからマッピング実行時、エラーなくヘッダー行と空データ行を含む有効なテンプレート構造が生成される', () => {
-    const emptyDataset: Array<Record<string, unknown>> = [];
-    const templateDefinition = {
-      template_id: 'tpl_monthly_summary_001',
-      template_name: '月次売上サマリー',
-      columns: [
-        { column_id: 'col_001', column_name: '顧客名', data_type: 'string', required: true },
-        { column_id: 'col_002', column_name: 'アポ数', data_type: 'number', required: false },
-        { column_id: 'col_003', column_name: '成約数', data_type: 'number', required: false },
-        { column_id: 'col_004', column_name: '売上金額', data_type: 'number', required: false },
-      ],
+describe("営業データ品質検証・エラー検出機能", () => {
+  // SCEN-1150
+  test("データ型不整合を検出し詳細エラー内容が記録される", () => {
+    const input_salesData = {
+      sales_amount: "ABC123",
+      customer_id: "2024-01-15",
+      transaction_date: "2024-01-15",
+      quantity: 5,
+      service_type: "Premium",
     };
 
-    const result = mapSalesDataToMonthlySummaryTemplate(emptyDataset, templateDefinition);
+    const result = validateSalesData(input_salesData);
 
-    expect(result).toBeDefined();
-    expect(result.status).toBe('success');
-    expect(result.template_id).toBe('tpl_monthly_summary_001');
-    expect(result.rows).toEqual([]);
-    expect(result.columns).toHaveLength(4);
-    expect(result.columns[0]).toEqual({
-      column_id: 'col_001',
-      column_name: '顧客名',
-      data_type: 'string',
-      required: true,
-    });
-    expect(result.columns[1]).toEqual({
-      column_id: 'col_002',
-      column_name: 'アポ数',
-      data_type: 'number',
-      required: false,
-    });
-    expect(result.columns[2]).toEqual({
-      column_id: 'col_003',
-      column_name: '成約数',
-      data_type: 'number',
-      required: false,
-    });
-    expect(result.columns[3]).toEqual({
-      column_id: 'col_004',
-      column_name: '売上金額',
-      data_type: 'number',
-      required: false,
-    });
-    expect(result.error_count).toBe(0);
-    expect(result.warning_count).toBe(0);
-    expect(result.errors).toEqual([]);
-    expect(result.warnings).toEqual([]);
-    expect(result.generated_at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+    expect(result.is_valid).toBe(false);
+    expect(result.errors).toHaveLength(2);
+
+    const sales_amount_error = result.errors.find(
+      (err: any) => err.field_name === "sales_amount"
+    );
+    expect(sales_amount_error).toBeDefined();
+    expect(sales_amount_error.expected_type).toBe("number");
+    expect(sales_amount_error.actual_value).toBe("ABC123");
+    expect(sales_amount_error.severity_level).toBe("HIGH");
+    expect(sales_amount_error.error_timestamp).toMatch(
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/
+    );
+
+    const customer_id_error = result.errors.find(
+      (err: any) => err.field_name === "customer_id"
+    );
+    expect(customer_id_error).toBeDefined();
+    expect(customer_id_error.expected_type).toBe("number");
+    expect(customer_id_error.actual_value).toBe("2024-01-15");
+    expect(customer_id_error.severity_level).toBe("HIGH");
+    expect(customer_id_error.error_timestamp).toMatch(
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/
+    );
+
+    expect(result.error_log_persisted).toBe(true);
   });
 });

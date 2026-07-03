@@ -1,254 +1,116 @@
-import { validateAndMergeMultipleMappings } from "../../src/logic/it-1-br-1781935279444-1-2-1";
+import { describe, it, expect, beforeEach } from '@jest/globals';
+import { generateAndDistributeMonthlyReport } from '../../src/logic/it-1-br-1781935279444-1-2-1';
 
-describe("月次サマリーテンプレートの定義・管理機能", () => {
-  // SCEN-1146: [edge] 標準フォーマット変換検証 - 複数の営業データ項目が同一のレポートフォーマット項目にマッピングされる場合、統合ルールが正確に適用される
-  test("複数の営業データ項目が同一のレポートフォーマット項目にマッピングされた場合、定義された統合ルール（合算、最大値、最小値、優先度順など）が正確に適用される", () => {
-    // ===== テストデータ準備 =====
-    // 複数の営業データ項目（sales_amount、revenue_total、income_value）が同一のレポートフォーマット項目（total_revenue）にマッピング
-    const mappingConfig = {
-      reportFormatItem: "total_revenue",
-      sourceDataItems: [
-        { name: "sales_amount", dataType: "number", mergeRule: "sum" },
-        { name: "revenue_total", dataType: "number", mergeRule: "sum" },
-        { name: "income_value", dataType: "number", mergeRule: "sum" },
+describe('月次レポート生成・配信期限管理機能', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('SCEN-1146: レポート生成から配信完了が定められた期限内に完了する', () => {
+    // テストデータ準備
+    const salesDataList = [
+      {
+        customerId: 'CUST001',
+        appointmentCount: 5,
+        contractCount: 2,
+        customerFeedback: 'positive',
+        serviceName: 'ServiceA',
+        reportMonth: '2024-01',
+      },
+      {
+        customerId: 'CUST002',
+        appointmentCount: 3,
+        contractCount: 1,
+        customerFeedback: 'neutral',
+        serviceName: 'ServiceB',
+        reportMonth: '2024-01',
+      },
+    ];
+
+    const monthlyReportConfig = {
+      templateId: 'TPL001',
+      generationDeadlineMinutes: 30,
+      distributionDeadlineMinutes: 60,
+      deliveryFormat: 'email',
+      recipientList: [
+        { customerId: 'CUST001', email: 'contact@cust001.com' },
+        { customerId: 'CUST002', email: 'contact@cust002.com' },
       ],
-      globalMergeRule: "sum",
     };
 
-    const sampleData = {
-      sales_amount: 10000,
-      revenue_total: 5000,
-      income_value: 3000,
-    };
+    const startTime = new Date('2024-01-31T09:00:00Z');
+    const generationCompleteTime = new Date('2024-01-31T09:20:00Z');
+    const distributionCompleteTime = new Date('2024-01-31T09:55:00Z');
 
-    // ===== ハッピーパス: 合算ルール =====
-    const resultSum = validateAndMergeMultipleMappings({
-      mappingConfig,
-      inputData: sampleData,
-      mergeStrategy: "sum",
+    // レポート生成・配信期限管理機能を実行
+    const result = generateAndDistributeMonthlyReport({
+      salesData: salesDataList,
+      config: monthlyReportConfig,
+      startTimestamp: startTime.getTime(),
+      generationCompleteTimestamp: generationCompleteTime.getTime(),
+      distributionCompleteTimestamp: distributionCompleteTime.getTime(),
     });
 
-    expect(resultSum).toEqual({
-      reportItem: "total_revenue",
-      value: 18000,
-      mergeRule: "sum",
-      sourceCount: 3,
-      isValid: true,
-      message: "正常に統合されました",
-    });
+    // 期限内完了の確認
+    const generationElapsedMinutes = (generationCompleteTime.getTime() - startTime.getTime()) / (1000 * 60);
+    const totalElapsedMinutes = (distributionCompleteTime.getTime() - startTime.getTime()) / (1000 * 60);
 
-    // ===== 最大値ルール =====
-    const resultMax = validateAndMergeMultipleMappings({
-      mappingConfig,
-      inputData: sampleData,
-      mergeStrategy: "max",
-    });
+    expect(generationElapsedMinutes).toBeLessThanOrEqual(monthlyReportConfig.generationDeadlineMinutes);
+    expect(totalElapsedMinutes).toBeLessThanOrEqual(monthlyReportConfig.distributionDeadlineMinutes);
 
-    expect(resultMax).toEqual({
-      reportItem: "total_revenue",
-      value: 10000,
-      mergeRule: "max",
-      sourceCount: 3,
-      isValid: true,
-      message: "正常に統合されました",
-    });
+    // レポート生成成功の確認
+    expect(result.generationStatus).toBe('completed');
+    expect(result.generationCompletedAt).toBe(generationCompleteTime.toISOString());
 
-    // ===== 最小値ルール =====
-    const resultMin = validateAndMergeMultipleMappings({
-      mappingConfig,
-      inputData: sampleData,
-      mergeStrategy: "min",
-    });
+    // 配信完了ステータスの記録確認
+    expect(result.distributionStatus).toBe('completed');
+    expect(result.distributionCompletedAt).toBe(distributionCompleteTime.toISOString());
+    expect(result.totalProcessingTimeMinutes).toBe(55);
 
-    expect(resultMin).toEqual({
-      reportItem: "total_revenue",
-      value: 3000,
-      mergeRule: "min",
-      sourceCount: 3,
-      isValid: true,
-      message: "正常に統合されました",
-    });
+    // 配信対象顧客数の確認
+    expect(result.recipientsCount).toBe(2);
 
-    // ===== 優先度順ルール（最初の有効値を選択） =====
-    const resultPriority = validateAndMergeMultipleMappings({
-      mappingConfig,
-      inputData: sampleData,
-      mergeStrategy: "priority",
-    });
-
-    expect(resultPriority).toEqual({
-      reportItem: "total_revenue",
-      value: 10000,
-      mergeRule: "priority",
-      sourceCount: 3,
-      isValid: true,
-      message: "正常に統合されました",
-    });
-
-    // ===== エッジケース: null値を含む場合 =====
-    const dataWithNull = {
-      sales_amount: 10000,
-      revenue_total: null,
-      income_value: 3000,
-    };
-
-    const resultWithNull = validateAndMergeMultipleMappings({
-      mappingConfig,
-      inputData: dataWithNull,
-      mergeStrategy: "sum",
-    });
-
-    expect(resultWithNull).toEqual({
-      reportItem: "total_revenue",
-      value: 13000,
-      mergeRule: "sum",
-      sourceCount: 2,
-      isValid: true,
-      message: "null値を除外して統合されました",
-    });
-
-    // ===== エッジケース: 0値を含む場合 =====
-    const dataWithZero = {
-      sales_amount: 0,
-      revenue_total: 5000,
-      income_value: 3000,
-    };
-
-    const resultWithZero = validateAndMergeMultipleMappings({
-      mappingConfig,
-      inputData: dataWithZero,
-      mergeStrategy: "sum",
-    });
-
-    expect(resultWithZero).toEqual({
-      reportItem: "total_revenue",
-      value: 8000,
-      mergeRule: "sum",
-      sourceCount: 3,
-      isValid: true,
-      message: "正常に統合されました",
-    });
-
-    // ===== エッジケース: 重複値を含む場合 =====
-    const dataWithDuplicate = {
-      sales_amount: 5000,
-      revenue_total: 5000,
-      income_value: 5000,
-    };
-
-    const resultWithDuplicate = validateAndMergeMultipleMappings({
-      mappingConfig,
-      inputData: dataWithDuplicate,
-      mergeStrategy: "sum",
-    });
-
-    expect(resultWithDuplicate).toEqual({
-      reportItem: "total_revenue",
-      value: 15000,
-      mergeRule: "sum",
-      sourceCount: 3,
-      isValid: true,
-      message: "正常に統合されました",
-    });
-
-    // ===== エッジケース: すべてnull =====
-    const dataAllNull = {
-      sales_amount: null,
-      revenue_total: null,
-      income_value: null,
-    };
-
-    const resultAllNull = validateAndMergeMultipleMappings({
-      mappingConfig,
-      inputData: dataAllNull,
-      mergeStrategy: "sum",
-    });
-
-    expect(resultAllNull).toEqual({
-      reportItem: "total_revenue",
-      value: 0,
-      mergeRule: "sum",
-      sourceCount: 0,
-      isValid: true,
-      message: "すべてのソースがnullであり、デフォルト値0が適用されました",
-    });
-
-    // ===== エラーケース: マッピング設定が不正 =====
-    expect(() =>
-      validateAndMergeMultipleMappings({
-        mappingConfig: {
-          reportFormatItem: "",
-          sourceDataItems: [],
-          globalMergeRule: "sum",
-        },
-        inputData: sampleData,
-        mergeStrategy: "sum",
+    // 各顧客へのレポート生成確認
+    expect(result.reportsByCustomer).toHaveLength(2);
+    expect(result.reportsByCustomer[0]).toEqual(
+      expect.objectContaining({
+        customerId: 'CUST001',
+        reportContent: expect.objectContaining({
+          appointmentCount: 5,
+          contractCount: 2,
+          serviceName: 'ServiceA',
+        }),
+        deliveryStatus: 'delivered',
       })
-    ).toThrow(/マッピング設定/);
-
-    // ===== エラーケース: マージ戦略が不正 =====
-    expect(() =>
-      validateAndMergeMultipleMappings({
-        mappingConfig,
-        inputData: sampleData,
-        mergeStrategy: "invalid_strategy" as any,
+    );
+    expect(result.reportsByCustomer[1]).toEqual(
+      expect.objectContaining({
+        customerId: 'CUST002',
+        reportContent: expect.objectContaining({
+          appointmentCount: 3,
+          contractCount: 1,
+          serviceName: 'ServiceB',
+        }),
+        deliveryStatus: 'delivered',
       })
-    ).toThrow(/マージ戦略/);
+    );
 
-    // ===== エラーケース: 入力データが不正な型 =====
-    expect(() =>
-      validateAndMergeMultipleMappings({
-        mappingConfig,
-        inputData: {
-          sales_amount: "not_a_number",
-          revenue_total: 5000,
-          income_value: 3000,
-        } as any,
-        mergeStrategy: "sum",
-      })
-    ).toThrow(/データ型/);
-
-    // ===== ログ検証: 統合処理がトレース可能であることを確認 =====
-    const resultWithLog = validateAndMergeMultipleMappings({
-      mappingConfig,
-      inputData: sampleData,
-      mergeStrategy: "sum",
+    // 期限超過時のエラー処理テスト（境界値）
+    const overDeadlineDistributionTime = new Date('2024-01-31T10:15:00Z');
+    const resultExceeded = generateAndDistributeMonthlyReport({
+      salesData: salesDataList,
+      config: monthlyReportConfig,
+      startTimestamp: startTime.getTime(),
+      generationCompleteTimestamp: generationCompleteTime.getTime(),
+      distributionCompleteTimestamp: overDeadlineDistributionTime.getTime(),
     });
 
-    expect(resultWithLog.message).toContain("統合");
-    expect(resultWithLog.sourceCount).toBe(3);
-    expect(resultWithLog.isValid).toBe(true);
-
-    // ===== 複数マッピング構成: 異なるマージルールの混合 =====
-    const complexMappingConfig = {
-      reportFormatItem: "total_revenue",
-      sourceDataItems: [
-        { name: "sales_amount", dataType: "number", mergeRule: "sum" },
-        { name: "revenue_total", dataType: "number", mergeRule: "sum" },
-        { name: "bonus_amount", dataType: "number", mergeRule: "max" },
-      ],
-      globalMergeRule: "sum",
-    };
-
-    const complexData = {
-      sales_amount: 10000,
-      revenue_total: 5000,
-      bonus_amount: 2000,
-    };
-
-    const resultComplex = validateAndMergeMultipleMappings({
-      mappingConfig: complexMappingConfig,
-      inputData: complexData,
-      mergeStrategy: "sum",
-    });
-
-    expect(resultComplex).toEqual({
-      reportItem: "total_revenue",
-      value: 17000,
-      mergeRule: "sum",
-      sourceCount: 3,
-      isValid: true,
-      message: "正常に統合されました",
-    });
+    expect(resultExceeded.distributionStatus).toBe('deadline_exceeded');
+    expect(resultExceeded.totalProcessingTimeMinutes).toBe(75);
+    expect(() => {
+      if (resultExceeded.distributionStatus === 'deadline_exceeded') {
+        throw new Error('期限超過');
+      }
+    }).toThrow(/期限超過/);
   });
 });

@@ -1,274 +1,191 @@
-import { describe, it, expect, beforeEach } from "@jest/globals";
+import { describe, test, expect, beforeEach } from "@jest/globals";
 import {
-  validateReportDataCompleteness,
-} from "../../src/logic/it-1781935279444-2-2-1";
+  searchSalesActivityByOutcomeType,
+  type SalesActivitySearchParams,
+  type SalesActivityRecord,
+} from "../../src/logic/it-1781935279444-1-1-1";
 
-describe("営業データの完全性・正確性を自動検証し、不足データ・誤りを検出・通知する機能", () => {
+describe("営業活動データ検索・抽出機能 - 成果種別フィルタ", () => {
   beforeEach(() => {
     jest.clearAllMocks();
   });
 
   // SCEN-1155
-  it("should detect no anomalies when report contains only valid numeric and string data within defined ranges", () => {
-    const reportData = {
-      report_id: "RPT20240115001",
-      generated_date: "2024-01-15T09:00:00Z",
-      reporting_period: {
-        start_date: "2024-01-01",
-        end_date: "2024-01-31",
+  test("成果種別フィルタで該当データのみが素早く正確に抽出される", () => {
+    // ========== Precondition: 営業データが営業システムに記録され、複数の成果種別を持つデータが存在している状態 ==========
+    const test_sales_activities: SalesActivityRecord[] = [
+      {
+        activity_id: "ACT001",
+        customer_id: "CUST001",
+        outcome_type: "受注",
+        activity_date: "2024-01-15",
+        amount: 50000,
+        status: "completed",
       },
-      customer_id: "CUST00123",
-      customer_name: "Sample Customer Inc.",
-      service_type: "standard_service",
-      metrics: {
-        appointment_count: 12,
-        contract_count: 3,
-        customer_satisfaction_rate: 92.5,
+      {
+        activity_id: "ACT002",
+        customer_id: "CUST002",
+        outcome_type: "提案",
+        activity_date: "2024-01-16",
+        amount: 30000,
+        status: "completed",
       },
-      financial_data: {
-        base_amount: 150000,
-        discount_rate: 10,
-        adjusted_amount: 135000,
+      {
+        activity_id: "ACT003",
+        customer_id: "CUST001",
+        outcome_type: "商談",
+        activity_date: "2024-01-17",
+        amount: 20000,
+        status: "completed",
       },
-      status: "approved",
-      validation_rules: {
-        numeric_ranges: {
-          appointment_count: { min: 0, max: 100 },
-          contract_count: { min: 0, max: 50 },
-          customer_satisfaction_rate: { min: 0, max: 100 },
-          base_amount: { min: 0, max: 1000000 },
-          discount_rate: { min: 0, max: 100 },
-          adjusted_amount: { min: 0, max: 1000000 },
-        },
-        string_allowlist: {
-          service_type: ["standard_service", "premium_service", "basic_service"],
-          status: ["approved", "pending", "rejected"],
-        },
+      {
+        activity_id: "ACT004",
+        customer_id: "CUST003",
+        outcome_type: "受注",
+        activity_date: "2024-01-18",
+        amount: 75000,
+        status: "completed",
       },
+      {
+        activity_id: "ACT005",
+        customer_id: "CUST002",
+        outcome_type: "商談",
+        activity_date: "2024-01-19",
+        amount: 15000,
+        status: "completed",
+      },
+    ];
+
+    // ========== Trigger: 営業担当者が成果種別フィルタで「受注」を選択し、検索・抽出を実行した ==========
+    const search_params_single: SalesActivitySearchParams = {
+      outcome_type: "受注",
+      start_date: "2024-01-01",
+      end_date: "2024-01-31",
     };
 
-    const result = validateReportDataCompleteness(reportData);
+    const start_time_single = Date.now();
+    const result_single = searchSalesActivityByOutcomeType(
+      test_sales_activities,
+      search_params_single
+    );
+    const response_time_single = Date.now() - start_time_single;
 
-    expect(result.is_valid).toBe(true);
-    expect(result.anomalies_detected).toBe(0);
-    expect(result.validation_status).toBe("passed");
-    expect(result.numeric_data_check.all_within_range).toBe(true);
-    expect(result.numeric_data_check.out_of_range_items).toEqual([]);
-    expect(result.string_data_check.all_values_in_allowlist).toBe(true);
-    expect(result.string_data_check.disallowed_values).toEqual([]);
-    expect(result.consistency_check.inconsistencies_found).toBe(0);
-    expect(result.consistency_check.issues).toEqual([]);
-    expect(result.error_report_lines).toBe(0);
-  });
-
-  // SCEN-1155: エラーケース - 数値が範囲外
-  it("should detect anomaly when numeric data exceeds defined range", () => {
-    const reportDataWithAnomalyNumeric = {
-      report_id: "RPT20240115002",
-      generated_date: "2024-01-15T09:00:00Z",
-      reporting_period: {
-        start_date: "2024-01-01",
-        end_date: "2024-01-31",
-      },
-      customer_id: "CUST00124",
-      customer_name: "Test Customer Corp.",
-      service_type: "premium_service",
-      metrics: {
-        appointment_count: 150,
-        contract_count: 3,
-        customer_satisfaction_rate: 92.5,
-      },
-      financial_data: {
-        base_amount: 150000,
-        discount_rate: 10,
-        adjusted_amount: 135000,
-      },
-      status: "approved",
-      validation_rules: {
-        numeric_ranges: {
-          appointment_count: { min: 0, max: 100 },
-          contract_count: { min: 0, max: 50 },
-          customer_satisfaction_rate: { min: 0, max: 100 },
-          base_amount: { min: 0, max: 1000000 },
-          discount_rate: { min: 0, max: 100 },
-          adjusted_amount: { min: 0, max: 1000000 },
-        },
-        string_allowlist: {
-          service_type: ["standard_service", "premium_service", "basic_service"],
-          status: ["approved", "pending", "rejected"],
-        },
-      },
-    };
-
-    const result = validateReportDataCompleteness(
-      reportDataWithAnomalyNumeric
+    // ========== Outcome: 成果種別「受注」に該当するデータのみが素早く正確に抽出されている ==========
+    // 期待: 受注データは ACT001 (50000), ACT004 (75000) の2件
+    expect(result_single).toHaveLength(2);
+    expect(result_single.every((rec) => rec.outcome_type === "受注")).toBe(
+      true
     );
 
-    expect(result.is_valid).toBe(false);
-    expect(result.anomalies_detected).toBeGreaterThan(0);
-    expect(result.validation_status).toBe("failed");
-    expect(result.numeric_data_check.all_within_range).toBe(false);
-    expect(result.numeric_data_check.out_of_range_items).toContainEqual(
-      expect.objectContaining({
-        field_name: "appointment_count",
-        value: 150,
-        expected_min: 0,
-        expected_max: 100,
-      })
-    );
-  });
+    const extracted_activity_ids = result_single.map((r) => r.activity_id);
+    expect(extracted_activity_ids).toEqual(["ACT001", "ACT004"]);
 
-  // SCEN-1155: エラーケース - 文字列が許可リスト外
-  it("should detect anomaly when string data is not in allowlist", () => {
-    const reportDataWithAnomalyString = {
-      report_id: "RPT20240115003",
-      generated_date: "2024-01-15T09:00:00Z",
-      reporting_period: {
-        start_date: "2024-01-01",
-        end_date: "2024-01-31",
-      },
-      customer_id: "CUST00125",
-      customer_name: "Another Customer Ltd.",
-      service_type: "unknown_service",
-      metrics: {
-        appointment_count: 12,
-        contract_count: 3,
-        customer_satisfaction_rate: 92.5,
-      },
-      financial_data: {
-        base_amount: 150000,
-        discount_rate: 10,
-        adjusted_amount: 135000,
-      },
-      status: "approved",
-      validation_rules: {
-        numeric_ranges: {
-          appointment_count: { min: 0, max: 100 },
-          contract_count: { min: 0, max: 50 },
-          customer_satisfaction_rate: { min: 0, max: 100 },
-          base_amount: { min: 0, max: 1000000 },
-          discount_rate: { min: 0, max: 100 },
-          adjusted_amount: { min: 0, max: 1000000 },
-        },
-        string_allowlist: {
-          service_type: ["standard_service", "premium_service", "basic_service"],
-          status: ["approved", "pending", "rejected"],
-        },
-      },
+    const extracted_amounts = result_single.map((r) => r.amount);
+    expect(extracted_amounts).toEqual([50000, 75000]);
+
+    // 応答時間が1秒以内であることを確認
+    expect(response_time_single).toBeLessThan(1000);
+
+    // ========== Trigger: 複数の成果種別「受注」と「商談」を組み合わせて検索・抽出を実行した ==========
+    const search_params_multiple: SalesActivitySearchParams = {
+      outcome_types: ["受注", "商談"],
+      start_date: "2024-01-01",
+      end_date: "2024-01-31",
     };
 
-    const result = validateReportDataCompleteness(reportDataWithAnomalyString);
-
-    expect(result.is_valid).toBe(false);
-    expect(result.anomalies_detected).toBeGreaterThan(0);
-    expect(result.validation_status).toBe("failed");
-    expect(result.string_data_check.all_values_in_allowlist).toBe(false);
-    expect(result.string_data_check.disallowed_values).toContainEqual(
-      expect.objectContaining({
-        field_name: "service_type",
-        value: "unknown_service",
-        allowed_values: ["standard_service", "premium_service", "basic_service"],
-      })
+    const start_time_multiple = Date.now();
+    const result_multiple = searchSalesActivityByOutcomeType(
+      test_sales_activities,
+      search_params_multiple
     );
-  });
+    const response_time_multiple = Date.now() - start_time_multiple;
 
-  // SCEN-1155: エラーケース - データ間の矛盾（合計値の不一致）
-  it("should detect inconsistency when adjusted amount does not match base amount minus discount", () => {
-    const reportDataWithInconsistency = {
-      report_id: "RPT20240115004",
-      generated_date: "2024-01-15T09:00:00Z",
-      reporting_period: {
-        start_date: "2024-01-01",
-        end_date: "2024-01-31",
-      },
-      customer_id: "CUST00126",
-      customer_name: "Inconsistent Customer Corp.",
-      service_type: "standard_service",
-      metrics: {
-        appointment_count: 12,
-        contract_count: 3,
-        customer_satisfaction_rate: 92.5,
-      },
-      financial_data: {
-        base_amount: 150000,
-        discount_rate: 10,
-        adjusted_amount: 140000,
-      },
-      status: "approved",
-      validation_rules: {
-        numeric_ranges: {
-          appointment_count: { min: 0, max: 100 },
-          contract_count: { min: 0, max: 50 },
-          customer_satisfaction_rate: { min: 0, max: 100 },
-          base_amount: { min: 0, max: 1000000 },
-          discount_rate: { min: 0, max: 100 },
-          adjusted_amount: { min: 0, max: 1000000 },
-        },
-        string_allowlist: {
-          service_type: ["standard_service", "premium_service", "basic_service"],
-          status: ["approved", "pending", "rejected"],
-        },
-      },
+    // ========== Outcome: 複数条件「受注」「商談」に該当するデータのみが正確に抽出されている ==========
+    // 期待: 受注+商談データは ACT001, ACT003, ACT004, ACT005 の4件
+    expect(result_multiple).toHaveLength(4);
+    expect(
+      result_multiple.every((rec) =>
+        ["受注", "商談"].includes(rec.outcome_type)
+      )
+    ).toBe(true);
+
+    const extracted_activity_ids_multiple = result_multiple.map(
+      (r) => r.activity_id
+    );
+    expect(extracted_activity_ids_multiple).toEqual([
+      "ACT001",
+      "ACT003",
+      "ACT004",
+      "ACT005",
+    ]);
+
+    // 複数条件での応答時間も1秒以内であることを確認
+    expect(response_time_multiple).toBeLessThan(1000);
+
+    // 複数条件での応答速度が単一条件と同等以上であることを確認（性能維持）
+    expect(response_time_multiple).toBeLessThanOrEqual(
+      response_time_single + 100
+    );
+
+    // ========== Outcome: 成果種別「提案」のみの検索でも正確に抽出される ==========
+    const search_params_proposal: SalesActivitySearchParams = {
+      outcome_type: "提案",
+      start_date: "2024-01-01",
+      end_date: "2024-01-31",
     };
 
-    const result = validateReportDataCompleteness(reportDataWithInconsistency);
-
-    expect(result.is_valid).toBe(false);
-    expect(result.anomalies_detected).toBeGreaterThan(0);
-    expect(result.validation_status).toBe("failed");
-    expect(result.consistency_check.inconsistencies_found).toBeGreaterThan(0);
-    expect(result.consistency_check.issues).toContainEqual(
-      expect.objectContaining({
-        issue_type: "calculation_mismatch",
-        description: expect.stringMatching(/adjusted_amount/),
-      })
+    const result_proposal = searchSalesActivityByOutcomeType(
+      test_sales_activities,
+      search_params_proposal
     );
-  });
 
-  // SCEN-1155: エラーケース - 複数の異常が同時に検出
-  it("should detect multiple anomalies when both numeric and string data are invalid", () => {
-    const reportDataWithMultipleAnomalies = {
-      report_id: "RPT20240115005",
-      generated_date: "2024-01-15T09:00:00Z",
-      reporting_period: {
-        start_date: "2024-01-01",
-        end_date: "2024-01-31",
-      },
-      customer_id: "CUST00127",
-      customer_name: "Multiple Anomaly Customer Ltd.",
-      service_type: "invalid_service",
-      metrics: {
-        appointment_count: 250,
-        contract_count: 3,
-        customer_satisfaction_rate: 150,
-      },
-      financial_data: {
-        base_amount: 150000,
-        discount_rate: 150,
-        adjusted_amount: 135000,
-      },
-      status: "unknown_status",
-      validation_rules: {
-        numeric_ranges: {
-          appointment_count: { min: 0, max: 100 },
-          contract_count: { min: 0, max: 50 },
-          customer_satisfaction_rate: { min: 0, max: 100 },
-          base_amount: { min: 0, max: 1000000 },
-          discount_rate: { min: 0, max: 100 },
-          adjusted_amount: { min: 0, max: 1000000 },
-        },
-        string_allowlist: {
-          service_type: ["standard_service", "premium_service", "basic_service"],
-          status: ["approved", "pending", "rejected"],
-        },
-      },
+    // 期待: 提案データは ACT002 の1件
+    expect(result_proposal).toHaveLength(1);
+    expect(result_proposal[0].activity_id).toBe("ACT002");
+    expect(result_proposal[0].outcome_type).toBe("提案");
+    expect(result_proposal[0].amount).toBe(30000);
+
+    // ========== Outcome: 存在しない成果種別を検索すると空配列が返される ==========
+    const search_params_nonexistent: SalesActivitySearchParams = {
+      outcome_type: "その他",
+      start_date: "2024-01-01",
+      end_date: "2024-01-31",
     };
 
-    const result = validateReportDataCompleteness(reportDataWithMultipleAnomalies);
+    const result_nonexistent = searchSalesActivityByOutcomeType(
+      test_sales_activities,
+      search_params_nonexistent
+    );
 
-    expect(result.is_valid).toBe(false);
-    expect(result.anomalies_detected).toBeGreaterThanOrEqual(3);
-    expect(result.validation_status).toBe("failed");
-    expect(result.error_report_lines).toBeGreaterThanOrEqual(3);
+    expect(result_nonexistent).toHaveLength(0);
+    expect(result_nonexistent).toEqual([]);
+
+    // ========== Outcome: 日付範囲外のデータは除外される ==========
+    const search_params_date_range: SalesActivitySearchParams = {
+      outcome_type: "受注",
+      start_date: "2024-01-18",
+      end_date: "2024-01-31",
+    };
+
+    const result_date_range = searchSalesActivityByOutcomeType(
+      test_sales_activities,
+      search_params_date_range
+    );
+
+    // 期待: 日付範囲内の受注データは ACT004 のみ
+    expect(result_date_range).toHaveLength(1);
+    expect(result_date_range[0].activity_id).toBe("ACT004");
+    expect(result_date_range[0].activity_date).toBe("2024-01-18");
+
+    // ========== Outcome: 空のデータセットを渡すと空配列が返される ==========
+    const empty_activities: SalesActivityRecord[] = [];
+    const result_empty = searchSalesActivityByOutcomeType(empty_activities, {
+      outcome_type: "受注",
+      start_date: "2024-01-01",
+      end_date: "2024-01-31",
+    });
+
+    expect(result_empty).toHaveLength(0);
+    expect(result_empty).toEqual([]);
   });
 });

@@ -1,260 +1,193 @@
-import {
-  identifyBillingTargetContracts,
-} from "../../src/logic/it-1-br-1781935279444-1-2-1";
+import { calculateInvoiceAmount } from "../../src/logic/it-1-2-1";
 
-describe("月次サマリーテンプレートの定義・管理機能", () => {
-  test("SCEN-949: [normal] 請求対象契約確認・割引基準識別機能 - 各契約の有効期間が正しく判定され、請求対象契約が正確に抽出される", () => {
-    // テストデータ: 複数の契約情報パターン
-    const today = new Date("2024-06-15T00:00:00Z");
+describe("営業成果データから請求対象項目を自動抽出し、顧客ごと・サービスごとの請求額を集計する機能", () => {
+  test("SCEN-949: 契約ごとの請求額計算 - 基本料金・成果報酬・割引額を個別に計算し合算した請求額が導出される", () => {
+    // ========== パターン 1: 基本的な請求額計算 ==========
+    // 契約条件: 基本料金 100,000円、成果報酬(成約数 × 単価) 5件 × 10,000円 = 50,000円、割引 10% = 15,000円
+    const contract_pattern_1 = {
+      contract_id: "CONTRACT-001",
+      base_fee: 100000,
+      performance_fee_per_unit: 10000,
+      performance_units: 5,
+      discount_percentage: 10,
+    };
 
-    const contracts = [
-      {
-        contractId: "CTR-001",
-        customerId: "CUST-A",
-        startDate: new Date("2024-01-01T00:00:00Z"),
-        endDate: new Date("2024-12-31T23:59:59Z"),
-        status: "active",
-        contractYears: 1,
-        contractAmount: 500000,
-        customerSegment: "enterprise",
-      },
-      {
-        contractId: "CTR-002",
-        customerId: "CUST-A",
-        startDate: new Date("2024-06-15T00:00:00Z"),
-        endDate: new Date("2024-06-15T23:59:59Z"),
-        status: "active",
-        contractYears: 1,
-        contractAmount: 300000,
-        customerSegment: "enterprise",
-      },
-      {
-        contractId: "CTR-003",
-        customerId: "CUST-B",
-        startDate: new Date("2024-01-01T00:00:00Z"),
-        endDate: new Date("2024-06-14T23:59:59Z"),
-        status: "active",
-        contractYears: 1,
-        contractAmount: 200000,
-        customerSegment: "smb",
-      },
-      {
-        contractId: "CTR-004",
-        customerId: "CUST-C",
-        startDate: new Date("2024-07-01T00:00:00Z"),
-        endDate: new Date("2024-12-31T23:59:59Z"),
-        status: "active",
-        contractYears: 1,
-        contractAmount: 400000,
-        customerSegment: "startup",
-      },
-      {
-        contractId: "CTR-005",
-        customerId: "CUST-B",
-        startDate: new Date("2023-01-01T00:00:00Z"),
-        endDate: new Date("2024-01-31T23:59:59Z"),
-        status: "terminated",
-        contractYears: 1,
-        contractAmount: 100000,
-        customerSegment: "smb",
-      },
-      {
-        contractId: "CTR-006",
-        customerId: "CUST-D",
-        startDate: new Date("2024-01-01T00:00:00Z"),
-        endDate: new Date("2024-12-31T23:59:59Z"),
-        status: "suspended",
-        contractYears: 2,
-        contractAmount: 1000000,
-        customerSegment: "enterprise",
-      },
-      {
-        contractId: "CTR-007",
-        customerId: "CUST-A",
-        startDate: new Date("2024-01-01T00:00:00Z"),
-        endDate: new Date("2024-12-31T23:59:59Z"),
-        status: "active",
-        contractYears: 3,
-        contractAmount: 1500000,
-        customerSegment: "enterprise",
-      },
-    ];
+    // 期待値計算:
+    // 基本料金: 100,000円
+    // 成果報酬: 5 * 10,000 = 50,000円
+    // 小計: 100,000 + 50,000 = 150,000円
+    // 割引額: 150,000 * 10% = 15,000円
+    // 請求額: 150,000 - 15,000 = 135,000円
+    const result_1 = calculateInvoiceAmount(contract_pattern_1);
+    expect(result_1).toEqual({
+      base_fee: 100000,
+      performance_fee: 50000,
+      subtotal: 150000,
+      discount_amount: 15000,
+      invoice_amount: 135000,
+    });
 
-    // 割引基準定義
-    const discountRules = [
-      {
-        ruleId: "DISC-YEARS-2",
-        type: "contractYears",
-        threshold: 2,
-        discountRate: 0.1,
-      },
-      {
-        ruleId: "DISC-YEARS-3",
-        type: "contractYears",
-        threshold: 3,
-        discountRate: 0.15,
-      },
-      {
-        ruleId: "DISC-AMOUNT-1M",
-        type: "contractAmount",
-        threshold: 1000000,
-        discountRate: 0.05,
-      },
-      {
-        ruleId: "DISC-SEGMENT-ENT",
-        type: "customerSegment",
-        threshold: null,
-        discountRate: 0.08,
-        segment: "enterprise",
-      },
-    ];
+    // ========== パターン 2: 割引なしのケース ==========
+    // 契約条件: 基本料金 50,000円、成果報酬(3件 × 5,000円) = 15,000円、割引 0%
+    const contract_pattern_2 = {
+      contract_id: "CONTRACT-002",
+      base_fee: 50000,
+      performance_fee_per_unit: 5000,
+      performance_units: 3,
+      discount_percentage: 0,
+    };
 
-    // 機能実行
-    const result = identifyBillingTargetContracts(
-      contracts,
-      discountRules,
-      today
+    // 期待値計算:
+    // 基本料金: 50,000円
+    // 成果報酬: 3 * 5,000 = 15,000円
+    // 小計: 50,000 + 15,000 = 65,000円
+    // 割引額: 65,000 * 0% = 0円
+    // 請求額: 65,000 - 0 = 65,000円
+    const result_2 = calculateInvoiceAmount(contract_pattern_2);
+    expect(result_2).toEqual({
+      base_fee: 50000,
+      performance_fee: 15000,
+      subtotal: 65000,
+      discount_amount: 0,
+      invoice_amount: 65000,
+    });
+
+    // ========== パターン 3: 高割引率のケース ==========
+    // 契約条件: 基本料金 200,000円、成果報酬(10件 × 8,000円) = 80,000円、割引 25%
+    const contract_pattern_3 = {
+      contract_id: "CONTRACT-003",
+      base_fee: 200000,
+      performance_fee_per_unit: 8000,
+      performance_units: 10,
+      discount_percentage: 25,
+    };
+
+    // 期待値計算:
+    // 基本料金: 200,000円
+    // 成果報酬: 10 * 8,000 = 80,000円
+    // 小計: 200,000 + 80,000 = 280,000円
+    // 割引額: 280,000 * 25% = 70,000円
+    // 請求額: 280,000 - 70,000 = 210,000円
+    const result_3 = calculateInvoiceAmount(contract_pattern_3);
+    expect(result_3).toEqual({
+      base_fee: 200000,
+      performance_fee: 80000,
+      subtotal: 280000,
+      discount_amount: 70000,
+      invoice_amount: 210000,
+    });
+
+    // ========== パターン 4: 成果報酬なしのケース ==========
+    // 契約条件: 基本料金 75,000円、成果報酬(0件 × 12,000円) = 0円、割引 5%
+    const contract_pattern_4 = {
+      contract_id: "CONTRACT-004",
+      base_fee: 75000,
+      performance_fee_per_unit: 12000,
+      performance_units: 0,
+      discount_percentage: 5,
+    };
+
+    // 期待値計算:
+    // 基本料金: 75,000円
+    // 成果報酬: 0 * 12,000 = 0円
+    // 小計: 75,000 + 0 = 75,000円
+    // 割引額: 75,000 * 5% = 3,750円
+    // 請求額: 75,000 - 3,750 = 71,250円
+    const result_4 = calculateInvoiceAmount(contract_pattern_4);
+    expect(result_4).toEqual({
+      base_fee: 75000,
+      performance_fee: 0,
+      subtotal: 75000,
+      discount_amount: 3750,
+      invoice_amount: 71250,
+    });
+
+    // ========== パターン 5: 複数単価ユニットの複雑なケース ==========
+    // 契約条件: 基本料金 120,000円、成果報酬(7件 × 15,000円) = 105,000円、割引 15%
+    const contract_pattern_5 = {
+      contract_id: "CONTRACT-005",
+      base_fee: 120000,
+      performance_fee_per_unit: 15000,
+      performance_units: 7,
+      discount_percentage: 15,
+    };
+
+    // 期待値計算:
+    // 基本料金: 120,000円
+    // 成果報酬: 7 * 15,000 = 105,000円
+    // 小計: 120,000 + 105,000 = 225,000円
+    // 割引額: 225,000 * 15% = 33,750円
+    // 請求額: 225,000 - 33,750 = 191,250円
+    const result_5 = calculateInvoiceAmount(contract_pattern_5);
+    expect(result_5).toEqual({
+      base_fee: 120000,
+      performance_fee: 105000,
+      subtotal: 225000,
+      discount_amount: 33750,
+      invoice_amount: 191250,
+    });
+
+    // ========== エラーケース: 必須フィールド欠落 ==========
+    const invalid_contract = {
+      contract_id: "CONTRACT-INVALID",
+      base_fee: 100000,
+      // performance_fee_per_unit 欠落
+      performance_units: 5,
+      discount_percentage: 10,
+    } as any;
+
+    expect(() => calculateInvoiceAmount(invalid_contract)).toThrow(/必須項目/);
+
+    // ========== エラーケース: 負の割引率 ==========
+    const invalid_discount_contract = {
+      contract_id: "CONTRACT-NEG-DISCOUNT",
+      base_fee: 100000,
+      performance_fee_per_unit: 10000,
+      performance_units: 5,
+      discount_percentage: -10,
+    };
+
+    expect(() => calculateInvoiceAmount(invalid_discount_contract)).toThrow(
+      /割引率/
     );
 
-    // 検証1: 請求対象契約の件数（本日有効な契約）
-    // 有効な契約: CTR-001, CTR-002（本日が終了日）, CTR-007 = 3件
-    // 除外対象: CTR-003（終了済み）, CTR-004（未開始）, CTR-005（terminated）, CTR-006（suspended）
-    expect(result.billingTargetContracts.length).toBe(3);
+    // ========== エラーケース: 割引率が100%超過 ==========
+    const invalid_discount_over_contract = {
+      contract_id: "CONTRACT-DISCOUNT-OVER",
+      base_fee: 100000,
+      performance_fee_per_unit: 10000,
+      performance_units: 5,
+      discount_percentage: 150,
+    };
 
-    // 検証2: 請求対象契約に含まれる契約ID
-    const billingContractIds = result.billingTargetContracts.map(
-      (c) => c.contractId
-    );
-    expect(billingContractIds).toContain("CTR-001");
-    expect(billingContractIds).toContain("CTR-002");
-    expect(billingContractIds).toContain("CTR-007");
-    expect(billingContractIds).not.toContain("CTR-003");
-    expect(billingContractIds).not.toContain("CTR-004");
-    expect(billingContractIds).not.toContain("CTR-005");
-    expect(billingContractIds).not.toContain("CTR-006");
+    expect(() =>
+      calculateInvoiceAmount(invalid_discount_over_contract)
+    ).toThrow(/割引率/);
 
-    // 検証3: 顧客A（CUST-A）の複数契約がそれぞれ正しく判定されているか
-    const custAContracts = result.billingTargetContracts.filter(
-      (c) => c.customerId === "CUST-A"
-    );
-    expect(custAContracts.length).toBe(3);
+    // ========== エラーケース: 負の基本料金 ==========
+    const invalid_base_fee_contract = {
+      contract_id: "CONTRACT-NEG-BASE",
+      base_fee: -100000,
+      performance_fee_per_unit: 10000,
+      performance_units: 5,
+      discount_percentage: 10,
+    };
 
-    // CTR-001の検証
-    const ctr001 = result.billingTargetContracts.find(
-      (c) => c.contractId === "CTR-001"
-    );
-    expect(ctr001).toBeDefined();
-    expect(ctr001?.isValid).toBe(true);
-    expect(ctr001?.appliedDiscounts.length).toBeGreaterThanOrEqual(1);
-
-    // CTR-002の検証（終了日が本日）
-    const ctr002 = result.billingTargetContracts.find(
-      (c) => c.contractId === "CTR-002"
-    );
-    expect(ctr002).toBeDefined();
-    expect(ctr002?.isValid).toBe(true);
-
-    // CTR-007の検証（契約年数3年で割引適用）
-    const ctr007 = result.billingTargetContracts.find(
-      (c) => c.contractId === "CTR-007"
-    );
-    expect(ctr007).toBeDefined();
-    expect(ctr007?.isValid).toBe(true);
-    expect(
-      ctr007?.appliedDiscounts.some((d) => d.ruleId === "DISC-YEARS-3")
-    ).toBe(true);
-
-    // 検証4: 割引基準の正確な識別
-    // CTR-001: enterprise割引 8% + 契約金額50万は1M未満なので金額割引なし
-    const ctr001Discounts = ctr001?.appliedDiscounts || [];
-    expect(ctr001Discounts.some((d) => d.ruleId === "DISC-SEGMENT-ENT")).toBe(
-      true
-    );
-    expect(ctr001Discounts.some((d) => d.ruleId === "DISC-AMOUNT-1M")).toBe(
-      false
+    expect(() => calculateInvoiceAmount(invalid_base_fee_contract)).toThrow(
+      /基本料金/
     );
 
-    // CTR-007: enterprise割引 8% + 契約年数3年割引 15% + 契約金額150万で1M超過割引 5%
-    const ctr007Discounts = ctr007?.appliedDiscounts || [];
-    expect(ctr007Discounts.some((d) => d.ruleId === "DISC-SEGMENT-ENT")).toBe(
-      true
+    // ========== エラーケース: 負のパフォーマンスユニット数 ==========
+    const invalid_units_contract = {
+      contract_id: "CONTRACT-NEG-UNITS",
+      base_fee: 100000,
+      performance_fee_per_unit: 10000,
+      performance_units: -5,
+      discount_percentage: 10,
+    };
+
+    expect(() => calculateInvoiceAmount(invalid_units_contract)).toThrow(
+      /ユニット数/
     );
-    expect(ctr007Discounts.some((d) => d.ruleId === "DISC-YEARS-3")).toBe(true);
-    expect(ctr007Discounts.some((d) => d.ruleId === "DISC-AMOUNT-1M")).toBe(
-      true
-    );
-
-    // 検証5: 除外対象の確認
-    expect(result.excludedContracts.length).toBe(4);
-    const excludedIds = result.excludedContracts.map((c) => c.contractId);
-    expect(excludedIds).toContain("CTR-003"); // 終了済み
-    expect(excludedIds).toContain("CTR-004"); // 未開始
-    expect(excludedIds).toContain("CTR-005"); // terminated
-    expect(excludedIds).toContain("CTR-006"); // suspended
-
-    // 検証6: 除外理由の妥当性
-    const ctr003Excluded = result.excludedContracts.find(
-      (c) => c.contractId === "CTR-003"
-    );
-    expect(ctr003Excluded?.reason).toMatch(/期間外|終了/);
-
-    const ctr004Excluded = result.excludedContracts.find(
-      (c) => c.contractId === "CTR-004"
-    );
-    expect(ctr004Excluded?.reason).toMatch(/期間外|未開始/);
-
-    const ctr005Excluded = result.excludedContracts.find(
-      (c) => c.contractId === "CTR-005"
-    );
-    expect(ctr005Excluded?.reason).toMatch(/ステータス|終了/);
-
-    const ctr006Excluded = result.excludedContracts.find(
-      (c) => c.contractId === "CTR-006"
-    );
-    expect(ctr006Excluded?.reason).toMatch(/ステータス|停止|休止/);
-
-    // 検証7: 完全性チェック（総件数）
-    expect(result.billingTargetContracts.length + result.excludedContracts.length).toBe(
-      contracts.length
-    );
-
-    // 検証8: 顧客ごとの请求对象契約が正確に抽出されているか
-    const custBTarget = result.billingTargetContracts.filter(
-      (c) => c.customerId === "CUST-B"
-    );
-    expect(custBTarget.length).toBe(0); // CUST-Bは有効な契約なし
-
-    const custCTarget = result.billingTargetContracts.filter(
-      (c) => c.customerId === "CUST-C"
-    );
-    expect(custCTarget.length).toBe(0); // CUST-Cは未開始なので除外
-
-    const custDTarget = result.billingTargetContracts.filter(
-      (c) => c.customerId === "CUST-D"
-    );
-    expect(custDTarget.length).toBe(0); // CUST-Dは suspended なので除外
-
-    // 検証9: 各契約のメタデータ確認
-    for (const contract of result.billingTargetContracts) {
-      expect(contract.contractId).toBeDefined();
-      expect(contract.customerId).toBeDefined();
-      expect(contract.isValid).toBe(true);
-      expect(contract.appliedDiscounts).toBeInstanceOf(Array);
-      expect(contract.appliedDiscounts.every((d) => d.ruleId && d.discountRate !== undefined)).toBe(true);
-    }
-
-    // 検証10: 割引率の妥当性
-    const ctr001AppliedRate = ctr001?.appliedDiscounts.reduce(
-      (sum, d) => sum + d.discountRate,
-      0
-    ) || 0;
-    expect(ctr001AppliedRate).toBe(0.08); // enterprise 8% のみ
-
-    const ctr007AppliedRate = ctr007?.appliedDiscounts.reduce(
-      (sum, d) => sum + d.discountRate,
-      0
-    ) || 0;
-    // enterprise 8% + 契約年数3年 15% + 契約金額1M超 5% = 28%
-    expect(ctr007AppliedRate).toBe(0.28);
   });
 });

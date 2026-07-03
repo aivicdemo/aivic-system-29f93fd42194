@@ -1,167 +1,128 @@
-import { validateCustomerAggregation } from "../../src/logic/it-1781935279444-2-1-1";
+import { determineDistributionEligibility } from "../../src/logic/it-1781935279444-2-1-1";
 
-describe("営業データ入力時の品質検証ルール定義・実行機能", () => {
-  // SCEN-1137: [normal] 顧客別成果指標集計ロジック検証 - 契約内容に基づいた集計ルールが正しく適用され、顧客別の成約数・アポ数が正確に計算される
-  test("契約内容に基づいた集計ルールが各顧客に対して正しく適用され、顧客別の成約数とアポ数が期待値と一致して計算されること", () => {
-    const testData = {
-      customers: [
-        {
-          customer_id: "CUST001",
-          customer_name: "顧客A",
-          contract_type: "成功報酬型",
-          contract_period_start: "2024-01-01",
-          contract_period_end: "2024-12-31",
-          contract_agreement_details: {
-            commission_per_deal: 50000,
-            min_appointment_count: 5,
-            deal_qualification: "クロージング完了"
-          },
-          sales_activities: [
-            {
-              activity_id: "ACT001",
-              activity_type: "appointment",
-              activity_date: "2024-02-10",
-              status: "completed"
-            },
-            {
-              activity_id: "ACT002",
-              activity_type: "appointment",
-              activity_date: "2024-02-15",
-              status: "completed"
-            },
-            {
-              activity_id: "ACT003",
-              activity_type: "deal",
-              activity_date: "2024-02-20",
-              deal_status: "closed",
-              deal_amount: 100000
-            },
-            {
-              activity_id: "ACT004",
-              activity_type: "appointment",
-              activity_date: "2024-03-05",
-              status: "completed"
-            },
-            {
-              activity_id: "ACT005",
-              activity_type: "deal",
-              activity_date: "2024-03-10",
-              deal_status: "closed",
-              deal_amount: 150000
-            }
-          ]
-        },
-        {
-          customer_id: "CUST002",
-          customer_name: "顧客B",
-          contract_type: "固定報酬型",
-          contract_period_start: "2024-01-01",
-          contract_period_end: "2024-12-31",
-          contract_agreement_details: {
-            fixed_monthly_fee: 100000,
-            target_appointment_count: 10,
-            deal_qualification: "見込み客獲得"
-          },
-          sales_activities: [
-            {
-              activity_id: "ACT006",
-              activity_type: "appointment",
-              activity_date: "2024-02-12",
-              status: "completed"
-            },
-            {
-              activity_id: "ACT007",
-              activity_type: "appointment",
-              activity_date: "2024-02-18",
-              status: "completed"
-            },
-            {
-              activity_id: "ACT008",
-              activity_type: "appointment",
-              activity_date: "2024-02-25",
-              status: "completed"
-            },
-            {
-              activity_id: "ACT009",
-              activity_type: "deal",
-              activity_date: "2024-03-01",
-              deal_status: "prospect",
-              deal_amount: 80000
-            }
-          ]
-        },
-        {
-          customer_id: "CUST003",
-          customer_name: "顧客C",
-          contract_type: "成功報酬型",
-          contract_period_start: "2024-03-01",
-          contract_period_end: "2024-12-31",
-          contract_agreement_details: {
-            commission_per_deal: 75000,
-            min_appointment_count: 8,
-            deal_qualification: "クロージング完了"
-          },
-          sales_activities: [
-            {
-              activity_id: "ACT010",
-              activity_type: "appointment",
-              activity_date: "2024-03-15",
-              status: "completed"
-            },
-            {
-              activity_id: "ACT011",
-              activity_type: "appointment",
-              activity_date: "2024-03-20",
-              status: "completed"
-            }
-          ]
-        }
-      ],
-      aggregation_period_start: "2024-02-01",
-      aggregation_period_end: "2024-03-31"
-    };
+describe("顧客企業別配信リスト確認 - 配信停止フラグ部分設定時の判定", () => {
+  // SCEN-1137
+  test("配信停止フラグが部分的に設定されている複数契約の配信リスト判定が正確に行われる", () => {
+    // テストデータ: 同一顧客企業に紐付く複数の契約
+    const contracts = [
+      {
+        contract_id: "C001",
+        customer_id: "CUST-001",
+        contract_name: "基本契約A",
+        status: "active",
+        distribution_stop_flag: false,
+      },
+      {
+        contract_id: "C002",
+        customer_id: "CUST-001",
+        contract_name: "基本契約B",
+        status: "active",
+        distribution_stop_flag: true, // 配信停止フラグ設定
+      },
+      {
+        contract_id: "C003",
+        customer_id: "CUST-001",
+        contract_name: "追加契約C",
+        status: "active",
+        distribution_stop_flag: false,
+      },
+      {
+        contract_id: "C004",
+        customer_id: "CUST-001",
+        contract_name: "追加契約D",
+        status: "active",
+        distribution_stop_flag: true, // 配信停止フラグ設定
+      },
+      {
+        contract_id: "C005",
+        customer_id: "CUST-001",
+        contract_name: "追加契約E",
+        status: "active",
+        distribution_stop_flag: false,
+      },
+    ];
 
-    const result = validateCustomerAggregation(testData);
+    const customer_id = "CUST-001";
 
-    // 顧客A: 成約数2件、アポ数3件、契約ルール適用確認
-    expect(result.customers[0].customer_id).toBe("CUST001");
-    expect(result.customers[0].aggregated_deal_count).toBe(2);
-    expect(result.customers[0].aggregated_appointment_count).toBe(3);
-    expect(result.customers[0].contract_type).toBe("成功報酬型");
-    expect(result.customers[0].meets_minimum_appointment_threshold).toBe(false);
-    expect(result.customers[0].calculated_commission_amount).toBe(100000);
+    // 関数実行
+    const result = determineDistributionEligibility({
+      contracts,
+      customer_id,
+    });
 
-    // 顧客B: 成約数1件（見込み客のみカウント）、アポ数3件、固定報酬適用
-    expect(result.customers[1].customer_id).toBe("CUST002");
-    expect(result.customers[1].aggregated_deal_count).toBe(1);
-    expect(result.customers[1].aggregated_appointment_count).toBe(3);
-    expect(result.customers[1].contract_type).toBe("固定報酬型");
-    expect(result.customers[1].applied_fixed_fee).toBe(100000);
+    // 期待結果の検証
 
-    // 顧客C: 集計期間内はアポ数2件、成約数0件、最小アポ数未満
-    expect(result.customers[2].customer_id).toBe("CUST003");
-    expect(result.customers[2].aggregated_deal_count).toBe(0);
-    expect(result.customers[2].aggregated_appointment_count).toBe(2);
-    expect(result.customers[2].contract_type).toBe("成功報酬型");
-    expect(result.customers[2].meets_minimum_appointment_threshold).toBe(false);
-    expect(result.customers[2].calculated_commission_amount).toBe(0);
+    // 1. 配信対象契約の確認（配信停止フラグが false の契約のみ）
+    expect(result.eligible_contracts).toEqual([
+      {
+        contract_id: "C001",
+        customer_id: "CUST-001",
+        contract_name: "基本契約A",
+        status: "active",
+        distribution_stop_flag: false,
+      },
+      {
+        contract_id: "C003",
+        customer_id: "CUST-001",
+        contract_name: "追加契約C",
+        status: "active",
+        distribution_stop_flag: false,
+      },
+      {
+        contract_id: "C005",
+        customer_id: "CUST-001",
+        contract_name: "追加契約E",
+        status: "active",
+        distribution_stop_flag: false,
+      },
+    ]);
 
-    // 顧客間のデータ独立性確認
-    expect(result.customers[0].aggregated_deal_count).not.toBe(
-      result.customers[1].aggregated_deal_count
-    );
-    expect(result.customers[1].aggregated_deal_count).not.toBe(
-      result.customers[2].aggregated_deal_count
+    // 2. 配信停止契約の確認（配信停止フラグが true の契約）
+    expect(result.stopped_contracts).toEqual([
+      {
+        contract_id: "C002",
+        customer_id: "CUST-001",
+        contract_name: "基本契約B",
+        status: "active",
+        distribution_stop_flag: true,
+      },
+      {
+        contract_id: "C004",
+        customer_id: "CUST-001",
+        contract_name: "追加契約D",
+        status: "active",
+        distribution_stop_flag: true,
+      },
+    ]);
+
+    // 3. 配信対象件数の検証
+    expect(result.eligible_count).toBe(3);
+
+    // 4. 配信停止件数の検証
+    expect(result.stopped_count).toBe(2);
+
+    // 5. 総契約件数の検証
+    expect(result.total_count).toBe(5);
+
+    // 6. 配信対象件数 + 配信停止件数 = 総契約件数
+    expect(result.eligible_count + result.stopped_count).toBe(
+      result.total_count
     );
 
-    // 集計期間内のデータのみ対象であることを確認
-    expect(result.aggregation_period_start).toBe("2024-02-01");
-    expect(result.aggregation_period_end).toBe("2024-03-31");
+    // 7. 顧客ID の確認
+    expect(result.customer_id).toBe("CUST-001");
 
-    // 全体集計結果の統計情報
-    expect(result.total_customers_processed).toBe(3);
-    expect(result.total_aggregated_deals).toBe(3);
-    expect(result.total_aggregated_appointments).toBe(8);
-    expect(result.validation_status).toBe("success");
+    // 8. 配信可能フラグの確認（配信対象契約が 0 でない場合は true）
+    expect(result.can_distribute).toBe(true);
+
+    // 9. 配信対象契約の各要素について、配信停止フラグが false であることを検証
+    result.eligible_contracts.forEach((contract) => {
+      expect(contract.distribution_stop_flag).toBe(false);
+    });
+
+    // 10. 配信停止契約の各要素について、配信停止フラグが true であることを検証
+    result.stopped_contracts.forEach((contract) => {
+      expect(contract.distribution_stop_flag).toBe(true);
+    });
   });
 });

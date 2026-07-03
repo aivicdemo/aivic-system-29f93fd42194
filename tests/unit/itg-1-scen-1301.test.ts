@@ -1,266 +1,137 @@
-import { executeAccountingSystemAPIWithRetry } from '../../src/logic/it-1-2-1';
+import { aggregateCustomerServiceBilling } from "../../src/logic/it-1-2-1";
 
-const fetchMock = require('jest-fetch-mock');
+describe("顧客別・サービス別請求額集計機能", () => {
+  // SCEN-1301
+  test("複数のサービスを利用する顧客の場合、サービスごと・顧客ごとに請求額が正確に集計される", () => {
+    // Arrange: テストデータ準備
+    const billing_records = [
+      {
+        customer_id: "CUST_A",
+        customer_name: "顧客A",
+        service_id: "SVC_A",
+        service_name: "ServiceA",
+        amount: 100000,
+      },
+      {
+        customer_id: "CUST_A",
+        customer_name: "顧客A",
+        service_id: "SVC_B",
+        service_name: "ServiceB",
+        amount: 50000,
+      },
+      {
+        customer_id: "CUST_A",
+        customer_name: "顧客A",
+        service_id: "SVC_C",
+        service_name: "ServiceC",
+        amount: 75000,
+      },
+      {
+        customer_id: "CUST_B",
+        customer_name: "顧客B",
+        service_id: "SVC_A",
+        service_name: "ServiceA",
+        amount: 80000,
+      },
+      {
+        customer_id: "CUST_B",
+        customer_name: "顧客B",
+        service_id: "SVC_B",
+        service_name: "ServiceB",
+        amount: 60000,
+      },
+    ];
 
-describe('営業成果データから請求対象項目を自動抽出し、顧客ごと・サービスごとの請求額を集計する機能', () => {
-  // SCEN-1301: [error] 会計システムAPI連携実行機能 - API連携がネットワークエラーで失敗した場合に、自動再試行が実行される
-  test('ネットワークエラー発生時に自動再試行メカニズムが正常に機能し、設定回数内での再試行が実行される', async () => {
-    fetchMock.resetMocks();
+    // Act: 顧客別・サービス別請求額集計機能を実行
+    const result = aggregateCustomerServiceBilling(billing_records);
 
-    const requestPayload = {
-      customerId: 'CUST-001',
-      invoiceAmount: 150000,
-      invoicePeriod: '2024-01',
-      serviceType: 'SALES_COMMISSION',
-    };
-
-    const maxRetries = 3;
-    const retryIntervalMs = 100;
-    let attemptCount = 0;
-
-    // 最初の2回はネットワークエラー、3回目で成功
-    fetchMock.mockImplementation(async () => {
-      attemptCount++;
-      if (attemptCount < 3) {
-        const error = new Error('Network error');
-        (error as any).code = 'ECONNREFUSED';
-        throw error;
-      }
-      // 3回目で成功
-      return new Response(
-        JSON.stringify({
-          success: true,
-          invoiceId: 'INV-2024-001',
-          amount: 150000,
-          status: 'POSTED',
-          timestamp: '2024-01-15T11:30:00Z',
-        }),
-        { status: 200 }
-      );
-    });
-
-    const result = await executeAccountingSystemAPIWithRetry(
-      requestPayload,
-      maxRetries,
-      retryIntervalMs
+    // Assert: 顧客Aの集計結果を検証
+    const customer_a = result.customer_billing.find(
+      (c) => c.customer_id === "CUST_A"
     );
+    expect(customer_a).toBeDefined();
+    expect(customer_a?.customer_name).toBe("顧客A");
+    expect(customer_a?.total_amount).toBe(225000);
 
-    // 再試行回数が設定値以内であることを確認
-    expect(attemptCount).toBeLessThanOrEqual(maxRetries);
-    expect(attemptCount).toBe(3);
-
-    // 最終的なAPI呼び出し結果が成功であることを確認
-    expect(result.success).toBe(true);
-    expect(result.invoiceId).toBe('INV-2024-001');
-    expect(result.amount).toBe(150000);
-    expect(result.status).toBe('POSTED');
-
-    // 各再試行の間隔が正しく設定されていることを検証（実装側で時間管理）
-    expect(result.retryCount).toBe(2);
-    expect(result.totalRetryTimeMs).toBeGreaterThanOrEqual(retryIntervalMs * 2);
-    expect(result.totalRetryTimeMs).toBeLessThan(retryIntervalMs * 3 + 100);
-  });
-
-  test('最大再試行回数に達してもAPIが失敗した場合、適切なエラーハンドリングが行われる', async () => {
-    fetchMock.resetMocks();
-
-    const requestPayload = {
-      customerId: 'CUST-002',
-      invoiceAmount: 200000,
-      invoicePeriod: '2024-01',
-      serviceType: 'SALES_COMMISSION',
-    };
-
-    const maxRetries = 3;
-    const retryIntervalMs = 50;
-    let attemptCount = 0;
-
-    // すべてのリクエストがネットワークエラーで失敗
-    fetchMock.mockImplementation(async () => {
-      attemptCount++;
-      const error = new Error('Network timeout');
-      (error as any).code = 'ETIMEDOUT';
-      throw error;
-    });
-
-    // エラーが正しくスローされることを確認
-    await expect(
-      executeAccountingSystemAPIWithRetry(
-        requestPayload,
-        maxRetries,
-        retryIntervalMs
-      )
-    ).rejects.toThrow(/ネットワークエラー|再試行|接続/);
-
-    // 最大再試行回数まで試行されたことを確認
-    expect(attemptCount).toBe(maxRetries + 1);
-  });
-
-  test('再試行の間隔が正確に管理され、指定された時間経過後に再試行が実行される', async () => {
-    fetchMock.resetMocks();
-
-    const requestPayload = {
-      customerId: 'CUST-003',
-      invoiceAmount: 250000,
-      invoicePeriod: '2024-01',
-      serviceType: 'SALES_COMMISSION',
-    };
-
-    const maxRetries = 2;
-    const retryIntervalMs = 150;
-    const attemptTimestamps: number[] = [];
-
-    fetchMock.mockImplementation(async () => {
-      attemptTimestamps.push(Date.now());
-      if (attemptTimestamps.length < 3) {
-        const error = new Error('Temporary connection error');
-        (error as any).code = 'ECONNREFUSED';
-        throw error;
-      }
-      return new Response(
-        JSON.stringify({
-          success: true,
-          invoiceId: 'INV-2024-002',
-          amount: 250000,
-          status: 'POSTED',
-          timestamp: '2024-01-15T12:00:00Z',
-        }),
-        { status: 200 }
-      );
-    });
-
-    const result = await executeAccountingSystemAPIWithRetry(
-      requestPayload,
-      maxRetries,
-      retryIntervalMs
+    // 顧客Aのサービスごと請求額を検証
+    expect(customer_a?.service_breakdown).toHaveLength(3);
+    const customer_a_service_a = customer_a?.service_breakdown.find(
+      (s) => s.service_id === "SVC_A"
     );
+    expect(customer_a_service_a?.service_name).toBe("ServiceA");
+    expect(customer_a_service_a?.amount).toBe(100000);
 
-    // 成功の確認
-    expect(result.success).toBe(true);
-    expect(result.invoiceId).toBe('INV-2024-002');
-
-    // 再試行間隔の検証
-    if (attemptTimestamps.length >= 2) {
-      const firstInterval = attemptTimestamps[1] - attemptTimestamps[0];
-      expect(firstInterval).toBeGreaterThanOrEqual(retryIntervalMs * 0.8);
-      expect(firstInterval).toBeLessThan(retryIntervalMs * 1.5);
-    }
-
-    if (attemptTimestamps.length >= 3) {
-      const secondInterval = attemptTimestamps[2] - attemptTimestamps[1];
-      expect(secondInterval).toBeGreaterThanOrEqual(retryIntervalMs * 0.8);
-      expect(secondInterval).toBeLessThan(retryIntervalMs * 1.5);
-    }
-  });
-
-  test('ネットワークエラーではなく、正常系のレスポンスが最初に返された場合、再試行なしで成功が返される', async () => {
-    fetchMock.resetMocks();
-
-    const requestPayload = {
-      customerId: 'CUST-004',
-      invoiceAmount: 300000,
-      invoicePeriod: '2024-01',
-      serviceType: 'SALES_COMMISSION',
-    };
-
-    const maxRetries = 3;
-    const retryIntervalMs = 100;
-    let attemptCount = 0;
-
-    // 最初のリクエストで成功
-    fetchMock.mockResponseOnce(
-      JSON.stringify({
-        success: true,
-        invoiceId: 'INV-2024-003',
-        amount: 300000,
-        status: 'POSTED',
-        timestamp: '2024-01-15T13:00:00Z',
-      }),
-      { status: 200 }
+    const customer_a_service_b = customer_a?.service_breakdown.find(
+      (s) => s.service_id === "SVC_B"
     );
+    expect(customer_a_service_b?.service_name).toBe("ServiceB");
+    expect(customer_a_service_b?.amount).toBe(50000);
 
-    fetchMock.mockImplementation(async () => {
-      attemptCount++;
-      return new Response(
-        JSON.stringify({
-          success: true,
-          invoiceId: 'INV-2024-003',
-          amount: 300000,
-          status: 'POSTED',
-          timestamp: '2024-01-15T13:00:00Z',
-        }),
-        { status: 200 }
-      );
-    });
-
-    const result = await executeAccountingSystemAPIWithRetry(
-      requestPayload,
-      maxRetries,
-      retryIntervalMs
+    const customer_a_service_c = customer_a?.service_breakdown.find(
+      (s) => s.service_id === "SVC_C"
     );
+    expect(customer_a_service_c?.service_name).toBe("ServiceC");
+    expect(customer_a_service_c?.amount).toBe(75000);
 
-    // 成功の確認
-    expect(result.success).toBe(true);
-    expect(result.invoiceId).toBe('INV-2024-003');
-    expect(result.amount).toBe(300000);
-    expect(result.status).toBe('POSTED');
-
-    // 再試行回数が0であることを確認（最初のリクエストで成功）
-    expect(result.retryCount).toBe(0);
-  });
-
-  test('API呼び出しが5XX エラーで返された場合、再試行が実行される', async () => {
-    fetchMock.resetMocks();
-
-    const requestPayload = {
-      customerId: 'CUST-005',
-      invoiceAmount: 175000,
-      invoicePeriod: '2024-02',
-      serviceType: 'SALES_COMMISSION',
-    };
-
-    const maxRetries = 2;
-    const retryIntervalMs = 100;
-    let attemptCount = 0;
-
-    fetchMock.mockImplementation(async () => {
-      attemptCount++;
-      if (attemptCount < 2) {
-        // 最初は500エラー
-        return new Response(
-          JSON.stringify({
-            success: false,
-            error: 'Internal Server Error',
-          }),
-          { status: 500 }
-        );
-      }
-      // 2回目で成功
-      return new Response(
-        JSON.stringify({
-          success: true,
-          invoiceId: 'INV-2024-004',
-          amount: 175000,
-          status: 'POSTED',
-          timestamp: '2024-02-15T10:00:00Z',
-        }),
-        { status: 200 }
-      );
-    });
-
-    const result = await executeAccountingSystemAPIWithRetry(
-      requestPayload,
-      maxRetries,
-      retryIntervalMs
+    // Assert: 顧客Bの集計結果を検証
+    const customer_b = result.customer_billing.find(
+      (c) => c.customer_id === "CUST_B"
     );
+    expect(customer_b).toBeDefined();
+    expect(customer_b?.customer_name).toBe("顧客B");
+    expect(customer_b?.total_amount).toBe(140000);
 
-    // 再試行後の成功を確認
-    expect(result.success).toBe(true);
-    expect(result.invoiceId).toBe('INV-2024-004');
-    expect(result.amount).toBe(175000);
+    // 顧客Bのサービスごと請求額を検証
+    expect(customer_b?.service_breakdown).toHaveLength(2);
+    const customer_b_service_a = customer_b?.service_breakdown.find(
+      (s) => s.service_id === "SVC_A"
+    );
+    expect(customer_b_service_a?.service_name).toBe("ServiceA");
+    expect(customer_b_service_a?.amount).toBe(80000);
 
-    // 再試行が実行されたことを確認
-    expect(attemptCount).toBeGreaterThan(1);
-    expect(attemptCount).toBeLessThanOrEqual(maxRetries + 1);
+    const customer_b_service_b = customer_b?.service_breakdown.find(
+      (s) => s.service_id === "SVC_B"
+    );
+    expect(customer_b_service_b?.service_name).toBe("ServiceB");
+    expect(customer_b_service_b?.amount).toBe(60000);
+
+    // Assert: サービス別集計結果を検証
+    expect(result.service_billing).toHaveLength(3);
+
+    const service_a_total = result.service_billing.find(
+      (s) => s.service_id === "SVC_A"
+    );
+    expect(service_a_total?.service_name).toBe("ServiceA");
+    expect(service_a_total?.total_amount).toBe(180000);
+    expect(service_a_total?.customer_count).toBe(2);
+
+    const service_b_total = result.service_billing.find(
+      (s) => s.service_id === "SVC_B"
+    );
+    expect(service_b_total?.service_name).toBe("ServiceB");
+    expect(service_b_total?.total_amount).toBe(110000);
+    expect(service_b_total?.customer_count).toBe(2);
+
+    const service_c_total = result.service_billing.find(
+      (s) => s.service_id === "SVC_C"
+    );
+    expect(service_c_total?.service_name).toBe("ServiceC");
+    expect(service_c_total?.total_amount).toBe(75000);
+    expect(service_c_total?.customer_count).toBe(1);
+
+    // Assert: 全体の整合性を検証（重複や漏れがないことを確認）
+    const total_sum_from_customer = result.customer_billing.reduce(
+      (sum, c) => sum + c.total_amount,
+      0
+    );
+    expect(total_sum_from_customer).toBe(365000);
+
+    const total_sum_from_service = result.service_billing.reduce(
+      (sum, s) => sum + s.total_amount,
+      0
+    );
+    expect(total_sum_from_service).toBe(365000);
+
+    expect(result.customer_billing).toHaveLength(2);
   });
 });

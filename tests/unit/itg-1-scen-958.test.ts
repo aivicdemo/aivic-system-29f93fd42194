@@ -1,110 +1,77 @@
-import { generateBillingManualFromContracts } from "../../src/logic/it-1-2-1";
+import { validateSalesDataQuality } from "../../src/logic/it-1781935279444-2-2-1";
 
-describe("請求ロジック・割引基準・例外パターンの文書化", () => {
+describe("営業データ品質検証 - 複数基準違反時の通知", () => {
   // SCEN-958
-  test("複数契約の料金体系・割引基準から請求ルール手順書を正常に生成できる", () => {
-    const contracts = [
-      {
-        contractId: "CONTRACT_A",
-        contractName: "契約A",
-        baseFee: 5000,
-        unitPrice: 10,
-        discountRules: [
-          {
-            unitThreshold: 100,
-            discountRate: 0.05,
-          },
-        ],
-      },
-      {
-        contractId: "CONTRACT_B",
-        contractName: "契約B",
-        baseFee: 8000,
-        unitPrice: 8,
-        discountRules: [
-          {
-            unitThreshold: 200,
-            discountRate: 0.1,
-          },
-        ],
-      },
-    ];
+  test("複数の品質基準に引っかかる場合、すべての不適合を通知して修正を促す", () => {
+    const invalidSalesRecord = {
+      salesDataId: "SD-20240115-001",
+      customerName: "",
+      appointmentCount: 5,
+      contractCount: 2,
+      amount: -50000,
+      billingDate: "",
+      serviceType: "営業代行",
+      status: "pending",
+      recordedAt: "2024-01-15T10:00:00Z",
+    };
 
-    const result = generateBillingManualFromContracts(contracts);
+    const result = validateSalesDataQuality(invalidSalesRecord);
 
-    expect(result).toBeDefined();
-    expect(result.documentFormat).toBe("PDF");
-    expect(result.generatedAt).toBeDefined();
+    expect(result.isValid).toBe(false);
+    expect(result.defects).toBeDefined();
+    expect(result.defects.length).toBe(3);
 
-    expect(result.contractManuals).toHaveLength(2);
-
-    const manualA = result.contractManuals.find(
-      (m) => m.contractId === "CONTRACT_A"
+    const defectMessages = result.defects.map(
+      (d: { field: string; message: string }) => d.field
     );
-    expect(manualA).toBeDefined();
-    expect(manualA.contractName).toBe("契約A");
-    expect(manualA.billingFormula).toBe(
-      "基本料金: 5,000円 + 従量課金: 10円/単位"
-    );
-    expect(manualA.discountConditions).toHaveLength(1);
-    expect(manualA.discountConditions[0]).toEqual({
-      condition: "100単位以上で5%割引",
-      unitThreshold: 100,
-      discountRate: 0.05,
-    });
+    expect(defectMessages).toContain("customerName");
+    expect(defectMessages).toContain("amount");
+    expect(defectMessages).toContain("billingDate");
 
-    const manualB = result.contractManuals.find(
-      (m) => m.contractId === "CONTRACT_B"
+    const customerNameDefect = result.defects.find(
+      (d: { field: string }) => d.field === "customerName"
     );
-    expect(manualB).toBeDefined();
-    expect(manualB.contractName).toBe("契約B");
-    expect(manualB.billingFormula).toBe(
-      "基本料金: 8,000円 + 従量課金: 8円/単位"
+    expect(customerNameDefect.message).toMatch(/顧客名|必須/);
+
+    const amountDefect = result.defects.find(
+      (d: { field: string }) => d.field === "amount"
     );
-    expect(manualB.discountConditions).toHaveLength(1);
-    expect(manualB.discountConditions[0]).toEqual({
-      condition: "200単位以上で10%割引",
-      unitThreshold: 200,
-      discountRate: 0.1,
-    });
+    expect(amountDefect.message).toMatch(/金額|負数|マイナス/);
 
-    // 契約Aの計算例検証: 150単位の場合
-    // 基本料金 5,000 + 従量課金 150 * 10 = 5,000 + 1,500 = 6,500
-    // 100単位以上で5%割引適用: 6,500 * (1 - 0.05) = 6,500 * 0.95 = 6,175
-    expect(manualA.calculationExamples).toBeDefined();
-    const exampleA = manualA.calculationExamples.find(
-      (ex) => ex.units === 150
+    const billingDateDefect = result.defects.find(
+      (d: { field: string }) => d.field === "billingDate"
     );
-    expect(exampleA).toBeDefined();
-    expect(exampleA.baseAmount).toBe(6500);
-    expect(exampleA.discountApplied).toBe(true);
-    expect(exampleA.discountAmount).toBe(325);
-    expect(exampleA.finalAmount).toBe(6175);
+    expect(billingDateDefect.message).toMatch(/請求日|必須/);
 
-    // 契約Bの計算例検証: 250単位の場合
-    // 基本料金 8,000 + 従量課金 250 * 8 = 8,000 + 2,000 = 10,000
-    // 200単位以上で10%割引適用: 10,000 * (1 - 0.1) = 10,000 * 0.9 = 9,000
-    expect(manualB.calculationExamples).toBeDefined();
-    const exampleB = manualB.calculationExamples.find(
-      (ex) => ex.units === 250
+    expect(result.notificationSent).toBe(true);
+    expect(result.notificationContent).toBeDefined();
+    expect(result.notificationContent.defectSummary).toContain("顧客名");
+    expect(result.notificationContent.defectSummary).toContain("金額");
+    expect(result.notificationContent.defectSummary).toContain("請求日");
+
+    expect(result.notificationContent.correctionInstructions).toBeDefined();
+    expect(result.notificationContent.correctionInstructions.length).toBeGreaterThanOrEqual(3);
+
+    const customerNameInstruction = result.notificationContent.correctionInstructions.find(
+      (i: { field: string }) => i.field === "customerName"
     );
-    expect(exampleB).toBeDefined();
-    expect(exampleB.baseAmount).toBe(10000);
-    expect(exampleB.discountApplied).toBe(true);
-    expect(exampleB.discountAmount).toBe(1000);
-    expect(exampleB.finalAmount).toBe(9000);
+    expect(customerNameInstruction).toBeDefined();
+    expect(customerNameInstruction.action).toMatch(/入力|確認/);
 
-    // 例外パターン検証
-    expect(manualA.exceptionPatterns).toBeDefined();
-    expect(manualA.exceptionPatterns.length).toBeGreaterThan(0);
-    expect(manualB.exceptionPatterns).toBeDefined();
-    expect(manualB.exceptionPatterns.length).toBeGreaterThan(0);
+    const amountInstruction = result.notificationContent.correctionInstructions.find(
+      (i: { field: string }) => i.field === "amount"
+    );
+    expect(amountInstruction).toBeDefined();
+    expect(amountInstruction.action).toMatch(/正の数/);
 
-    // 手順書の完全性検証
-    expect(result.tableOfContents).toBeDefined();
-    expect(result.tableOfContents.length).toBe(2);
-    expect(result.summary).toBeDefined();
-    expect(result.summary).toContain("契約A");
-    expect(result.summary).toContain("契約B");
+    const billingDateInstruction = result.notificationContent.correctionInstructions.find(
+      (i: { field: string }) => i.field === "billingDate"
+    );
+    expect(billingDateInstruction).toBeDefined();
+    expect(billingDateInstruction.action).toMatch(/日付|設定/);
+
+    expect(result.recordIdentifier).toBe("SD-20240115-001");
+    expect(result.correctionRequired).toBe(true);
+    expect(result.allDefectsIdentified).toBe(true);
   });
 });

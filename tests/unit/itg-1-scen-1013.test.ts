@@ -1,123 +1,184 @@
-import { determineRetrospectiveApplicationScope } from '../../src/logic/it-1-2-1';
+import { describe, test, expect } from "@jest/globals";
+import { validateReportAccuracy } from "../../src/logic/it-1-1-1";
 
-describe('営業成果データから請求対象項目を自動抽出し、顧客ごと・サービスごとの請求額を集計する機能', () => {
-  // SCEN-1013: [edge] 請求ルール変更時の遡及適用判定 - 遡及適用開始日時を基準に、期間内のデータは新請求ルールが適用され、期間外のデータは旧ルールが維持される
-  test('遡及適用開始日時を基準に期間内外でルール適用分岐が正確に機能する', () => {
-    const retrospectiveChangeStartDatetime = new Date('2024-01-01T00:00:00Z');
-    const beforeBoundaryData = {
-      id: 'data_001',
-      transactionDate: new Date('2023-12-31T23:59:59Z'),
-      customerId: 'cust_A',
-      serviceId: 'svc_01',
-      appointmentCount: 5,
-      contractAmount: 100000,
-    };
-    const atBoundaryData = {
-      id: 'data_002',
-      transactionDate: new Date('2024-01-01T00:00:00Z'),
-      customerId: 'cust_A',
-      serviceId: 'svc_01',
-      appointmentCount: 5,
-      contractAmount: 100000,
-    };
-    const afterBoundaryData = {
-      id: 'data_003',
-      transactionDate: new Date('2024-01-01T00:00:01Z'),
-      customerId: 'cust_A',
-      serviceId: 'svc_01',
-      appointmentCount: 5,
-      contractAmount: 100000,
-    };
-    const withinApplicationPeriodData = {
-      id: 'data_004',
-      transactionDate: new Date('2024-01-15T10:30:00Z'),
-      customerId: 'cust_B',
-      serviceId: 'svc_02',
-      appointmentCount: 3,
-      contractAmount: 50000,
-    };
-    const testDataSet = [
-      beforeBoundaryData,
-      atBoundaryData,
-      afterBoundaryData,
-      withinApplicationPeriodData,
-    ];
-    const oldBillingRate = 0.15;
-    const newBillingRate = 0.20;
-    const oldDiscountRate = 0.05;
-    const newDiscountRate = 0.10;
+describe("営業成果レポート内容妥当性判定機能", () => {
+  test("SCEN-1013: レポート内の集計値が営業データと不一致の場合、エラーを返す", () => {
+    // Arrange: 営業データベースの正規値
+    const expectedSalesAmount = 1500000;
+    const expectedContractCount = 12;
+    const expectedAchievementRate = 85.5;
 
-    const result = determineRetrospectiveApplicationScope({
-      changeStartDatetime: retrospectiveChangeStartDatetime,
-      transactionDataSet: testDataSet,
-      oldBillingRate: oldBillingRate,
-      newBillingRate: newBillingRate,
-      oldDiscountRate: oldDiscountRate,
-      newDiscountRate: newDiscountRate,
+    // Act & Assert: 改ざんされたレポートデータを検証
+    const tamperedReport = {
+      reportId: "RPT-202401-001",
+      customerId: "CUST-A001",
+      period: "2024-01",
+      salesAmount: 1200000, // 正規値 1500000 と不一致
+      contractCount: 12,
+      achievementRate: 85.5,
+      generatedAt: "2024-01-31T09:00:00Z",
+    };
+
+    const sourceData = {
+      customerId: "CUST-A001",
+      period: "2024-01",
+      salesAmount: expectedSalesAmount,
+      contractCount: expectedContractCount,
+      achievementRate: expectedAchievementRate,
+    };
+
+    // 不一致検出時にエラーを返す
+    expect(() => validateReportAccuracy(tamperedReport, sourceData)).toThrow(
+      /売上金額/
+    );
+  });
+
+  test("SCEN-1013: 複数項目が不一致の場合、最初の不一致項目を検出して返す", () => {
+    const tamperedReport = {
+      reportId: "RPT-202401-002",
+      customerId: "CUST-B001",
+      period: "2024-01",
+      salesAmount: 900000, // 不一致
+      contractCount: 8, // 不一致
+      achievementRate: 75.2, // 不一致
+      generatedAt: "2024-01-31T10:30:00Z",
+    };
+
+    const sourceData = {
+      customerId: "CUST-B001",
+      period: "2024-01",
+      salesAmount: 1250000,
+      contractCount: 10,
+      achievementRate: 82.5,
+    };
+
+    expect(() => validateReportAccuracy(tamperedReport, sourceData)).toThrow(
+      /売上金額|件数|達成率/
+    );
+  });
+
+  test("SCEN-1013: すべての集計値が営業データと一致する場合、成功ステータスを返す", () => {
+    const validReport = {
+      reportId: "RPT-202401-003",
+      customerId: "CUST-C001",
+      period: "2024-01",
+      salesAmount: 1800000,
+      contractCount: 15,
+      achievementRate: 92.0,
+      generatedAt: "2024-01-31T11:00:00Z",
+    };
+
+    const sourceData = {
+      customerId: "CUST-C001",
+      period: "2024-01",
+      salesAmount: 1800000,
+      contractCount: 15,
+      achievementRate: 92.0,
+    };
+
+    const result = validateReportAccuracy(validReport, sourceData);
+
+    expect(result).toEqual({
+      isValid: true,
+      statusCode: 200,
+      message: "レポート内容の妥当性確認が完了しました。",
+      validatedAt: expect.any(String),
     });
+  });
 
-    // 遡及非適用期間（2023-12-31 23:59:59）のデータは旧ルール適用
-    const beforeBoundaryResult = result.processedRecords.find(
-      (r) => r.transactionDataId === 'data_001'
-    );
-    expect(beforeBoundaryResult).toBeDefined();
-    expect(beforeBoundaryResult?.retrospectiveApplicationStatus).toBe('not_applied');
-    expect(beforeBoundaryResult?.appliedBillingRate).toBe(0.15);
-    expect(beforeBoundaryResult?.appliedDiscountRate).toBe(0.05);
-    const beforeBoundaryOldAmount =
-      100000 * 0.15 - 100000 * 0.15 * 0.05;
-    expect(beforeBoundaryResult?.recalculatedBillingAmount).toBe(
-      beforeBoundaryOldAmount
-    );
+  test("SCEN-1013: 達成率の小数点精度で不一致を検出する", () => {
+    const tamperedReport = {
+      reportId: "RPT-202401-004",
+      customerId: "CUST-D001",
+      period: "2024-01",
+      salesAmount: 2100000,
+      contractCount: 18,
+      achievementRate: 88.3, // 正規値 88.5 と異なる
+      generatedAt: "2024-01-31T12:15:00Z",
+    };
 
-    // 分岐点（2024-01-01 00:00:00）のデータは新ルール適用
-    const atBoundaryResult = result.processedRecords.find(
-      (r) => r.transactionDataId === 'data_002'
-    );
-    expect(atBoundaryResult).toBeDefined();
-    expect(atBoundaryResult?.retrospectiveApplicationStatus).toBe('applied');
-    expect(atBoundaryResult?.appliedBillingRate).toBe(0.20);
-    expect(atBoundaryResult?.appliedDiscountRate).toBe(0.10);
-    const atBoundaryNewAmount =
-      100000 * 0.20 - 100000 * 0.20 * 0.10;
-    expect(atBoundaryResult?.recalculatedBillingAmount).toBe(
-      atBoundaryNewAmount
-    );
+    const sourceData = {
+      customerId: "CUST-D001",
+      period: "2024-01",
+      salesAmount: 2100000,
+      contractCount: 18,
+      achievementRate: 88.5,
+    };
 
-    // 分岐点直後（2024-01-01 00:00:01）のデータは新ルール適用
-    const afterBoundaryResult = result.processedRecords.find(
-      (r) => r.transactionDataId === 'data_003'
+    expect(() => validateReportAccuracy(tamperedReport, sourceData)).toThrow(
+      /達成率/
     );
-    expect(afterBoundaryResult).toBeDefined();
-    expect(afterBoundaryResult?.retrospectiveApplicationStatus).toBe('applied');
-    expect(afterBoundaryResult?.appliedBillingRate).toBe(0.20);
-    expect(afterBoundaryResult?.appliedDiscountRate).toBe(0.10);
-    const afterBoundaryNewAmount =
-      100000 * 0.20 - 100000 * 0.20 * 0.10;
-    expect(afterBoundaryResult?.recalculatedBillingAmount).toBe(
-      afterBoundaryNewAmount
-    );
+  });
 
-    // 遡及適用期間内（2024-01-15）のデータは新ルール適用
-    const withinApplicationPeriodResult = result.processedRecords.find(
-      (r) => r.transactionDataId === 'data_004'
-    );
-    expect(withinApplicationPeriodResult).toBeDefined();
-    expect(withinApplicationPeriodResult?.retrospectiveApplicationStatus).toBe(
-      'applied'
-    );
-    expect(withinApplicationPeriodResult?.appliedBillingRate).toBe(0.20);
-    expect(withinApplicationPeriodResult?.appliedDiscountRate).toBe(0.10);
-    const withinApplicationNewAmount =
-      50000 * 0.20 - 50000 * 0.20 * 0.10;
-    expect(withinApplicationPeriodResult?.recalculatedBillingAmount).toBe(
-      withinApplicationNewAmount
-    );
+  test("SCEN-1013: 不一致時に詳細情報を含むエラーメッセージを返す", () => {
+    const tamperedReport = {
+      reportId: "RPT-202401-005",
+      customerId: "CUST-E001",
+      period: "2024-01",
+      salesAmount: 950000, // 不一致
+      contractCount: 11,
+      achievementRate: 80.0,
+      generatedAt: "2024-01-31T13:45:00Z",
+    };
 
-    // 処理結果の要約
-    expect(result.totalProcessedRecordCount).toBe(4);
-    expect(result.appliedRecordCount).toBe(3);
-    expect(result.notAppliedRecordCount).toBe(1);
-    expect(result.changeStartDatetime).toEqual(retrospectiveChangeStartDatetime);
+    const sourceData = {
+      customerId: "CUST-E001",
+      period: "2024-01",
+      salesAmount: 1100000,
+      contractCount: 11,
+      achievementRate: 80.0,
+    };
+
+    expect(() => validateReportAccuracy(tamperedReport, sourceData)).toThrow(
+      /売上金額|期待値|1100000|950000/
+    );
+  });
+
+  test("SCEN-1013: 境界値テスト - 売上金額がゼロの場合", () => {
+    const tamperedReport = {
+      reportId: "RPT-202401-006",
+      customerId: "CUST-F001",
+      period: "2024-01",
+      salesAmount: 0,
+      contractCount: 0,
+      achievementRate: 0.0,
+      generatedAt: "2024-01-31T14:00:00Z",
+    };
+
+    const sourceData = {
+      customerId: "CUST-F001",
+      period: "2024-01",
+      salesAmount: 500000,
+      contractCount: 5,
+      achievementRate: 50.0,
+    };
+
+    expect(() => validateReportAccuracy(tamperedReport, sourceData)).toThrow(
+      /売上金額/
+    );
+  });
+
+  test("SCEN-1013: 境界値テスト - 達成率が100%を超える場合", () => {
+    const tamperedReport = {
+      reportId: "RPT-202401-007",
+      customerId: "CUST-G001",
+      period: "2024-01",
+      salesAmount: 2500000,
+      contractCount: 20,
+      achievementRate: 110.5, // 100%を超える異常値
+      generatedAt: "2024-01-31T15:30:00Z",
+    };
+
+    const sourceData = {
+      customerId: "CUST-G001",
+      period: "2024-01",
+      salesAmount: 2500000,
+      contractCount: 20,
+      achievementRate: 95.0,
+    };
+
+    expect(() => validateReportAccuracy(tamperedReport, sourceData)).toThrow(
+      /達成率/
+    );
   });
 });

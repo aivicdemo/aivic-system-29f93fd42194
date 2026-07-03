@@ -1,137 +1,174 @@
 import { describe, test, expect } from "@jest/globals";
-import { validateSalesDataWithRuleDefinition } from "../../src/logic/it-1-1-1";
+import { validateHearingResultContradictions } from "../../src/logic/it-1-1-1";
 
 describe("営業成果データの自動検証ルール定義と異常検出機能", () => {
-  test("SCEN-1322: ボーダーラインの金額（閾値と同一）がルール判定される", () => {
-    // Setup: 検証ルール定義
-    const ruleDefinition = {
-      ruleId: "rule_amount_threshold_001",
-      ruleName: "金額閾値異常検出ルール",
-      targetField: "amount",
-      conditionType: "greaterThanOrEqual",
-      thresholdValue: 10000,
-      anomalyFlagName: "amount_anomaly_flag",
-      description: "金額が閾値以上の場合、異常フラグを立てる",
+  // SCEN-1322
+  test("ヒアリング結果が矛盾する計算ルール定義を含む場合、警告が生成される", () => {
+    // 正常系: 矛盾がない場合
+    const validHearingResult = {
+      hearing_id: "HEARING-001",
+      customer_id: "CUST-A",
+      discount_rate: 10,
+      tax_rate: 8,
+      tax_calculation_order: "after_discount",
+      min_billing_amount: 10000,
+      max_billing_amount: 1000000,
+      commission_rate: 5,
     };
 
-    // Test data: 金額がボーダーライン値（10,000円）と完全に一致
-    const salesDataAtBoundary = {
-      dataId: "sales_001",
-      customerId: "cust_001",
-      amount: 10000,
-      date: "2024-01-15",
-      description: "営業成果データ（ボーダーライン値）",
+    const validResult = validateHearingResultContradictions(validHearingResult);
+    expect(validResult.has_contradiction).toBe(false);
+    expect(validResult.warnings).toEqual([]);
+    expect(validResult.contradiction_count).toBe(0);
+
+    // 異常系1: 割引率が100%を超える場合
+    const contradictionDiscount = {
+      hearing_id: "HEARING-002",
+      customer_id: "CUST-B",
+      discount_rate: 150,
+      tax_rate: 8,
+      tax_calculation_order: "after_discount",
+      min_billing_amount: 10000,
+      max_billing_amount: 1000000,
+      commission_rate: 5,
     };
 
-    // Test data: 金額が閾値を下回る
-    const salesDataBelowThreshold = {
-      dataId: "sales_002",
-      customerId: "cust_001",
-      amount: 9999,
-      date: "2024-01-15",
-      description: "営業成果データ（閾値以下）",
+    const discountResult = validateHearingResultContradictions(
+      contradictionDiscount
+    );
+    expect(discountResult.has_contradiction).toBe(true);
+    expect(discountResult.contradiction_count).toBe(1);
+    expect(discountResult.warnings.length).toBeGreaterThan(0);
+    expect(discountResult.warnings[0]).toMatch(/割引率/);
+    expect(discountResult.warnings[0]).toMatch(/100/);
+
+    // 異常系2: 最小請求額が最大請求額を超えている場合
+    const contradictionBillingAmount = {
+      hearing_id: "HEARING-003",
+      customer_id: "CUST-C",
+      discount_rate: 10,
+      tax_rate: 8,
+      tax_calculation_order: "after_discount",
+      min_billing_amount: 2000000,
+      max_billing_amount: 1000000,
+      commission_rate: 5,
     };
 
-    // Test data: 金額が閾値を上回る
-    const salesDataAboveThreshold = {
-      dataId: "sales_003",
-      customerId: "cust_001",
-      amount: 10001,
-      date: "2024-01-15",
-      description: "営業成果データ（閾値以上）",
+    const billingResult = validateHearingResultContradictions(
+      contradictionBillingAmount
+    );
+    expect(billingResult.has_contradiction).toBe(true);
+    expect(billingResult.contradiction_count).toBe(1);
+    expect(billingResult.warnings.length).toBeGreaterThan(0);
+    expect(billingResult.warnings[0]).toMatch(/最小請求額|最大請求額/);
+
+    // 異常系3: 税計算順序が不正な場合
+    const contradictionTaxOrder = {
+      hearing_id: "HEARING-004",
+      customer_id: "CUST-D",
+      discount_rate: 10,
+      tax_rate: 8,
+      tax_calculation_order: "invalid_order",
+      min_billing_amount: 10000,
+      max_billing_amount: 1000000,
+      commission_rate: 5,
     };
 
-    // Execute: 自動検証プロセスを実行
-    const resultAtBoundary = validateSalesDataWithRuleDefinition(
-      ruleDefinition,
-      salesDataAtBoundary
+    const taxOrderResult = validateHearingResultContradictions(
+      contradictionTaxOrder
     );
+    expect(taxOrderResult.has_contradiction).toBe(true);
+    expect(taxOrderResult.contradiction_count).toBeGreaterThan(0);
+    expect(taxOrderResult.warnings.length).toBeGreaterThan(0);
+    expect(taxOrderResult.warnings[0]).toMatch(/税計算順序|計算順序/);
 
-    const resultBelowThreshold = validateSalesDataWithRuleDefinition(
-      ruleDefinition,
-      salesDataBelowThreshold
+    // 異常系4: 複数の矛盾が同時に存在する場合
+    const multipleContradictions = {
+      hearing_id: "HEARING-005",
+      customer_id: "CUST-E",
+      discount_rate: 120,
+      tax_rate: 8,
+      tax_calculation_order: "before_discount",
+      min_billing_amount: 5000000,
+      max_billing_amount: 1000000,
+      commission_rate: 5,
+    };
+
+    const multiResult = validateHearingResultContradictions(
+      multipleContradictions
     );
+    expect(multiResult.has_contradiction).toBe(true);
+    expect(multiResult.contradiction_count).toBeGreaterThanOrEqual(2);
+    expect(multiResult.warnings.length).toBeGreaterThanOrEqual(2);
 
-    const resultAboveThreshold = validateSalesDataWithRuleDefinition(
-      ruleDefinition,
-      salesDataAboveThreshold
+    // 異常系5: 手数料率が負数の場合
+    const negativeCommission = {
+      hearing_id: "HEARING-006",
+      customer_id: "CUST-F",
+      discount_rate: 10,
+      tax_rate: 8,
+      tax_calculation_order: "after_discount",
+      min_billing_amount: 10000,
+      max_billing_amount: 1000000,
+      commission_rate: -5,
+    };
+
+    const negativeResult = validateHearingResultContradictions(
+      negativeCommission
     );
+    expect(negativeResult.has_contradiction).toBe(true);
+    expect(negativeResult.contradiction_count).toBe(1);
+    expect(negativeResult.warnings[0]).toMatch(/手数料率|commission/);
 
-    // Verify: ボーダーライン値（10,000円）で異常フラグが立てられること
-    expect(resultAtBoundary).toEqual({
-      dataId: "sales_001",
-      isValid: false,
-      anomalyDetected: true,
-      anomalyFlagName: "amount_anomaly_flag",
-      ruleId: "rule_amount_threshold_001",
-      violatedCondition: "greaterThanOrEqual",
-      detectedValue: 10000,
-      thresholdValue: 10000,
-      validationLog: {
-        timestamp: expect.any(String),
-        ruleName: "金額閾値異常検出ルール",
-        targetField: "amount",
-        actualValue: 10000,
-        condition: "金額が閾値以上の場合、異常フラグを立てる",
-        judgmentResult: "異常フラグ立て",
-        reason: "金額がボーダーライン値と完全に一致し、条件を満たす",
-      },
-    });
+    // 異常系6: 税率が0未満の場合
+    const negativeTax = {
+      hearing_id: "HEARING-007",
+      customer_id: "CUST-G",
+      discount_rate: 10,
+      tax_rate: -5,
+      tax_calculation_order: "after_discount",
+      min_billing_amount: 10000,
+      max_billing_amount: 1000000,
+      commission_rate: 5,
+    };
 
-    // Verify: 閾値以下（9,999円）では異常フラグが立たないこと
-    expect(resultBelowThreshold).toEqual({
-      dataId: "sales_002",
-      isValid: true,
-      anomalyDetected: false,
-      anomalyFlagName: "amount_anomaly_flag",
-      ruleId: "rule_amount_threshold_001",
-      violatedCondition: null,
-      detectedValue: 9999,
-      thresholdValue: 10000,
-      validationLog: {
-        timestamp: expect.any(String),
-        ruleName: "金額閾値異常検出ルール",
-        targetField: "amount",
-        actualValue: 9999,
-        condition: "金額が閾値以上の場合、異常フラグを立てる",
-        judgmentResult: "正常",
-        reason: "金額が閾値を下回っているため条件を満たさない",
-      },
-    });
+    const negTaxResult = validateHearingResultContradictions(negativeTax);
+    expect(negTaxResult.has_contradiction).toBe(true);
+    expect(negTaxResult.contradiction_count).toBe(1);
+    expect(negTaxResult.warnings[0]).toMatch(/税率|tax_rate/);
 
-    // Verify: 閾値以上（10,001円）でも異常フラグが立てられること
-    expect(resultAboveThreshold).toEqual({
-      dataId: "sales_003",
-      isValid: false,
-      anomalyDetected: true,
-      anomalyFlagName: "amount_anomaly_flag",
-      ruleId: "rule_amount_threshold_001",
-      violatedCondition: "greaterThanOrEqual",
-      detectedValue: 10001,
-      thresholdValue: 10000,
-      validationLog: {
-        timestamp: expect.any(String),
-        ruleName: "金額閾値異常検出ルール",
-        targetField: "amount",
-        actualValue: 10001,
-        condition: "金額が閾値以上の場合、異常フラグを立てる",
-        judgmentResult: "異常フラグ立て",
-        reason: "金額が閾値を上回っており、条件を満たす",
-      },
-    });
+    // エッジケース: 全てが境界値の正常な場合
+    const boundaryValid = {
+      hearing_id: "HEARING-008",
+      customer_id: "CUST-H",
+      discount_rate: 0,
+      tax_rate: 0,
+      tax_calculation_order: "after_discount",
+      min_billing_amount: 1,
+      max_billing_amount: 999999999,
+      commission_rate: 0,
+    };
 
-    // Verify: 検証ログに判定結果が正しく記録されていること
-    expect(resultAtBoundary.validationLog.judgmentResult).toBe("異常フラグ立て");
-    expect(resultBelowThreshold.validationLog.judgmentResult).toBe("正常");
-    expect(resultAboveThreshold.validationLog.judgmentResult).toBe(
-      "異常フラグ立て"
+    const boundaryResult = validateHearingResultContradictions(boundaryValid);
+    expect(boundaryResult.has_contradiction).toBe(false);
+    expect(boundaryResult.contradiction_count).toBe(0);
+
+    // エッジケース: 割引率が100%の境界値
+    const boundaryDiscount100 = {
+      hearing_id: "HEARING-009",
+      customer_id: "CUST-I",
+      discount_rate: 100,
+      tax_rate: 8,
+      tax_calculation_order: "after_discount",
+      min_billing_amount: 10000,
+      max_billing_amount: 1000000,
+      commission_rate: 5,
+    };
+
+    const boundary100Result = validateHearingResultContradictions(
+      boundaryDiscount100
     );
-
-    // Verify: ボーダーラインでの境界値判定が正確であること
-    expect(resultAtBoundary.detectedValue).toBe(
-      resultAtBoundary.thresholdValue
-    );
-    expect(resultAtBoundary.anomalyDetected).toBe(true);
-    expect(resultAtBoundary.isValid).toBe(false);
+    expect(boundary100Result.has_contradiction).toBe(false);
+    expect(boundary100Result.contradiction_count).toBe(0);
   });
 });

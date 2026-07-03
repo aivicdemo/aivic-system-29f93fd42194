@@ -1,142 +1,89 @@
-import { describe, test, expect, beforeEach } from '@jest/globals';
-import { generateQualityChecklistFromMetadata } from '../../src/logic/it-1781935279444-2-1-1';
+import { describe, test, expect } from "@jest/globals";
+import { validateLogicCompatibility } from "../../src/logic/it-1781935279444-1-1-1";
 
-describe('品質管理ルール・チェックリスト作成機能 - メタデータ必須項目検証', () => {
-  beforeEach(() => {
-    jest.clearAllMocks();
-  });
-
-  // SCEN-1358: メタデータに必須項目が不足している場合、チェックリスト生成がエラーとなり詳細なエラーメッセージが返される
-  test('should reject checklist generation when required metadata fields are missing and return detailed error message', () => {
-    const incompleteMetadata = {
-      dataSourceName: '',
-      checkItems: [],
-      mandatoryFields: ['顧客名', '接触日時'],
-      dataType: 'sales_activity',
-      validationRules: [
-        {
-          fieldName: '顧客名',
-          ruleType: 'required',
-          expectedFormat: 'string',
-        },
-      ],
+describe("営業データ項目のメタデータ管理機能 - 営業システムとの連携互Compatibility検証", () => {
+  // SCEN-1358: [error] 営業システムとの連携互Compatibility検証機能
+  test("営業システムの計算ロジックがCRMベンダー仕様と矛盾する場合、連携不可と判定される", () => {
+    // 営業システムの計算ロジック定義（矛盾するケース）
+    const salesSystemLogic = {
+      itemId: "item-001",
+      itemName: "成約数",
+      unit: "件",
+      dataType: "integer",
+      calculationLogic: {
+        formula: "tax_rate = 0.10; discount_order = ['tax_first', 'discount_after']; amount = (base_price * (1 - discount_rate)) * (1 + tax_rate);",
+        taxRate: 0.10,
+        discountApplicationOrder: ["tax_first", "discount_after"],
+        minInvoiceAmount: 1000,
+      },
     };
 
-    expect(() =>
-      generateQualityChecklistFromMetadata(incompleteMetadata)
-    ).toThrow(/データソース名/);
-  });
-
-  test('should reject checklist generation when check items are empty and return error message', () => {
-    const incompleteMetadata = {
-      dataSourceName: 'sales_pipeline',
-      checkItems: [],
-      mandatoryFields: ['顧客名', '接触日時'],
-      dataType: 'sales_activity',
-      validationRules: [
-        {
-          fieldName: '顧客名',
-          ruleType: 'required',
-          expectedFormat: 'string',
-        },
-      ],
+    // CRMベンダーの標準計算ロジック（互いに矛盾）
+    const crmVendorLogic = {
+      itemId: "item-001",
+      itemName: "成約数",
+      unit: "件",
+      dataType: "integer",
+      calculationLogic: {
+        formula: "tax_rate = 0.08; discount_order = ['discount_first', 'tax_after']; amount = (base_price * (1 - discount_rate)) * (1 + tax_rate);",
+        taxRate: 0.08,
+        discountApplicationOrder: ["discount_first", "tax_after"],
+        minInvoiceAmount: 500,
+      },
     };
 
-    expect(() =>
-      generateQualityChecklistFromMetadata(incompleteMetadata)
-    ).toThrow(/チェック項目/);
-  });
+    // 検証実行
+    const result = validateLogicCompatibility({
+      salesSystemLogic: salesSystemLogic,
+      crmVendorLogic: crmVendorLogic,
+    });
 
-  test('should reject checklist generation when mandatory fields are empty', () => {
-    const incompleteMetadata = {
-      dataSourceName: 'sales_pipeline',
-      checkItems: [
-        {
-          itemId: 'check_001',
-          itemName: '必須項目チェック',
-          description: '顧客名が入力されているか確認',
-        },
-      ],
-      mandatoryFields: [],
-      dataType: 'sales_activity',
-      validationRules: [
-        {
-          fieldName: '顧客名',
-          ruleType: 'required',
-          expectedFormat: 'string',
-        },
-      ],
-    };
+    // 期待結果: 連携互Compatibility検証が矛盾を検出
+    expect(result.isCompatible).toBe(false);
+    expect(result.compatibilityStatus).toBe("連携不可");
 
-    expect(() =>
-      generateQualityChecklistFromMetadata(incompleteMetadata)
-    ).toThrow(/必須項目/);
-  });
+    // エラーメッセージが矛盾内容を含む
+    expect(result.errorMessage).toMatch(/計算ロジック/);
+    expect(result.errorMessage).toMatch(/矛盾/);
 
-  test('should reject checklist generation when validation rules are missing', () => {
-    const incompleteMetadata = {
-      dataSourceName: 'sales_pipeline',
-      checkItems: [
-        {
-          itemId: 'check_001',
-          itemName: '必須項目チェック',
-          description: '顧客名が入力されているか確認',
-        },
-      ],
-      mandatoryFields: ['顧客名', '接触日時'],
-      dataType: 'sales_activity',
-      validationRules: [],
-    };
+    // 矛盾箇所の詳細が記録される
+    expect(result.incompatibilities).toHaveLength(3);
+    expect(result.incompatibilities).toContainEqual(
+      expect.objectContaining({
+        field: "taxRate",
+        salesSystemValue: 0.10,
+        crmVendorValue: 0.08,
+        conflictType: "value_mismatch",
+      })
+    );
+    expect(result.incompatibilities).toContainEqual(
+      expect.objectContaining({
+        field: "discountApplicationOrder",
+        salesSystemValue: ["tax_first", "discount_after"],
+        crmVendorValue: ["discount_first", "tax_after"],
+        conflictType: "sequence_mismatch",
+      })
+    );
+    expect(result.incompatibilities).toContainEqual(
+      expect.objectContaining({
+        field: "minInvoiceAmount",
+        salesSystemValue: 1000,
+        crmVendorValue: 500,
+        conflictType: "value_mismatch",
+      })
+    );
 
-    expect(() =>
-      generateQualityChecklistFromMetadata(incompleteMetadata)
-    ).toThrow(/検証ルール/);
-  });
+    // 連携ブロック理由ログに詳細が記録される
+    expect(result.blockReasonLog).toBeDefined();
+    expect(result.blockReasonLog).toMatch(/税率/);
+    expect(result.blockReasonLog).toMatch(/割引適用順序/);
+    expect(result.blockReasonLog).toMatch(/最小請求額/);
 
-  test('should successfully generate checklist when all required metadata fields are provided', () => {
-    const completeMetadata = {
-      dataSourceName: 'sales_pipeline',
-      checkItems: [
-        {
-          itemId: 'check_001',
-          itemName: '必須項目チェック',
-          description: '顧客名が入力されているか確認',
-        },
-        {
-          itemId: 'check_002',
-          itemName: 'データ型チェック',
-          description: '接触日時が日付形式か確認',
-        },
-      ],
-      mandatoryFields: ['顧客名', '接触日時'],
-      dataType: 'sales_activity',
-      validationRules: [
-        {
-          fieldName: '顧客名',
-          ruleType: 'required',
-          expectedFormat: 'string',
-          errorMessage: '顧客名は必須項目です',
-        },
-        {
-          fieldName: '接触日時',
-          ruleType: 'dateFormat',
-          expectedFormat: 'YYYY-MM-DD HH:mm:ss',
-          errorMessage: '接触日時は日付形式で入力してください',
-        },
-      ],
-      createdBy: 'operator_001',
-      createdAt: '2024-01-15T09:00:00Z',
-    };
+    // 検証タイムスタンプが記録される
+    expect(result.validatedAt).toBeDefined();
+    expect(new Date(result.validatedAt).getTime()).toBeGreaterThan(0);
 
-    const result = generateQualityChecklistFromMetadata(completeMetadata);
-
-    expect(result).toBeDefined();
-    expect(result.checklistId).toBeDefined();
-    expect(result.dataSourceName).toBe('sales_pipeline');
-    expect(result.checkItems.length).toBe(2);
-    expect(result.mandatoryFields).toEqual(['顧客名', '接触日時']);
-    expect(result.validationRulesCount).toBe(2);
-    expect(result.status).toBe('generated');
-    expect(result.generatedAt).toBeDefined();
+    // 連携可否フラグが正確に設定される
+    expect(result.canProceedWithIntegration).toBe(false);
   });
 });

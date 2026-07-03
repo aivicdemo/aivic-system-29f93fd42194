@@ -1,118 +1,93 @@
-import { extractAndAggregateInvoiceItems } from "../../src/logic/it-1781935279444-2-2-1";
+import { validateMonthlySummaryReport } from "../../src/logic/it-1-br-1781935279444-1-2-1";
 
-describe("営業データから請求対象項目の自動抽出・集計", () => {
-  // SCEN-1009: [edge] 請求対象項目の数量が0またはマイナス値の場合、集計対象外または警告として処理される
-  test("数量が0またはマイナス値のレコードは除外され、警告が出力される", () => {
-    const salesData = [
-      {
-        id: "rec_001",
-        customerId: "cust_A",
-        serviceType: "service_X",
-        quantity: 5,
-        unitPrice: 1000,
-        recordDate: "2024-01-15",
-      },
-      {
-        id: "rec_002",
-        customerId: "cust_A",
-        serviceType: "service_X",
-        quantity: 0,
-        unitPrice: 1000,
-        recordDate: "2024-01-16",
-      },
-      {
-        id: "rec_003",
-        customerId: "cust_A",
-        serviceType: "service_X",
-        quantity: 3,
-        unitPrice: 1000,
-        recordDate: "2024-01-17",
-      },
-      {
-        id: "rec_004",
-        customerId: "cust_A",
-        serviceType: "service_X",
-        quantity: -1,
-        unitPrice: 1000,
-        recordDate: "2024-01-18",
-      },
-      {
-        id: "rec_005",
-        customerId: "cust_A",
-        serviceType: "service_X",
-        quantity: 2,
-        unitPrice: 1000,
-        recordDate: "2024-01-19",
-      },
-      {
-        id: "rec_006",
-        customerId: "cust_A",
-        serviceType: "service_X",
-        quantity: -100,
-        unitPrice: 1000,
-        recordDate: "2024-01-20",
-      },
+describe("月次サマリーテンプレートの定義・管理機能", () => {
+  test("SCEN-1009: 月次サマリーレポート正確性・完全性確認 - 生成されたレポートに必須項目が欠落している場合に修正指示が正確に実行される", () => {
+    // テストデータ: 必須項目が欠落した月次サマリーレポート
+    const incompleteReport = {
+      reportId: "MSR-20240131-001",
+      month: "2024-01",
+      totalRevenue: 1500000,
+      // 欠落: totalCount
+      totalCustomers: 45,
+      // 欠落: regionalBreakdown
+      generatedAt: "2024-01-31T15:30:00Z",
+      generatedBy: "operator_001",
+    };
+
+    const requiredFields = [
+      "totalRevenue",
+      "totalCount",
+      "totalCustomers",
+      "regionalBreakdown",
     ];
 
-    const result = extractAndAggregateInvoiceItems(salesData);
-
-    // 正常な数量値のレコードのみが集計対象として含まれること
-    expect(result.includedRecords.length).toBe(3);
-    expect(result.includedRecords.map((r: any) => r.id)).toEqual([
-      "rec_001",
-      "rec_003",
-      "rec_005",
-    ]);
-
-    // 数量0またはマイナス値のレコードが除外されていることを確認
-    expect(result.excludedRecords.length).toBe(3);
-    expect(result.excludedRecords.map((r: any) => r.id)).toEqual([
-      "rec_002",
-      "rec_004",
-      "rec_006",
-    ]);
-
-    // 集計結果の合計値が正しく計算されること
-    // 正常レコード: quantity 5 + 3 + 2 = 10 → 10 * 1000 = 10000
-    expect(result.aggregatedAmount).toBe(10000);
-
-    // 警告メッセージが出力されていることを確認
-    expect(result.warnings.length).toBe(3);
-    expect(result.warnings).toContainEqual(
-      expect.objectContaining({
-        recordId: "rec_002",
-        message: expect.stringMatching(/数量/),
-      })
-    );
-    expect(result.warnings).toContainEqual(
-      expect.objectContaining({
-        recordId: "rec_004",
-        message: expect.stringMatching(/数量/),
-      })
-    );
-    expect(result.warnings).toContainEqual(
-      expect.objectContaining({
-        recordId: "rec_006",
-        message: expect.stringMatching(/数量/),
-      })
+    // 欠落項目を検出
+    const validationResult = validateMonthlySummaryReport(
+      incompleteReport,
+      requiredFields
     );
 
-    // 顧客別の集計結果が正確であることを確認
-    expect(result.aggregationByCustomer).toEqual({
-      cust_A: {
-        totalQuantity: 10,
-        totalAmount: 10000,
-        recordCount: 3,
+    // 欠落項目が正確に検出されることを確認
+    expect(validationResult.isValid).toBe(false);
+    expect(validationResult.missingFields).toEqual(["totalCount", "regionalBreakdown"]);
+    expect(validationResult.missingFields.length).toBe(2);
+
+    // 修正指示メッセージが生成されることを確認
+    expect(validationResult.correctionInstructions).toBeDefined();
+    expect(validationResult.correctionInstructions.length).toBeGreaterThan(0);
+
+    // 修正指示が具体的であることを確認
+    const correctionMessages = validationResult.correctionInstructions;
+    expect(correctionMessages).toContain(expect.stringContaining("totalCount"));
+    expect(correctionMessages).toContain(expect.stringContaining("regionalBreakdown"));
+
+    // 修正指示に基づいてデータを補完したレポート
+    const completedReport = {
+      reportId: "MSR-20240131-001",
+      month: "2024-01",
+      totalRevenue: 1500000,
+      totalCount: 87,
+      totalCustomers: 45,
+      regionalBreakdown: {
+        tokyo: 450000,
+        osaka: 380000,
+        aichi: 320000,
+        other: 350000,
       },
+      generatedAt: "2024-01-31T15:30:00Z",
+      generatedBy: "operator_001",
+    };
+
+    // 補完後のレポートを再検証
+    const revalidationResult = validateMonthlySummaryReport(
+      completedReport,
+      requiredFields
+    );
+
+    // すべての必須項目が完全に含まれていることを確認
+    expect(revalidationResult.isValid).toBe(true);
+    expect(revalidationResult.missingFields).toEqual([]);
+    expect(revalidationResult.missingFields.length).toBe(0);
+
+    // 修正前後の比較: 修正が正確に実行されたことを検証
+    expect(completedReport.totalCount).toBe(87);
+    expect(completedReport.regionalBreakdown).toEqual({
+      tokyo: 450000,
+      osaka: 380000,
+      aichi: 320000,
+      other: 350000,
     });
 
-    // サービス別の集計結果が正確であることを確認
-    expect(result.aggregationByService).toEqual({
-      service_X: {
-        totalQuantity: 10,
-        totalAmount: 10000,
-        recordCount: 3,
-      },
-    });
+    // 修正後レポートの売上合計が地域別集計と整合していることを確認
+    const regionalSum =
+      completedReport.regionalBreakdown.tokyo +
+      completedReport.regionalBreakdown.osaka +
+      completedReport.regionalBreakdown.aichi +
+      completedReport.regionalBreakdown.other;
+    expect(regionalSum).toBe(1500000);
+    expect(regionalSum).toBe(completedReport.totalRevenue);
+
+    // 修正指示に基づいた補完が完全に実行されたことを確認
+    expect(revalidationResult.correctionInstructions).toEqual([]);
   });
 });

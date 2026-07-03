@@ -1,167 +1,165 @@
-import { validateSalesData } from '../../src/logic/it-1781935279444-2-2-1';
+import { describe, test, expect, beforeEach, afterEach } from '@jest/globals';
+import { validatePortalReportVisibility } from '../../src/logic/it-1-1-1';
 
-describe('営業データ品質自動検証機能', () => {
-  // SCEN-674: すべてのデータが検証ルール違反の場合、全件がエラーリストに含まれる
-  test('すべてのレコードが検証ルール違反となる場合、全件がエラーリストに含まれ、各レコードの違反詳細が正確に記録されること', () => {
-    // 検証ルール定義
-    const validationRules = [
-      {
-        ruleId: 'RULE_001',
-        ruleName: '顧客名必須',
-        fieldName: 'customerName',
-        condition: 'required',
-        errorMessage: '顧客名は必須項目です',
-      },
-      {
-        ruleId: 'RULE_002',
-        ruleName: 'アポ数データ型',
-        fieldName: 'appointmentCount',
-        condition: 'dataType:number',
-        errorMessage: 'アポ数は数値である必要があります',
-      },
-      {
-        ruleId: 'RULE_003',
-        ruleName: 'アポ数範囲',
-        fieldName: 'appointmentCount',
-        condition: 'range:0-1000',
-        errorMessage: 'アポ数は0～1000の範囲である必要があります',
-      },
-      {
-        ruleId: 'RULE_004',
-        ruleName: '成約数データ型',
-        fieldName: 'contractCount',
-        condition: 'dataType:number',
-        errorMessage: '成約数は数値である必要があります',
-      },
-      {
-        ruleId: 'RULE_005',
-        ruleName: '接触日時形式',
-        fieldName: 'contactDate',
-        condition: 'format:ISO8601',
-        errorMessage: '接触日時はISO8601形式である必要があります',
-      },
-    ];
+describe('営業成果データの自動検証ルール定義と異常検出機能', () => {
+  // SCEN-674: [edge] 顧客別ポータル表示制御機能 - 契約IDが未割り当ての営業責任者にはレポートが表示されない
+  test('SCEN-674: 契約IDが未割り当ての営業責任者にはレポートが表示されない', () => {
+    // 前提: 営業責任者がポータルにログインしており、契約IDが未割り当ての状態
+    const unassignedExecutiveUserId = 'user_12345';
+    const contractIds = null; // 契約IDが未割り当て
+    const portalAccessTimestamp = new Date('2024-01-15T10:00:00Z');
+    const cacheKey = `portal_report_${unassignedExecutiveUserId}`;
+    const isSharedBrowserSession = false;
+    const usePrivateMode = false;
 
-    // すべてのレコードが検証ルール違反となるテストデータセット
-    const testDataSet = [
-      {
-        recordId: 'REC_001',
-        customerName: '', // 必須項目欠落
-        appointmentCount: 'invalid', // データ型不正
-        contractCount: 'abc', // データ型不正
-        contactDate: '2024/01/15', // 形式不正
-      },
-      {
-        recordId: 'REC_002',
-        customerName: null, // 必須項目欠落
-        appointmentCount: 2000, // 範囲外（0-1000を超過）
-        contractCount: 'xyz', // データ型不正
-        contactDate: '15-01-2024', // 形式不正
-      },
-      {
-        recordId: 'REC_003',
-        customerName: '', // 必須項目欠落
-        appointmentCount: -100, // 範囲外（0未満）
-        contractCount: null, // データ型不正
-        contactDate: 'invalid-date', // 形式不正
-      },
-    ];
-
-    // 検証処理を実行
-    const validationResult = validateSalesData(testDataSet, validationRules);
-
-    // エラーリストが存在することを確認
-    expect(validationResult).toBeDefined();
-    expect(validationResult.errorList).toBeDefined();
-    expect(Array.isArray(validationResult.errorList)).toBe(true);
-
-    // エラーリストのレコード件数を確認
-    // 3レコード × 複数違反ルール = 最小限全レコード以上が含まれる
-    expect(validationResult.errorList.length).toBeGreaterThanOrEqual(
-      testDataSet.length
-    );
-
-    // テストデータセット内のすべてのレコードがエラーリストに含まれていることを確認
-    const errorRecordIds = validationResult.errorList.map(
-      (err: any) => err.recordId
-    );
-    testDataSet.forEach((record: any) => {
-      expect(errorRecordIds).toContain(record.recordId);
+    // 契約IDが未割り当てのユーザーがポータルにアクセスした場合、レポートが表示されない
+    const result = validatePortalReportVisibility({
+      executiveUserId: unassignedExecutiveUserId,
+      assignedContractIds: contractIds,
+      accessTimestamp: portalAccessTimestamp,
+      useCache: true,
+      cacheKey: cacheKey,
+      isSharedBrowser: isSharedBrowserSession,
+      usePrivateMode: usePrivateMode,
     });
 
-    // 各レコードに対する違反ルール情報を検証
-    const rec001Errors = validationResult.errorList.filter(
-      (err: any) => err.recordId === 'REC_001'
-    );
-    expect(rec001Errors.length).toBeGreaterThanOrEqual(3); // customerName, appointmentCount, contactDate 違反
-    expect(
-      rec001Errors.some(
-        (err: any) =>
-          err.fieldName === 'customerName' && err.ruleId === 'RULE_001'
-      )
-    ).toBe(true);
-    expect(
-      rec001Errors.some(
-        (err: any) =>
-          err.fieldName === 'appointmentCount' && err.ruleId === 'RULE_002'
-      )
-    ).toBe(true);
-    expect(
-      rec001Errors.some(
-        (err: any) =>
-          err.fieldName === 'contactDate' && err.ruleId === 'RULE_005'
-      )
-    ).toBe(true);
+    // 期待結果: レポート表示が不許可
+    expect(result.isReportVisible).toBe(false);
+    expect(result.reportDisplayStatus).toBe('hidden');
+    expect(result.contractsAvailableForDisplay).toEqual([]);
+    expect(result.displayMode).toBe('empty');
+    expect(result.consoleErrorOccurred).toBe(false);
+    expect(result.pageLoadSuccessful).toBe(true);
 
-    const rec002Errors = validationResult.errorList.filter(
-      (err: any) => err.recordId === 'REC_002'
-    );
-    expect(rec002Errors.length).toBeGreaterThanOrEqual(4); // customerName, appointmentCount(range), contractCount, contactDate 違反
-    expect(
-      rec002Errors.some(
-        (err: any) =>
-          err.fieldName === 'appointmentCount' && err.ruleId === 'RULE_003'
-      )
-    ).toBe(true);
-    expect(
-      rec002Errors.some(
-        (err: any) =>
-          err.fieldName === 'contractCount' && err.ruleId === 'RULE_004'
-      )
-    ).toBe(true);
-
-    const rec003Errors = validationResult.errorList.filter(
-      (err: any) => err.recordId === 'REC_003'
-    );
-    expect(rec003Errors.length).toBeGreaterThanOrEqual(4); // customerName, appointmentCount(range), contractCount, contactDate 違反
-    expect(
-      rec003Errors.some(
-        (err: any) =>
-          err.fieldName === 'customerName' && err.ruleId === 'RULE_001'
-      )
-    ).toBe(true);
-    expect(
-      rec003Errors.some(
-        (err: any) =>
-          err.fieldName === 'appointmentCount' && err.ruleId === 'RULE_003'
-      )
-    ).toBe(true);
-
-    // 各エラーレコードに違反ルール情報が記録されていることを確認
-    validationResult.errorList.forEach((errorRecord: any) => {
-      expect(errorRecord.recordId).toBeDefined();
-      expect(errorRecord.fieldName).toBeDefined();
-      expect(errorRecord.ruleId).toBeDefined();
-      expect(errorRecord.ruleName).toBeDefined();
-      expect(errorRecord.errorMessage).toBeDefined();
-      expect(typeof errorRecord.errorMessage).toBe('string');
-      expect(errorRecord.errorMessage.length).toBeGreaterThan(0);
+    // キャッシュをクリアして再度アクセスした場合も同じ結果となること
+    const resultAfterCacheClear = validatePortalReportVisibility({
+      executiveUserId: unassignedExecutiveUserId,
+      assignedContractIds: contractIds,
+      accessTimestamp: new Date('2024-01-15T10:05:00Z'),
+      useCache: false,
+      cacheKey: cacheKey,
+      isSharedBrowser: isSharedBrowserSession,
+      usePrivateMode: usePrivateMode,
     });
 
-    // 検証結果の全体ステータスを確認
-    expect(validationResult.isValid).toBe(false);
-    expect(validationResult.totalRecords).toBe(testDataSet.length);
-    expect(validationResult.failedRecords).toBe(testDataSet.length);
-    expect(validationResult.passedRecords).toBe(0);
+    expect(resultAfterCacheClear.isReportVisible).toBe(false);
+    expect(resultAfterCacheClear.reportDisplayStatus).toBe('hidden');
+    expect(resultAfterCacheClear.consoleErrorOccurred).toBe(false);
+    expect(resultAfterCacheClear.pageLoadSuccessful).toBe(true);
+
+    // シークレットモードでアクセスした場合も同じ結果となること
+    const resultPrivateMode = validatePortalReportVisibility({
+      executiveUserId: unassignedExecutiveUserId,
+      assignedContractIds: contractIds,
+      accessTimestamp: new Date('2024-01-15T10:10:00Z'),
+      useCache: false,
+      cacheKey: cacheKey,
+      isSharedBrowser: isSharedBrowserSession,
+      usePrivateMode: true,
+    });
+
+    expect(resultPrivateMode.isReportVisible).toBe(false);
+    expect(resultPrivateMode.reportDisplayStatus).toBe('hidden');
+    expect(resultPrivateMode.consoleErrorOccurred).toBe(false);
+    expect(resultPrivateMode.pageLoadSuccessful).toBe(true);
+    expect(resultPrivateMode.displayMode).toBe('empty');
+
+    // 複数のアクセス方法でも一貫性が保たれることを確認
+    expect(result.reportDisplayStatus).toEqual(resultAfterCacheClear.reportDisplayStatus);
+    expect(result.reportDisplayStatus).toEqual(resultPrivateMode.reportDisplayStatus);
+    expect(result.pageLoadSuccessful).toEqual(resultAfterCacheClear.pageLoadSuccessful);
+    expect(result.pageLoadSuccessful).toEqual(resultPrivateMode.pageLoadSuccessful);
+  });
+
+  test('SCEN-674: 契約IDが割り当てられた営業責任者にはレポートが表示される', () => {
+    // 前提: 営業責任者がポータルにログインしており、契約IDが割り当てられている状態
+    const assignedExecutiveUserId = 'user_67890';
+    const contractIds = ['contract_001', 'contract_002'];
+    const portalAccessTimestamp = new Date('2024-01-15T11:00:00Z');
+    const cacheKey = `portal_report_${assignedExecutiveUserId}`;
+    const isSharedBrowserSession = false;
+    const usePrivateMode = false;
+
+    // 契約IDが割り当てられたユーザーがポータルにアクセスした場合、レポートが表示される
+    const result = validatePortalReportVisibility({
+      executiveUserId: assignedExecutiveUserId,
+      assignedContractIds: contractIds,
+      accessTimestamp: portalAccessTimestamp,
+      useCache: true,
+      cacheKey: cacheKey,
+      isSharedBrowser: isSharedBrowserSession,
+      usePrivateMode: usePrivateMode,
+    });
+
+    // 期待結果: レポート表示が許可
+    expect(result.isReportVisible).toBe(true);
+    expect(result.reportDisplayStatus).toBe('visible');
+    expect(result.contractsAvailableForDisplay).toEqual(contractIds);
+    expect(result.displayMode).toBe('full');
+    expect(result.consoleErrorOccurred).toBe(false);
+    expect(result.pageLoadSuccessful).toBe(true);
+    expect(result.contractsAvailableForDisplay.length).toBe(2);
+  });
+
+  test('SCEN-674: 無効な入力でエラーが発生する', () => {
+    // 前提: 無効なユーザーIDが指定された場合
+    const invalidExecutiveUserId = '';
+    const contractIds = ['contract_001'];
+    const portalAccessTimestamp = new Date('2024-01-15T12:00:00Z');
+    const cacheKey = `portal_report_`;
+    const isSharedBrowserSession = false;
+    const usePrivateMode = false;
+
+    // 無効な入力でエラーが発生する
+    expect(() =>
+      validatePortalReportVisibility({
+        executiveUserId: invalidExecutiveUserId,
+        assignedContractIds: contractIds,
+        accessTimestamp: portalAccessTimestamp,
+        useCache: true,
+        cacheKey: cacheKey,
+        isSharedBrowser: isSharedBrowserSession,
+        usePrivateMode: usePrivateMode,
+      })
+    ).toThrow(/ユーザーID/);
+  });
+
+  test('SCEN-674: キャッシュ機能が正常に動作する', () => {
+    // 前提: キャッシュが有効な状態
+    const executiveUserId = 'user_11111';
+    const contractIds = null;
+    const portalAccessTimestamp1 = new Date('2024-01-15T13:00:00Z');
+    const portalAccessTimestamp2 = new Date('2024-01-15T13:05:00Z');
+    const cacheKey = `portal_report_${executiveUserId}`;
+    const isSharedBrowserSession = false;
+    const usePrivateMode = false;
+
+    // 1回目のアクセス（キャッシュに保存される）
+    const result1 = validatePortalReportVisibility({
+      executiveUserId: executiveUserId,
+      assignedContractIds: contractIds,
+      accessTimestamp: portalAccessTimestamp1,
+      useCache: true,
+      cacheKey: cacheKey,
+      isSharedBrowser: isSharedBrowserSession,
+      usePrivateMode: usePrivateMode,
+    });
+
+    // 2回目のアクセス（キャッシュから取得）
+    const result2 = validatePortalReportVisibility({
+      executiveUserId: executiveUserId,
+      assignedContractIds: contractIds,
+      accessTimestamp: portalAccessTimestamp2,
+      useCache: true,
+      cacheKey: cacheKey,
+      isSharedBrowser: isSharedBrowserSession,
+      usePrivateMode: usePrivateMode,
+    });
+
+    // キャッシュが正常に機能していることを確認
+    expect(result1.isReportVisible).toEqual(result2.isReportVisible);
+    expect(result1.reportDisplayStatus).toEqual(result2.reportDisplayStatus);
+    expect(result1.consoleErrorOccurred).toBe(false);
+    expect(result2.consoleErrorOccurred).toBe(false);
   });
 });

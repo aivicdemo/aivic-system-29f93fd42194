@@ -1,79 +1,217 @@
-import { describe, test, expect, beforeEach, afterEach } from "@jest/globals";
-import { generateReportWithTimeoutNotification } from "../../src/logic/it-1-br-1781935279444-1-2-1";
+import { validateReportAccuracyJudgment } from '../../src/logic/it-1781935279444-2-1-1';
 
-describe("月次サマリーテンプレートの定義・管理機能", () => {
-  beforeEach(() => {
-    jest.clearAllMocks();
-    jest.useFakeTimers();
+describe('営業データ入力時の品質検証ルール定義・実行機能', () => {
+  // SCEN-1177: [error] レポート数値の正確性合否判定機能 - 必須の判定根拠データが不足している場合、エラーを返す
+  test('必須の判定根拠データが不足している場合、エラーを返す', () => {
+    const reportData = {
+      reportId: 'RPT-2024-001',
+      customerId: 'CUST-001',
+      reportMonth: '2024-01-01',
+      reportValues: {
+        appointmentCount: 10,
+        contractCount: 3,
+        revenue: 500000,
+      },
+    };
+
+    const requiredFoundationData = {
+      salesDetails: null, // 売上明細が未入力
+      invoiceInfo: {
+        invoiceId: 'INV-2024-001',
+        amount: 500000,
+        issueDate: '2024-01-15',
+      },
+      contractInfo: {
+        contractId: 'CON-2024-001',
+        startDate: '2024-01-01',
+        endDate: '2024-12-31',
+        serviceType: 'sales',
+      },
+    };
+
+    expect(() =>
+      validateReportAccuracyJudgment({
+        reportData,
+        foundationData: requiredFoundationData,
+      })
+    ).toThrow(/売上明細/);
   });
 
-  afterEach(() => {
-    jest.runOnlyPendingTimers();
-    jest.useRealTimers();
+  test('複数の必須判定根拠データが不足している場合、エラーを返す', () => {
+    const reportData = {
+      reportId: 'RPT-2024-002',
+      customerId: 'CUST-002',
+      reportMonth: '2024-02-01',
+      reportValues: {
+        appointmentCount: 15,
+        contractCount: 5,
+        revenue: 750000,
+      },
+    };
+
+    const requiredFoundationData = {
+      salesDetails: undefined, // 売上明細が未定義
+      invoiceInfo: null, // 請求書情報が未入力
+      contractInfo: {
+        contractId: 'CON-2024-002',
+        startDate: '2024-02-01',
+        endDate: '2024-12-31',
+        serviceType: 'sales',
+      },
+    };
+
+    expect(() =>
+      validateReportAccuracyJudgment({
+        reportData,
+        foundationData: requiredFoundationData,
+      })
+    ).toThrow(/請求書情報|売上明細/);
   });
 
-  // SCEN-1177: [error] レポート生成・配信期限管理 - レポート生成処理がタイムアウトした場合、管理者に通知が発行される
-  test("レポート生成処理がタイムアウトした場合、管理者に対してタイムアウト通知が発行される", () => {
-    const report_id = "REPORT-2024-001";
-    const admin_user_id = "ADMIN-USR-001";
-    const admin_email = "admin@example.com";
-    const timeout_ms = 5000;
-    const large_dataset_size = 1000000;
-    const expected_timeout_timestamp = new Date("2024-01-15T10:30:00Z").toISOString();
-    const expected_notification_type = "TIMEOUT_ERROR";
-    const expected_notification_status = "SENT";
+  test('判定根拠データが完全に揃っている場合、合否判定を実行する', () => {
+    const reportData = {
+      reportId: 'RPT-2024-003',
+      customerId: 'CUST-003',
+      reportMonth: '2024-03-01',
+      reportValues: {
+        appointmentCount: 8,
+        contractCount: 2,
+        revenue: 400000,
+      },
+    };
 
-    const result = generateReportWithTimeoutNotification({
-      report_id: report_id,
-      admin_user_id: admin_user_id,
-      admin_email: admin_email,
-      timeout_ms: timeout_ms,
-      dataset_size: large_dataset_size,
-      triggered_at: new Date("2024-01-15T10:30:00Z"),
+    const requiredFoundationData = {
+      salesDetails: {
+        detailId: 'SD-2024-001',
+        items: [
+          {
+            itemId: 'ITEM-001',
+            description: 'Service A',
+            quantity: 2,
+            unitPrice: 200000,
+            amount: 400000,
+          },
+        ],
+        totalAmount: 400000,
+      },
+      invoiceInfo: {
+        invoiceId: 'INV-2024-003',
+        amount: 400000,
+        issueDate: '2024-03-15',
+      },
+      contractInfo: {
+        contractId: 'CON-2024-003',
+        startDate: '2024-03-01',
+        endDate: '2024-12-31',
+        serviceType: 'sales',
+        unitPrice: 200000,
+      },
+    };
+
+    const result = validateReportAccuracyJudgment({
+      reportData,
+      foundationData: requiredFoundationData,
     });
 
-    // アサーション: レポートがタイムアウトエラーを含む
-    expect(result.status).toBe("TIMEOUT");
-    expect(result.error_code).toBe("REPORT_GENERATION_TIMEOUT");
-    expect(result.report_id).toBe(report_id);
-    expect(result.timeout_duration_ms).toBe(timeout_ms);
+    expect(result).toEqual({
+      judgeId: expect.any(String),
+      reportId: 'RPT-2024-003',
+      customerId: 'CUST-003',
+      judgmentStatus: 'accurate',
+      accuracy: 100,
+      foundationDataPresent: true,
+      discrepancies: [],
+      executedAt: expect.any(String),
+    });
+  });
 
-    // アサーション: 管理者通知が生成されたことを確認
-    expect(result.notification).toBeDefined();
-    expect(result.notification.notification_id).toMatch(/^NOTIF-/);
-    expect(result.notification.notification_type).toBe(expected_notification_type);
-    expect(result.notification.recipient_user_id).toBe(admin_user_id);
-    expect(result.notification.recipient_email).toBe(admin_email);
+  test('契約情報が不足している場合、エラーを返す', () => {
+    const reportData = {
+      reportId: 'RPT-2024-004',
+      customerId: 'CUST-004',
+      reportMonth: '2024-04-01',
+      reportValues: {
+        appointmentCount: 12,
+        contractCount: 4,
+        revenue: 600000,
+      },
+    };
 
-    // アサーション: 通知が発行されていることを確認
-    expect(result.notification.status).toBe(expected_notification_status);
-    expect(result.notification.delivered_at).toBeDefined();
-    expect(typeof result.notification.delivered_at).toBe("string");
+    const requiredFoundationData = {
+      salesDetails: {
+        detailId: 'SD-2024-002',
+        items: [
+          {
+            itemId: 'ITEM-002',
+            description: 'Service B',
+            quantity: 4,
+            unitPrice: 150000,
+            amount: 600000,
+          },
+        ],
+        totalAmount: 600000,
+      },
+      invoiceInfo: {
+        invoiceId: 'INV-2024-004',
+        amount: 600000,
+        issueDate: '2024-04-15',
+      },
+      contractInfo: null, // 契約情報が未入力
+    };
 
-    // アサーション: 通知にレポートID、失敗理由、タイムスタンプなどの詳細情報が含まれている
-    expect(result.notification.message).toContain(report_id);
-    expect(result.notification.message).toContain("タイムアウト");
-    expect(result.notification.details).toBeDefined();
-    expect(result.notification.details.report_id).toBe(report_id);
-    expect(result.notification.details.failure_reason).toBe("レポート生成処理がタイムアウト時間内に完了しませんでした");
-    expect(result.notification.details.timeout_at).toBe(expected_timeout_timestamp);
-    expect(result.notification.details.dataset_size).toBe(large_dataset_size);
-    expect(result.notification.details.recommended_action).toMatch(/再実行|タイムアウト値の調整/);
+    expect(() =>
+      validateReportAccuracyJudgment({
+        reportData,
+        foundationData: requiredFoundationData,
+      })
+    ).toThrow(/契約情報/);
+  });
 
-    // アサーション: 通知に推奨アクション（レポート再生成または管理者による調査）が含まれている
-    expect(result.notification.details.recommended_actions).toBeDefined();
-    expect(Array.isArray(result.notification.details.recommended_actions)).toBe(true);
-    expect(result.notification.details.recommended_actions.length).toBeGreaterThan(0);
-    expect(result.notification.details.recommended_actions[0]).toMatch(/レポート再生成|スケジュール調整|リソース確保/);
+  test('判定根拠データの値が不正な場合、エラーを返す', () => {
+    const reportData = {
+      reportId: 'RPT-2024-005',
+      customerId: 'CUST-005',
+      reportMonth: '2024-05-01',
+      reportValues: {
+        appointmentCount: 6,
+        contractCount: 1,
+        revenue: 300000,
+      },
+    };
 
-    // アサーション: 管理者が対応可能なステータスになっていることを確認
-    expect(result.notification.action_required).toBe(true);
-    expect(result.notification.priority).toBe("HIGH");
+    const requiredFoundationData = {
+      salesDetails: {
+        detailId: 'SD-2024-003',
+        items: [
+          {
+            itemId: 'ITEM-003',
+            description: 'Service C',
+            quantity: 1,
+            unitPrice: 300000,
+            amount: 300000,
+          },
+        ],
+        totalAmount: 300000,
+      },
+      invoiceInfo: {
+        invoiceId: 'INV-2024-005',
+        amount: 350000, // 売上明細との金額不一致
+        issueDate: '2024-05-15',
+      },
+      contractInfo: {
+        contractId: 'CON-2024-005',
+        startDate: '2024-05-01',
+        endDate: '2024-12-31',
+        serviceType: 'sales',
+        unitPrice: 300000,
+      },
+    };
 
-    // アサーション: 通知の配信ログが記録されていることを確認
-    expect(result.notification.delivery_log).toBeDefined();
-    expect(result.notification.delivery_log.channel).toBe("EMAIL");
-    expect(result.notification.delivery_log.attempt_count).toBe(1);
-    expect(result.notification.delivery_log.success).toBe(true);
+    expect(() =>
+      validateReportAccuracyJudgment({
+        reportData,
+        foundationData: requiredFoundationData,
+      })
+    ).toThrow(/金額|不一致/);
   });
 });

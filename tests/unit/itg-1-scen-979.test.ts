@@ -1,89 +1,130 @@
-import { describe, it, expect, beforeEach } from '@jest/globals';
-import { generateInvoiceFromSalesData } from '../../src/logic/it-1781935279444-2-1-1';
+import { describe, test, expect, beforeEach, afterEach } from '@jest/globals';
+import { calculateBillingAmount } from '../../src/logic/it-1781935279444-2-1-1';
 
 describe('営業データ入力時の品質検証ルール定義・実行機能', () => {
-  // SCEN-979: [normal] 請求書自動検証機能 - 検証済み営業データから生成された請求書が形式・内容基準を満たす
-  it('検証済み営業データから生成された請求書が形式・内容基準を満たす', () => {
-    // テストデータ: 検証済みの営業データ
-    const validated_sales_data = {
-      customer_id: 'CUST-001',
-      customer_name: '株式会社テスト',
-      customer_address: '東京都渋谷区1-2-3',
-      invoice_date: '2024-01-15',
-      delivery_date: '2024-01-31',
-      line_items: [
-        {
-          item_id: 'ITEM-001',
-          item_name: 'サービスA',
-          quantity: 2,
-          unit_price: 50000,
-          tax_rate: 0.1,
-        },
-        {
-          item_id: 'ITEM-002',
-          item_name: 'サービスB',
-          quantity: 1,
-          unit_price: 30000,
-          tax_rate: 0.1,
-        },
-      ],
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  afterEach(() => {
+    jest.clearAllMocks();
+  });
+
+  // SCEN-979: [normal] 請求額算出・検証機能 - 複数スタッフの請求額算出結果が同一基準で完全に一致する
+  test('複数スタッフの請求額算出結果が同一基準で完全に一致する', () => {
+    // 共通の売上条件を定義
+    const commonSalesData = {
+      appointmentCount: 12,
+      contractCount: 5,
+      serviceType: 'standard',
+      saleAmount: 500000,
     };
 
-    // 請求書自動生成機能を実行
-    const generated_invoice = generateInvoiceFromSalesData(validated_sales_data);
+    // 手数料率と割引条件を定義
+    const billingRules = {
+      commissionRate: 0.1,
+      discountRate: 0.05,
+      taxRate: 0.1,
+      minimumBillingAmount: 10000,
+    };
 
-    // 検証1: ファイル形式が正しい（PDF）
-    expect(generated_invoice.file_format).toBe('PDF');
+    // スタッフ 1 の請求額計算
+    const staff1Result = calculateBillingAmount({
+      staffId: 'staff-001',
+      salesData: commonSalesData,
+      billingRules,
+      executionDate: new Date('2024-01-15T09:00:00Z'),
+    });
 
-    // 検証2: すべての必須項目が含まれている
-    expect(generated_invoice.invoice_number).toBeDefined();
-    expect(generated_invoice.invoice_number).toMatch(/^INV-\d{8}-\d{4}$/);
-    expect(generated_invoice.invoice_date).toBe('2024-01-15');
-    expect(generated_invoice.delivery_date).toBe('2024-01-31');
-    expect(generated_invoice.customer_name).toBe('株式会社テスト');
-    expect(generated_invoice.customer_address).toBe('東京都渋谷区1-2-3');
-    expect(generated_invoice.line_items).toHaveLength(2);
+    // スタッフ 2 の請求額計算 (同一条件)
+    const staff2Result = calculateBillingAmount({
+      staffId: 'staff-002',
+      salesData: commonSalesData,
+      billingRules,
+      executionDate: new Date('2024-01-15T09:00:00Z'),
+    });
 
-    // 検証3: 金額計算が正確であることを検証
-    // サービスA: 50000 * 2 * 1.1 = 110000
-    // サービスB: 30000 * 1 * 1.1 = 33000
-    // 小計: (50000 * 2) + (30000 * 1) = 130000
-    // 税額: 130000 * 0.1 = 13000
-    // 合計: 130000 + 13000 = 143000
-    expect(generated_invoice.subtotal).toBe(130000);
-    expect(generated_invoice.tax_amount).toBe(13000);
-    expect(generated_invoice.total_amount).toBe(143000);
+    // スタッフ 3 の請求額計算 (同一条件)
+    const staff3Result = calculateBillingAmount({
+      staffId: 'staff-003',
+      salesData: commonSalesData,
+      billingRules,
+      executionDate: new Date('2024-01-15T09:00:00Z'),
+    });
 
-    // 検証4: 請求書に記載された顧客情報が営業データと一致
-    expect(generated_invoice.customer_name).toBe(validated_sales_data.customer_name);
-    expect(generated_invoice.customer_address).toBe(
-      validated_sales_data.customer_address
-    );
-    expect(generated_invoice.line_items[0].item_name).toBe(
-      validated_sales_data.line_items[0].item_name
-    );
-    expect(generated_invoice.line_items[0].quantity).toBe(
-      validated_sales_data.line_items[0].quantity
-    );
-    expect(generated_invoice.line_items[0].unit_price).toBe(
-      validated_sales_data.line_items[0].unit_price
-    );
+    // 基本計算ロジック: (売上額 × 手数料率 - 割引額) × (1 + 税率)
+    // 割引額 = 売上額 × 割引率
+    // = (500000 × 0.1 - 500000 × 0.05) × (1 + 0.1)
+    // = (50000 - 25000) × 1.1
+    // = 25000 × 1.1
+    // = 27500
+    const expectedBillingAmount = 27500;
 
-    // 検証5: レイアウトとフォーマットが基準に準拠
-    expect(generated_invoice.layout_version).toBe('1.0');
-    expect(generated_invoice.template_name).toBe('standard_invoice');
-    expect(generated_invoice.page_count).toBe(1);
+    // 複数スタッフの結果が完全に一致することを検証
+    expect(staff1Result.billingAmount).toBe(expectedBillingAmount);
+    expect(staff2Result.billingAmount).toBe(expectedBillingAmount);
+    expect(staff3Result.billingAmount).toBe(expectedBillingAmount);
 
-    // 検証6: 生成された請求書が正常にシステムに保存されている
-    expect(generated_invoice.saved_to_database).toBe(true);
-    expect(generated_invoice.database_id).toBeDefined();
-    expect(generated_invoice.database_id).toMatch(/^DB-\d+$/);
-    expect(generated_invoice.created_at).toBeDefined();
-    expect(new Date(generated_invoice.created_at).getTime()).toBeLessThanOrEqual(
-      Date.now()
-    );
+    // 各スタッフの詳細情報が正確に記録されていることを検証
+    expect(staff1Result.staffId).toBe('staff-001');
+    expect(staff2Result.staffId).toBe('staff-002');
+    expect(staff3Result.staffId).toBe('staff-003');
 
-    // 検証7: ステータスが「生成済み」になっている
-    expect(generated_invoice.status).toBe('generated');
+    // 計算根拠の詳細が各スタッフで一致していることを検証
+    expect(staff1Result.calculationDetails.commission).toBe(50000); // 500000 × 0.1
+    expect(staff2Result.calculationDetails.commission).toBe(50000);
+    expect(staff3Result.calculationDetails.commission).toBe(50000);
+
+    expect(staff1Result.calculationDetails.discount).toBe(25000); // 500000 × 0.05
+    expect(staff2Result.calculationDetails.discount).toBe(25000);
+    expect(staff3Result.calculationDetails.discount).toBe(25000);
+
+    expect(staff1Result.calculationDetails.taxAmount).toBe(2500); // 25000 × 0.1
+    expect(staff2Result.calculationDetails.taxAmount).toBe(2500);
+    expect(staff3Result.calculationDetails.taxAmount).toBe(2500);
+
+    // 最小請求額と比較
+    expect(staff1Result.billingAmount).toBeGreaterThanOrEqual(billingRules.minimumBillingAmount);
+    expect(staff2Result.billingAmount).toBeGreaterThanOrEqual(billingRules.minimumBillingAmount);
+    expect(staff3Result.billingAmount).toBeGreaterThanOrEqual(billingRules.minimumBillingAmount);
+
+    // タイムスタンプと計算ルールバージョンの一貫性を検証
+    expect(staff1Result.executionTimestamp).toEqual(new Date('2024-01-15T09:00:00Z'));
+    expect(staff2Result.executionTimestamp).toEqual(new Date('2024-01-15T09:00:00Z'));
+    expect(staff3Result.executionTimestamp).toEqual(new Date('2024-01-15T09:00:00Z'));
+
+    expect(staff1Result.billingRuleVersion).toBe(staff2Result.billingRuleVersion);
+    expect(staff2Result.billingRuleVersion).toBe(staff3Result.billingRuleVersion);
+
+    // エラーやログが存在しないことを検証
+    expect(staff1Result.errors).toEqual([]);
+    expect(staff2Result.errors).toEqual([]);
+    expect(staff3Result.errors).toEqual([]);
+
+    expect(staff1Result.warnings).toEqual([]);
+    expect(staff2Result.warnings).toEqual([]);
+    expect(staff3Result.warnings).toEqual([]);
+
+    // ステータスが成功であることを検証
+    expect(staff1Result.status).toBe('success');
+    expect(staff2Result.status).toBe('success');
+    expect(staff3Result.status).toBe('success');
+
+    // 複数回実行の一貫性検証 (同一スタッフで再度実行)
+    const staff1ResultRetry = calculateBillingAmount({
+      staffId: 'staff-001',
+      salesData: commonSalesData,
+      billingRules,
+      executionDate: new Date('2024-01-15T09:00:00Z'),
+    });
+
+    // 同一スタッフの再実行でも同じ結果が得られることを検証
+    expect(staff1ResultRetry.billingAmount).toBe(expectedBillingAmount);
+    expect(staff1ResultRetry.calculationDetails.commission).toBe(50000);
+    expect(staff1ResultRetry.calculationDetails.discount).toBe(25000);
+    expect(staff1ResultRetry.calculationDetails.taxAmount).toBe(2500);
+    expect(staff1ResultRetry.status).toBe('success');
+    expect(staff1ResultRetry.errors).toEqual([]);
+    expect(staff1ResultRetry.warnings).toEqual([]);
   });
 });

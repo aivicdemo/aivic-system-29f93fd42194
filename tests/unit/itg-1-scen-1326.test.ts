@@ -1,121 +1,162 @@
-import { extractBillingItems, aggregateBillingAmount } from '../../src/logic/it-1-2-1';
+import { describe, test, expect, beforeEach } from "@jest/globals";
+import {
+  defineValidationRule,
+  retrieveValidationRuleDetail,
+} from "../../src/logic/it-1781935279444-2-1-1";
 
-describe('営業成果データから請求対象項目を自動抽出し、顧客ごと・サービスごとの請求額を集計する機能', () => {
-  // SCEN-1326: [edge] 請求対象項目の自動抽出と顧客別・サービス別請求額集計 - 複数顧客が同一サービスを利用している場合、顧客別・サービス別に正しく分離されて集計される
-  test('複数顧客が同一サービスを利用している場合、顧客別・サービス別に正しく分離されて集計される', () => {
-    // Arrange: テストデータの準備
-    // 顧客A、B、Cが同一サービス（クラウドストレージ）を利用している場合
-    const salesData = [
-      {
-        sales_id: 'sales_001',
-        customer_id: 'cust_A',
-        service_id: 'svc_storage',
-        service_name: 'クラウドストレージ',
-        billing_period_start: '2024-01-01',
-        billing_period_end: '2024-01-31',
-        usage_quantity: 100,
-        unit_price: 1000,
-        discount_rate: 0,
-        is_billable: true,
-      },
-      {
-        sales_id: 'sales_002',
-        customer_id: 'cust_B',
-        service_id: 'svc_storage',
-        service_name: 'クラウドストレージ',
-        billing_period_start: '2024-01-01',
-        billing_period_end: '2024-01-31',
-        usage_quantity: 150,
-        unit_price: 1000,
-        discount_rate: 0.1,
-        is_billable: true,
-      },
-      {
-        sales_id: 'sales_003',
-        customer_id: 'cust_C',
-        service_id: 'svc_storage',
-        service_name: 'クラウドストレージ',
-        billing_period_start: '2024-01-01',
-        billing_period_end: '2024-01-31',
-        usage_quantity: 200,
-        unit_price: 1000,
-        discount_rate: 0.05,
-        is_billable: true,
-      },
-    ];
+describe("営業データ品質基準・検証ルール定義", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
 
-    // Act: 請求対象項目の自動抽出
-    const extracted_items = extractBillingItems(salesData);
+  // SCEN-1326
+  test("営業データ項目について許容範囲・データ型・必須フラグ・計算ロジックが定義される", () => {
+    // ルール定義入力値
+    const ruleInput = {
+      dataItemId: "item_001",
+      dataItemName: "売上金額",
+      dataType: "numeric",
+      minValue: 0,
+      maxValue: 1000000,
+      isRequired: true,
+      calculationLogic: "taxIncludedAmount = baseAmount * 1.1",
+      description: "税込売上金額の計算",
+    };
 
-    // Assert: 抽出されたデータが顧客IDで正しく分離されていることを確認
-    const cust_A_items = extracted_items.filter((item: any) => item.customer_id === 'cust_A');
-    const cust_B_items = extracted_items.filter((item: any) => item.customer_id === 'cust_B');
-    const cust_C_items = extracted_items.filter((item: any) => item.customer_id === 'cust_C');
+    // ルール定義を保存
+    const savedRuleId = defineValidationRule(ruleInput);
+    expect(typeof savedRuleId).toBe("string");
+    expect(savedRuleId.length).toBeGreaterThan(0);
 
-    expect(cust_A_items.length).toBe(1);
-    expect(cust_B_items.length).toBe(1);
-    expect(cust_C_items.length).toBe(1);
+    // ルール詳細を取得
+    const retrievedRule = retrieveValidationRuleDetail(savedRuleId);
 
-    // 顧客A：100 * 1000 * (1 - 0) = 100,000
-    expect(cust_A_items[0].billing_amount).toBe(100000);
+    // 許容範囲の検証
+    expect(retrievedRule.minValue).toBe(0);
+    expect(retrievedRule.maxValue).toBe(1000000);
 
-    // 顧客B：150 * 1000 * (1 - 0.1) = 135,000
-    expect(cust_B_items[0].billing_amount).toBe(135000);
+    // データ型の検証
+    expect(retrievedRule.dataType).toBe("numeric");
 
-    // 顧客C：200 * 1000 * (1 - 0.05) = 190,000
-    expect(cust_C_items[0].billing_amount).toBe(190000);
+    // 必須フラグの検証
+    expect(retrievedRule.isRequired).toBe(true);
 
-    // 顧客別・サービス別の請求額集計
-    const aggregation_result = aggregateBillingAmount(extracted_items);
-
-    // Assert: 各顧客別に、サービス別の請求額が正確に集計されていることを検証
-    const cust_A_total = aggregation_result.find(
-      (agg: any) => agg.customer_id === 'cust_A' && agg.service_id === 'svc_storage'
-    );
-    const cust_B_total = aggregation_result.find(
-      (agg: any) => agg.customer_id === 'cust_B' && agg.service_id === 'svc_storage'
-    );
-    const cust_C_total = aggregation_result.find(
-      (agg: any) => agg.customer_id === 'cust_C' && agg.service_id === 'svc_storage'
+    // 計算ロジックの検証
+    expect(retrievedRule.calculationLogic).toBe(
+      "taxIncludedAmount = baseAmount * 1.1"
     );
 
-    expect(cust_A_total.total_amount).toBe(100000);
-    expect(cust_B_total.total_amount).toBe(135000);
-    expect(cust_C_total.total_amount).toBe(190000);
+    // データ項目名の検証
+    expect(retrievedRule.dataItemName).toBe("売上金額");
 
-    // Assert: 複数顧客における同一サービスの請求額合計が、各顧客個別の集計値の合計と一致することを確認
-    const service_total_from_aggregation = aggregation_result.reduce(
-      (sum: number, agg: any) => {
-        if (agg.service_id === 'svc_storage') {
-          return sum + agg.total_amount;
-        }
-        return sum;
-      },
-      0
+    // 説明の検証
+    expect(retrievedRule.description).toBe("税込売上金額の計算");
+  });
+
+  test("複数のデータ項目に対して異なる定義が正確に保存される", () => {
+    // 顧客名ルール定義
+    const customerNameRuleInput = {
+      dataItemId: "item_002",
+      dataItemName: "顧客名",
+      dataType: "string",
+      minValue: null,
+      maxValue: null,
+      isRequired: true,
+      calculationLogic: null,
+      description: "顧客企業の名前",
+    };
+
+    const customerNameRuleId = defineValidationRule(customerNameRuleInput);
+    const customerNameRule = retrieveValidationRuleDetail(customerNameRuleId);
+
+    expect(customerNameRule.dataType).toBe("string");
+    expect(customerNameRule.isRequired).toBe(true);
+    expect(customerNameRule.calculationLogic).toBeNull();
+
+    // 受注日ルール定義
+    const orderDateRuleInput = {
+      dataItemId: "item_003",
+      dataItemName: "受注日",
+      dataType: "date",
+      minValue: null,
+      maxValue: null,
+      isRequired: true,
+      calculationLogic: null,
+      description: "商品受注日",
+    };
+
+    const orderDateRuleId = defineValidationRule(orderDateRuleInput);
+    const orderDateRule = retrieveValidationRuleDetail(orderDateRuleId);
+
+    expect(orderDateRule.dataType).toBe("date");
+    expect(orderDateRule.isRequired).toBe(true);
+
+    // アポイント数ルール定義（オプション項目、計算ロジックあり）
+    const appointmentCountRuleInput = {
+      dataItemId: "item_004",
+      dataItemName: "アポイント数",
+      dataType: "numeric",
+      minValue: 0,
+      maxValue: 999,
+      isRequired: false,
+      calculationLogic: "totalAppointments = confirmCount + tentativeCount",
+      description: "確定・暫定アポイント数の合計",
+    };
+
+    const appointmentCountRuleId = defineValidationRule(
+      appointmentCountRuleInput
+    );
+    const appointmentCountRule = retrieveValidationRuleDetail(
+      appointmentCountRuleId
     );
 
-    const expected_service_total = 100000 + 135000 + 190000;
-    expect(service_total_from_aggregation).toBe(expected_service_total);
-
-    // Assert: 顧客A、顧客B、顧客Cの請求額がそれぞれ独立して計算されていることをアサート
-    expect(cust_A_total.customer_id).toBe('cust_A');
-    expect(cust_B_total.customer_id).toBe('cust_B');
-    expect(cust_C_total.customer_id).toBe('cust_C');
-
-    // Assert: サービス別集計において、同一サービスの複数顧客データが適切に分離されていることを確認
-    const storage_service_aggregates = aggregation_result.filter(
-      (agg: any) => agg.service_id === 'svc_storage'
+    expect(appointmentCountRule.isRequired).toBe(false);
+    expect(appointmentCountRule.minValue).toBe(0);
+    expect(appointmentCountRule.maxValue).toBe(999);
+    expect(appointmentCountRule.calculationLogic).toBe(
+      "totalAppointments = confirmCount + tentativeCount"
     );
-    expect(storage_service_aggregates.length).toBe(3);
-    expect(
-      storage_service_aggregates.map((agg: any) => agg.customer_id).sort()
-    ).toEqual(['cust_A', 'cust_B', 'cust_C']);
+  });
 
-    // Assert: データの二重計上や漏落がないことを確認
-    const all_items_in_aggregation = aggregation_result.reduce(
-      (sum: number, agg: any) => sum + agg.total_amount,
-      0
+  test("必須フラグがOFFの場合、データは任意入力として扱われる", () => {
+    const optionalRuleInput = {
+      dataItemId: "item_005",
+      dataItemName: "顧客反応メモ",
+      dataType: "string",
+      minValue: null,
+      maxValue: null,
+      isRequired: false,
+      calculationLogic: null,
+      description: "顧客からのコメント",
+    };
+
+    const optionalRuleId = defineValidationRule(optionalRuleInput);
+    const optionalRule = retrieveValidationRuleDetail(optionalRuleId);
+
+    expect(optionalRule.isRequired).toBe(false);
+    expect(optionalRule.dataItemName).toBe("顧客反応メモ");
+  });
+
+  test("計算ロジックが複雑な場合でも正確に保存される", () => {
+    const complexCalcRuleInput = {
+      dataItemId: "item_006",
+      dataItemName: "月間請求額",
+      dataType: "numeric",
+      minValue: 0,
+      maxValue: 10000000,
+      isRequired: true,
+      calculationLogic:
+        "monthlyBilling = (basePrice * quantity) - discount + tax; tax = basePrice * quantity * 0.1",
+      description: "基本料金×数量-割引+税金",
+    };
+
+    const complexCalcRuleId = defineValidationRule(complexCalcRuleInput);
+    const complexCalcRule = retrieveValidationRuleDetail(complexCalcRuleId);
+
+    expect(complexCalcRule.calculationLogic).toBe(
+      "monthlyBilling = (basePrice * quantity) - discount + tax; tax = basePrice * quantity * 0.1"
     );
-    expect(all_items_in_aggregation).toBe(425000);
+    expect(complexCalcRule.minValue).toBe(0);
+    expect(complexCalcRule.maxValue).toBe(10000000);
   });
 });

@@ -1,134 +1,155 @@
-import { describe, test, expect, beforeEach, afterEach } from "@jest/globals";
-import { validateSalesDataCompleteness } from "../../src/logic/it-1781935279444-2-2-1";
+import { describe, test, expect, beforeEach } from '@jest/globals';
+import { aggregateMultipleSalesDataToMonthlySummary } from '../../src/logic/it-1-br-1781935279444-1-2-1';
 
-const fetchMock = require("jest-fetch-mock");
-fetchMock.enableMocks();
-
-describe("営業データ完全性・正確性自動検証", () => {
+describe('月次サマリーテンプレート定義・管理機能', () => {
   beforeEach(() => {
-    fetchMock.resetMocks();
-  });
-
-  afterEach(() => {
     jest.clearAllMocks();
   });
 
-  // SCEN-1123
-  test("必須項目が欠落している場合、エスカレーション基準に従い適切なエラーが返却される", async () => {
-    // 準備: 必須項目の定義
-    const requiredFields = ["customerId", "billingAmount", "billingDate"];
+  // SCEN-1123: [edge] 営業データから月次サマリーへの自動マッピング - 複数の営業データ項目が同一のサマリー項目へ集約される場合に正確に計算される
+  test('should accurately aggregate multiple sales data items into single monthly summary item', () => {
+    // 複数の営業データ項目を同一のサマリー項目にマッピング
+    const sales_data_items = [
+      {
+        item_id: 'sales_a',
+        item_name: '売上A',
+        value: 10000,
+        unit: '円',
+        data_type: 'number',
+        period: '2024-01',
+      },
+      {
+        item_id: 'sales_b',
+        item_name: '売上B',
+        value: 25000,
+        unit: '円',
+        data_type: 'number',
+        period: '2024-01',
+      },
+      {
+        item_id: 'sales_c',
+        item_name: '売上C',
+        value: 15000,
+        unit: '円',
+        data_type: 'number',
+        period: '2024-01',
+      },
+    ];
 
-    // テストケース1: 顧客IDが欠落
-    const testPayload1 = {
-      billingAmount: 50000,
-      billingDate: "2024-01-15",
-      serviceType: "営業活動代行",
+    const mapping_rule = {
+      rule_id: 'map_total_sales',
+      source_items: ['sales_a', 'sales_b', 'sales_c'],
+      target_summary_item: 'monthly_total_sales',
+      aggregation_type: 'sum',
+      description: '月次売上合計',
     };
 
-    const response1 = await validateSalesDataCompleteness(testPayload1);
+    // 月次サマリーの自動マッピング処理を実行
+    const result = aggregateMultipleSalesDataToMonthlySummary(
+      sales_data_items,
+      mapping_rule,
+      '2024-01'
+    );
 
-    expect(response1.statusCode).toBe(400);
-    expect(response1.errorCode).toMatch(/MISSING_FIELD/);
-    expect(response1.errorMessage).toMatch(/customerId/);
-    expect(response1.escalationLevel).toBe("HIGH");
-    expect(response1.missingFields).toContain("customerId");
-
-    // テストケース2: 複数の必須項目が欠落（顧客ID、請求金額）
-    const testPayload2 = {
-      billingDate: "2024-01-15",
-      serviceType: "営業活動代行",
-    };
-
-    const response2 = await validateSalesDataCompleteness(testPayload2);
-
-    expect(response2.statusCode).toBe(400);
-    expect(response2.errorCode).toMatch(/MISSING_FIELD/);
-    expect(response2.errorMessage).toMatch(/customerId|billingAmount/);
-    expect(response2.escalationLevel).toBe("HIGH");
-    expect(response2.missingFields).toContain("customerId");
-    expect(response2.missingFields).toContain("billingAmount");
-    expect(response2.missingFields.length).toBe(2);
-
-    // テストケース3: 請求日が欠落
-    const testPayload3 = {
-      customerId: "CUST-001",
-      billingAmount: 75000,
-      serviceType: "営業活動代行",
-    };
-
-    const response3 = await validateSalesDataCompleteness(testPayload3);
-
-    expect(response3.statusCode).toBe(400);
-    expect(response3.errorCode).toMatch(/MISSING_FIELD/);
-    expect(response3.errorMessage).toMatch(/billingDate/);
-    expect(response3.escalationLevel).toBe("MEDIUM");
-    expect(response3.missingFields).toContain("billingDate");
-    expect(response3.missingFields.length).toBe(1);
-
-    // テストケース4: 全ての必須項目が欠落
-    const testPayload4 = {
-      serviceType: "営業活動代行",
-    };
-
-    const response4 = await validateSalesDataCompleteness(testPayload4);
-
-    expect(response4.statusCode).toBe(400);
-    expect(response4.errorCode).toMatch(/MISSING_FIELD/);
-    expect(response4.escalationLevel).toBe("CRITICAL");
-    expect(response4.missingFields).toContain("customerId");
-    expect(response4.missingFields).toContain("billingAmount");
-    expect(response4.missingFields).toContain("billingDate");
-    expect(response4.missingFields.length).toBe(3);
-
-    // テストケース5: エラーレスポンスのフォーマット検証
-    expect(response4).toHaveProperty("statusCode");
-    expect(response4).toHaveProperty("errorCode");
-    expect(response4).toHaveProperty("errorMessage");
-    expect(response4).toHaveProperty("escalationLevel");
-    expect(response4).toHaveProperty("missingFields");
-    expect(response4).toHaveProperty("timestamp");
-
-    // テストケース6: エラーメッセージが定義されたフォーマットに準拠
-    expect(response4.errorMessage).toMatch(/必須項目が不足しています/);
-    expect(response4.errorMessage).toMatch(/customerId/);
-    expect(response4.errorMessage).toMatch(/billingAmount/);
-    expect(response4.errorMessage).toMatch(/billingDate/);
-
-    // テストケース7: システムログに記録されるか検証（fetchを使用）
-    fetchMock.mockResponseOnce(JSON.stringify({ success: true }), {
-      status: 200,
+    // 集約された月次サマリー項目の計算値を検証
+    // 期待値: 10000 + 25000 + 15000 = 50000
+    expect(result).toEqual({
+      summary_item: 'monthly_total_sales',
+      calculated_value: 50000,
+      aggregation_type: 'sum',
+      period: '2024-01',
+      source_count: 3,
+      source_items: ['sales_a', 'sales_b', 'sales_c'],
+      status: 'success',
     });
 
-    const logResponse = await fetch("/api/logs", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        eventType: "VALIDATION_ERROR",
-        escalationLevel: response4.escalationLevel,
-        missingFields: response4.missingFields,
-      }),
+    // 異なる月のデータでも同じマッピングルールが一貫して適用されることを確認
+    const sales_data_items_feb = [
+      {
+        item_id: 'sales_a',
+        item_name: '売上A',
+        value: 12000,
+        unit: '円',
+        data_type: 'number',
+        period: '2024-02',
+      },
+      {
+        item_id: 'sales_b',
+        item_name: '売上B',
+        value: 28000,
+        unit: '円',
+        data_type: 'number',
+        period: '2024-02',
+      },
+      {
+        item_id: 'sales_c',
+        item_name: '売上C',
+        value: 18000,
+        unit: '円',
+        data_type: 'number',
+        period: '2024-02',
+      },
+    ];
+
+    const result_feb = aggregateMultipleSalesDataToMonthlySummary(
+      sales_data_items_feb,
+      mapping_rule,
+      '2024-02'
+    );
+
+    // 期待値: 12000 + 28000 + 18000 = 58000
+    expect(result_feb).toEqual({
+      summary_item: 'monthly_total_sales',
+      calculated_value: 58000,
+      aggregation_type: 'sum',
+      period: '2024-02',
+      source_count: 3,
+      source_items: ['sales_a', 'sales_b', 'sales_c'],
+      status: 'success',
     });
 
-    expect(logResponse.status).toBe(200);
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/logs",
-      expect.objectContaining({
-        method: "POST",
-      })
-    );
+    // エラーハンドリングが正常に機能しているか確認
+    const invalid_mapping_rule = {
+      rule_id: 'invalid_map',
+      source_items: ['nonexistent_item_x', 'nonexistent_item_y'],
+      target_summary_item: 'monthly_total_sales',
+      aggregation_type: 'sum',
+      description: '存在しない項目へのマッピング',
+    };
 
-    // テストケース8: 異なるエスカレーションレベルの検証
-    expect(["LOW", "MEDIUM", "HIGH", "CRITICAL"]).toContain(
-      response1.escalationLevel
-    );
-    expect(["LOW", "MEDIUM", "HIGH", "CRITICAL"]).toContain(
-      response2.escalationLevel
-    );
-    expect(["LOW", "MEDIUM", "HIGH", "CRITICAL"]).toContain(
-      response3.escalationLevel
-    );
-    expect(["LOW", "MEDIUM", "HIGH", "CRITICAL"]).toContain(
-      response4.escalationLevel
-    );
+    expect(() =>
+      aggregateMultipleSalesDataToMonthlySummary(
+        sales_data_items,
+        invalid_mapping_rule,
+        '2024-01'
+      )
+    ).toThrow(/マッピング/);
+
+    // 空のデータセットでのエラーハンドリング
+    const empty_data_items: typeof sales_data_items = [];
+    expect(() =>
+      aggregateMultipleSalesDataToMonthlySummary(
+        empty_data_items,
+        mapping_rule,
+        '2024-01'
+      )
+    ).toThrow(/データ/);
+
+    // 不正な集計タイプでのエラーハンドリング
+    const invalid_aggregation_rule = {
+      rule_id: 'invalid_agg',
+      source_items: ['sales_a', 'sales_b', 'sales_c'],
+      target_summary_item: 'monthly_total_sales',
+      aggregation_type: 'invalid_type',
+      description: '不正な集計タイプ',
+    };
+
+    expect(() =>
+      aggregateMultipleSalesDataToMonthlySummary(
+        sales_data_items,
+        invalid_aggregation_rule,
+        '2024-01'
+      )
+    ).toThrow(/集計/);
   });
 });

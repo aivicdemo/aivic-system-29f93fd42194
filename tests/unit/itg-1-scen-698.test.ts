@@ -1,30 +1,29 @@
-import { validateSalesDataAccuracy } from "../../src/logic/it-1781935279444-2-2-1";
+import { describe, test, expect } from '@jest/globals';
+import { validateSalesData } from '../../src/logic/it-1-1-1';
 
-describe("営業データの完全性・正確性を自動検証し、不足データ・誤りを検出・通知する機能", () => {
-  // SCEN-698: [error] 営業データ正確性検証機能 - 商談金額と成約金額が大きく乖離している矛盾を検出する
-  test("should detect discrepancy between negotiation amount and contract amount exceeding tolerance threshold", () => {
-    const negotiation_amount = 1000000;
-    const contract_amount = 500000;
-    const tolerance_rate = 0.1;
-    const case_id = "CASE-001";
+describe('営業成果データの自動検証ルール定義と異常検出機能', () => {
+  test('SCEN-698: 月次営業データが必須項目・データ型・値の範囲をすべて満たす場合に異常が検出されない', () => {
+    const salesData = {
+      sales_data_id: 'SD20240115001',
+      customer_id: 'CUST001',
+      service_id: 'SVC001',
+      appointment_count: 5,
+      contract_count: 2,
+      customer_response: 'positive',
+      sales_amount: 150000,
+      sales_date: new Date('2024-01-15T09:00:00Z'),
+      sales_rep_id: 'REP001',
+      status: 'completed'
+    };
 
-    const discrepancy_rate = Math.abs(negotiation_amount - contract_amount) / negotiation_amount;
-    const expected_discrepancy_rate = 0.5;
+    const validationResult = validateSalesData(salesData);
 
-    const result = validateSalesDataAccuracy({
-      case_id: case_id,
-      negotiation_amount: negotiation_amount,
-      contract_amount: contract_amount,
-      tolerance_rate: tolerance_rate,
-    });
-
-    expect(result.is_valid).toBe(false);
-    expect(result.discrepancy_rate).toBe(expected_discrepancy_rate);
-    expect(result.error_message).toMatch(/乖離率/);
-    expect(result.error_message).toMatch(/50%/);
-    expect(result.error_code).toBe("DISCREPANCY_EXCEEDS_THRESHOLD");
-    expect(result.case_id).toBe(case_id);
-    expect(result.timestamp).toBeDefined();
-    expect(typeof result.timestamp).toBe("string");
+    expect(validationResult.is_valid).toBe(true);
+    expect(validationResult.errors).toEqual([]);
+    expect(validationResult.required_fields_check).toBe('success');
+    expect(validationResult.data_type_check).toBe('success');
+    expect(validationResult.range_check).toBe('success');
+    expect(validationResult.abnormality_detected).toBe(false);
+    expect(validationResult.validation_status).toBe('normal');
   });
 });

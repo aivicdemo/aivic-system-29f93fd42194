@@ -1,15 +1,68 @@
-import { defineAggregationRules } from '../../src/logic/it-1-br-1781935279444-1-2-1';
+import { validateSalesDataInput } from '../../src/logic/it-1781935279444-2-1-1';
 
-describe('月次サマリーテンプレートの定義・管理機能', () => {
-  test('SCEN-1026: 空の集計項目リストが入力されたときにエラーが返却される', () => {
-    const input = {
-      extraction_rule_name: '営業成果抽出ルール_202501',
-      aggregation_items: [],
-      report_format: 'pdf',
-      target_period_start: '2025-01-01',
-      target_period_end: '2025-01-31'
+describe('営業データ入力時自動検証機能', () => {
+  test('SCEN-1026: 入力値が許容範囲の最小値・最大値と完全に一致する場合、検証が正常に完了する', () => {
+    // 最小値での検証（金額フィールド: 最小値 0）
+    const minAmountInput = {
+      fieldName: '金額',
+      value: 0,
+      minValue: 0,
+      maxValue: 999999999,
+      dataType: 'number',
+      isRequired: true,
     };
 
-    expect(() => defineAggregationRules(input)).toThrow(/集計項目/);
+    const minAmountResult = validateSalesDataInput(minAmountInput);
+    expect(minAmountResult.isValid).toBe(true);
+    expect(minAmountResult.errors).toEqual([]);
+    expect(minAmountResult.warnings).toEqual([]);
+
+    // 最大値での検証（金額フィールド: 最大値 999999999）
+    const maxAmountInput = {
+      fieldName: '金額',
+      value: 999999999,
+      minValue: 0,
+      maxValue: 999999999,
+      dataType: 'number',
+      isRequired: true,
+    };
+
+    const maxAmountResult = validateSalesDataInput(maxAmountInput);
+    expect(maxAmountResult.isValid).toBe(true);
+    expect(maxAmountResult.errors).toEqual([]);
+    expect(maxAmountResult.warnings).toEqual([]);
+
+    // 最小値での検証（数量フィールド: 最小値 1）
+    const minQuantityInput = {
+      fieldName: '数量',
+      value: 1,
+      minValue: 1,
+      maxValue: 99999,
+      dataType: 'number',
+      isRequired: true,
+    };
+
+    const minQuantityResult = validateSalesDataInput(minQuantityInput);
+    expect(minQuantityResult.isValid).toBe(true);
+    expect(minQuantityResult.errors).toEqual([]);
+    expect(minQuantityResult.warnings).toEqual([]);
+
+    // 最大値での検証（数量フィールド: 最大値 99999）
+    const maxQuantityInput = {
+      fieldName: '数量',
+      value: 99999,
+      minValue: 1,
+      maxValue: 99999,
+      dataType: 'number',
+      isRequired: true,
+    };
+
+    const maxQuantityResult = validateSalesDataInput(maxQuantityInput);
+    expect(maxQuantityResult.isValid).toBe(true);
+    expect(maxQuantityResult.errors).toEqual([]);
+    expect(maxQuantityResult.warnings).toEqual([]);
+
+    // すべての検証が完了し、データが有効な状態であることを確認
+    expect([minAmountResult, maxAmountResult, minQuantityResult, maxQuantityResult].every(r => r.isValid)).toBe(true);
   });
 });

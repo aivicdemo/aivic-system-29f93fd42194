@@ -1,72 +1,97 @@
-import { describe, test, expect } from '@jest/globals';
-import { validateInvoiceForMissingRequiredFields } from '../../src/logic/it-1781935279444-2-1-1';
+import { describe, it, expect, beforeEach } from '@jest/globals';
+import { calculateStaffBillingAccuracyRate } from '../../src/logic/it-1781935279444-2-1-1';
 
 describe('営業データ入力時の品質検証ルール定義・実行機能', () => {
-  test('SCEN-980: 請求書に必須項目が不足している場合、修正要件が自動検出される', () => {
-    // ハッピーパス: 必須項目が不足した請求書データを入力
-    const incompleteInvoice = {
-      invoiceNumber: 'INV-2024-001',
-      // invoiceDate: 欠落
-      invoiceSource: '営業代行企業A',
-      // invoiceTo: 欠落
-      totalAmount: 150000,
-      // description: 欠落
-      dueDate: '2024-02-15',
-      paymentTerms: 'NET30'
-    };
-
-    const result = validateInvoiceForMissingRequiredFields(incompleteInvoice);
-
-    // 修正要件が配列として返されることを確認
-    expect(Array.isArray(result.correctionRequirements)).toBe(true);
-
-    // 修正要件に不足している全ての必須項目が列挙されていることを確認
-    expect(result.correctionRequirements.length).toBe(3);
-
-    const missingFieldNames = result.correctionRequirements.map(
-      (req: { fieldName: string }) => req.fieldName
-    );
-    expect(missingFieldNames).toContain('invoiceDate');
-    expect(missingFieldNames).toContain('invoiceTo');
-    expect(missingFieldNames).toContain('description');
-
-    // 各修正要件に項目名、エラーコード、エラーメッセージが含まれていることを確認
-    result.correctionRequirements.forEach(
-      (req: { fieldName: string; errorCode: string; errorMessage: string }) => {
-        expect(typeof req.fieldName).toBe('string');
-        expect(req.fieldName.length).toBeGreaterThan(0);
-        expect(typeof req.errorCode).toBe('string');
-        expect(req.errorCode.match(/^ERR_/)).toBeTruthy();
-        expect(typeof req.errorMessage).toBe('string');
-        expect(req.errorMessage.length).toBeGreaterThan(0);
+  it('SCEN-980: 請求額算出・検証機能 - スタッフごとの算出結果が基準値以上の一致率を達成できない場合を検出する', () => {
+    // テストデータ準備: 複数スタッフの請求額算出結果
+    const staffBillingResults = [
+      {
+        staffId: 'STAFF-001',
+        calculatedAmount: 100000,
+        referenceAmount: 100000,
+        matchCount: 10,
+        totalCount: 10
+      },
+      {
+        staffId: 'STAFF-002',
+        calculatedAmount: 95000,
+        referenceAmount: 100000,
+        matchCount: 6,
+        totalCount: 10
+      },
+      {
+        staffId: 'STAFF-003',
+        calculatedAmount: 92000,
+        referenceAmount: 100000,
+        matchCount: 4,
+        totalCount: 10
       }
+    ];
+
+    const accuracyThreshold = 0.80; // 基準値: 80%
+
+    // 各スタッフの一致率を計算
+    const accuracyResults = staffBillingResults.map(staff => ({
+      staffId: staff.staffId,
+      accuracyRate: staff.matchCount / staff.totalCount,
+      threshold: accuracyThreshold,
+      isAcceptable: (staff.matchCount / staff.totalCount) >= accuracyThreshold
+    }));
+
+    // 基準値以下のスタッフを検出
+    const staffWithLowAccuracy = accuracyResults.filter(
+      result => result.accuracyRate < accuracyThreshold
     );
 
-    // 修正要件の形式がスキーマに準拠していることを検証
-    expect(result.validationPassed).toBe(false);
-    expect(result.correctionRequirements[0]).toHaveProperty('fieldName');
-    expect(result.correctionRequirements[0]).toHaveProperty('errorCode');
-    expect(result.correctionRequirements[0]).toHaveProperty('errorMessage');
+    // エラー検出ロジック実行
+    const errorDetected = staffWithLowAccuracy.length > 0;
 
-    // 不足している項目の具体的なエラーコードを確認
-    const invoiceDateError = result.correctionRequirements.find(
-      (req: { fieldName: string }) => req.fieldName === 'invoiceDate'
+    // 期待結果の検証
+    expect(errorDetected).toBe(true);
+    expect(staffWithLowAccuracy).toHaveLength(2);
+    expect(staffWithLowAccuracy[0]).toEqual({
+      staffId: 'STAFF-002',
+      accuracyRate: 0.6,
+      threshold: 0.8,
+      isAcceptable: false
+    });
+    expect(staffWithLowAccuracy[1]).toEqual({
+      staffId: 'STAFF-003',
+      accuracyRate: 0.4,
+      threshold: 0.8,
+      isAcceptable: false
+    });
+
+    // エラーメッセージの内容検証
+    const errorReport = staffWithLowAccuracy.map(result => ({
+      staffId: result.staffId,
+      actualAccuracyRate: (result.accuracyRate * 100).toFixed(1),
+      expectedThreshold: (result.threshold * 100).toFixed(1),
+      differencePercentage: ((result.threshold - result.accuracyRate) * 100).toFixed(1)
+    }));
+
+    expect(errorReport).toHaveLength(2);
+    expect(errorReport[0].staffId).toBe('STAFF-002');
+    expect(errorReport[0].actualAccuracyRate).toBe('60.0');
+    expect(errorReport[0].expectedThreshold).toBe('80.0');
+    expect(errorReport[0].differencePercentage).toBe('20.0');
+    expect(errorReport[1].staffId).toBe('STAFF-003');
+    expect(errorReport[1].actualAccuracyRate).toBe('40.0');
+    expect(errorReport[1].expectedThreshold).toBe('80.0');
+    expect(errorReport[1].differencePercentage).toBe('40.0');
+
+    // calculateStaffBillingAccuracyRate関数の呼び出しと検証
+    const result = calculateStaffBillingAccuracyRate(
+      staffBillingResults,
+      accuracyThreshold
     );
-    expect(invoiceDateError.errorCode).toBe('ERR_MISSING_INVOICE_DATE');
 
-    const invoiceToError = result.correctionRequirements.find(
-      (req: { fieldName: string }) => req.fieldName === 'invoiceTo'
-    );
-    expect(invoiceToError.errorCode).toBe('ERR_MISSING_INVOICE_TO');
-
-    const descriptionError = result.correctionRequirements.find(
-      (req: { fieldName: string }) => req.fieldName === 'description'
-    );
-    expect(descriptionError.errorCode).toBe('ERR_MISSING_DESCRIPTION');
-
-    // エラーメッセージが業務的に理解可能であることを確認
-    expect(invoiceDateError.errorMessage).toMatch(/請求日/);
-    expect(invoiceToError.errorMessage).toMatch(/請求先/);
-    expect(descriptionError.errorMessage).toMatch(/摘要/);
+    expect(result.hasInsufficientAccuracy).toBe(true);
+    expect(result.staffWithLowAccuracy).toHaveLength(2);
+    expect(result.staffWithLowAccuracy[0].staffId).toBe('STAFF-002');
+    expect(result.staffWithLowAccuracy[0].accuracyRate).toBe(0.6);
+    expect(result.staffWithLowAccuracy[1].staffId).toBe('STAFF-003');
+    expect(result.staffWithLowAccuracy[1].accuracyRate).toBe(0.4);
+    expect(result.errorMessage).toMatch(/一致率/);
   });
 });

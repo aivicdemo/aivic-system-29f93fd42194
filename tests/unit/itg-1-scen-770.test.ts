@@ -1,112 +1,108 @@
-import { describe, test, expect } from "@jest/globals";
-import {
-  determineEffectiveDocumentVersion,
-} from "../../src/logic/it-1781935279444-2-1-1";
+import { searchContractDocuments } from "../../src/logic/it-1781935279444-2-2-1";
 
-describe("営業データ入力時の品質検証ルール定義・実行機能", () => {
-  test("SCEN-770: 複数バージョンが同一有効期限を持つ場合にエラーまたは優先順位適用", () => {
-    // テストデータ: 同一顧客ID、案件ID、資料種別で複数バージョン
-    const customerId = "CUST-001";
-    const projectId = "PROJ-001";
-    const documentType = "proposal";
-    const commonEffectiveDate = "2024-12-31";
+describe("資料検索フィルタリング機能 - 有効期限外の資料は検索結果から除外される", () => {
+  test("SCEN-770: 有効期限内の資料のみが検索結果に含まれることを確認", () => {
+    // 入力: 検索条件と資料マスタデータ
+    const search_customer_id = "CUST-12345";
+    const search_document_type = "contract";
+    const search_as_of_date = new Date("2024-03-15T00:00:00Z");
 
-    const versions = [
+    const documents = [
       {
-        versionId: "v1-001",
-        versionNumber: 1.0,
-        customerId,
-        projectId,
-        documentType,
-        effectiveStartDate: "2024-01-01",
-        effectiveEndDate: commonEffectiveDate,
-        createdAt: "2024-06-01T10:00:00Z",
-        status: "active",
+        doc_id: "DOC-001",
+        customer_id: "CUST-12345",
+        document_type: "contract",
+        document_name: "基本契約書 v1",
+        effective_start_date: new Date("2024-01-01T00:00:00Z"),
+        effective_end_date: new Date("2024-06-30T23:59:59Z"),
+        is_active: true,
+        version: 1,
       },
       {
-        versionId: "v2-001",
-        versionNumber: 2.0,
-        customerId,
-        projectId,
-        documentType,
-        effectiveStartDate: "2024-01-01",
-        effectiveEndDate: commonEffectiveDate,
-        createdAt: "2024-07-15T14:30:00Z",
-        status: "active",
+        doc_id: "DOC-002",
+        customer_id: "CUST-12345",
+        document_type: "contract",
+        document_name: "基本契約書 v2",
+        effective_start_date: new Date("2024-02-01T00:00:00Z"),
+        effective_end_date: new Date("2023-12-31T23:59:59Z"),
+        is_active: false,
+        version: 2,
       },
       {
-        versionId: "v3-001",
-        versionNumber: 3.0,
-        customerId,
-        projectId,
-        documentType,
-        effectiveStartDate: "2024-01-01",
-        effectiveEndDate: commonEffectiveDate,
-        createdAt: "2024-08-20T09:45:00Z",
-        status: "active",
+        doc_id: "DOC-003",
+        customer_id: "CUST-12345",
+        document_type: "contract",
+        document_name: "基本契約書 v3",
+        effective_start_date: new Date("2024-04-01T00:00:00Z"),
+        effective_end_date: new Date("2024-12-31T23:59:59Z"),
+        is_active: true,
+        version: 3,
+      },
+      {
+        doc_id: "DOC-004",
+        customer_id: "CUST-99999",
+        document_type: "contract",
+        document_name: "他顧客契約書",
+        effective_start_date: new Date("2024-01-01T00:00:00Z"),
+        effective_end_date: new Date("2024-06-30T23:59:59Z"),
+        is_active: true,
+        version: 1,
       },
     ];
 
-    const result = determineEffectiveDocumentVersion({
-      customerId,
-      projectId,
-      documentType,
-      versions,
-      referenceDate: "2024-09-01",
+    // 実行: 検索関数を呼び出し
+    const result = searchContractDocuments({
+      customer_id: search_customer_id,
+      document_type: search_document_type,
+      as_of_date: search_as_of_date,
+      documents: documents,
     });
 
-    // 期待結果: 最新のバージョン番号（v3.0）が有効と判定されるか、
-    // またはシステムエラーを発生させるか明確な優先順位ルール適用結果
-    expect(result).toBeDefined();
+    // 検証1: 検索結果のドキュメント数が正確であること
+    expect(result.length).toBe(2);
 
-    // ケース1: システムが優先順位ルールを適用し、最新バージョンを選択
-    if (result.errorCode === null) {
-      expect(result.effectiveVersionId).toBe("v3-001");
-      expect(result.effectiveVersionNumber).toBe(3.0);
-      expect(result.priorityRule).toBe("highest_version_number");
-      expect(result.conflictResolved).toBe(true);
-    }
-    // ケース2: システムがエラーを発生させる
-    else if (result.errorCode === "AMBIGUOUS_EFFECTIVE_VERSION") {
-      expect(result.errorMessage).toMatch(/有効期限/);
-      expect(result.conflictingVersionIds).toEqual([
-        "v1-001",
-        "v2-001",
-        "v3-001",
-      ]);
-      expect(result.recommendedAction).toBe("manual_review_required");
-    }
-    // ケース3: 作成日時が最新のものを優先
-    else if (result.errorCode === null && result.priorityRule === "latest_created_at") {
-      expect(result.effectiveVersionId).toBe("v3-001");
-      expect(result.effectiveVersionNumber).toBe(3.0);
-      expect(result.conflictResolved).toBe(true);
-    }
+    // 検証2: 有効期限内の資料のみが含まれること
+    const returned_doc_ids = result.map((doc) => doc.doc_id);
+    expect(returned_doc_ids).toEqual(["DOC-001", "DOC-003"]);
 
-    // 共通の検証: 結果は明確で曖昧な状態ではないこと
-    expect(
-      result.errorCode === null ||
-        result.errorCode === "AMBIGUOUS_EFFECTIVE_VERSION"
-    ).toBe(true);
+    // 検証3: 各結果資料が指定顧客かつ指定document_typeであること
+    result.forEach((doc) => {
+      expect(doc.customer_id).toBe(search_customer_id);
+      expect(doc.document_type).toBe(search_document_type);
+    });
 
-    // ユーザーに対して結果またはエラーメッセージが明確に示されること
-    if (result.errorCode === null) {
-      expect(result.effectiveVersionId).toBeDefined();
-      expect(result.effectiveVersionNumber).toBeDefined();
-      expect(result.priorityRule).toBeDefined();
-    } else {
-      expect(result.errorMessage).toBeDefined();
-      expect(result.errorMessage.length).toBeGreaterThan(0);
-    }
+    // 検証4: 各結果資料の有効期限が検索時点を包含すること
+    result.forEach((doc) => {
+      expect(doc.effective_start_date.getTime()).toBeLessThanOrEqual(
+        search_as_of_date.getTime()
+      );
+      expect(doc.effective_end_date.getTime()).toBeGreaterThanOrEqual(
+        search_as_of_date.getTime()
+      );
+    });
 
-    // ログに優先順位適用結果が記録されていることを確認
-    expect(result.auditLog).toBeDefined();
-    expect(result.auditLog.length).toBeGreaterThan(0);
-    expect(result.auditLog[0]).toHaveProperty("timestamp");
-    expect(result.auditLog[0]).toHaveProperty("action");
-    expect(
-      result.auditLog[0].action === "priority_rule_applied" ||
-        result.auditLog[0].action === "ambiguity_detected"
-    ).toBe(true);
+    // 検証5: DOC-002（有効期限外）が除外されていること
+    const excluded_ids = documents
+      .filter((doc) => doc.doc_id === "DOC-002")
+      .map((doc) => doc.doc_id);
+    excluded_ids.forEach((excluded_id) => {
+      expect(returned_doc_ids).not.toContain(excluded_id);
+    });
+
+    // 検証6: DOC-004（異なる顧客）が除外されていること
+    expect(returned_doc_ids).not.toContain("DOC-004");
+
+    // 検証7: 結果に期待される資料の詳細情報が含まれること
+    const doc_001 = result.find((doc) => doc.doc_id === "DOC-001");
+    expect(doc_001).toBeDefined();
+    expect(doc_001?.document_name).toBe("基本契約書 v1");
+    expect(doc_001?.version).toBe(1);
+    expect(doc_001?.is_active).toBe(true);
+
+    const doc_003 = result.find((doc) => doc.doc_id === "DOC-003");
+    expect(doc_003).toBeDefined();
+    expect(doc_003?.document_name).toBe("基本契約書 v3");
+    expect(doc_003?.version).toBe(3);
+    expect(doc_003?.is_active).toBe(true);
   });
 });

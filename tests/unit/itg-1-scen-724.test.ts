@@ -1,143 +1,298 @@
-import { validateSalesDataAfterCorrection } from "../../src/logic/it-1781935279444-2-2-1";
+import { describe, test, expect, beforeEach } from '@jest/globals';
+import { validateSalesDataForApproval } from '../../src/logic/it-1781935279444-2-1-1';
 
-describe("営業データの完全性・正確性を自動検証し、不足データ・誤りを検出・通知する機能", () => {
-  // SCEN-724: [error] 修正後データ再検証 - 修正後の必須項目が再度空欄で不合格判定となる
-  test("修正後のデータ再検証で必須項目が空欄の場合、検証失敗で不合格判定となること", () => {
-    const corrected_record_id = "REC_001";
-    const corrected_customer_name = "テスト顧客";
-    const corrected_amount = 50000;
-    const corrected_billing_date = "2024-01-15";
-    const corrected_contact_date = "2024-01-10";
-    const corrected_status = "成約";
+describe('営業データ入力時の品質検証ルール定義・実行機能', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
 
-    // 修正後のレコード：すべての必須項目が入力されている
-    const corrected_data = {
-      record_id: corrected_record_id,
-      customer_name: corrected_customer_name,
-      amount: corrected_amount,
-      billing_date: corrected_billing_date,
-      contact_date: corrected_contact_date,
-      status: corrected_status,
+  // SCEN-724
+  test('修正済みデータの形式が不正（データ型不整合）で、承認が拒否される', () => {
+    const sales_data_id = 'SD-20240115-001';
+    const corrected_sales_data = {
+      customer_id: 'CUST-12345',
+      service_id: 'SVC-67890',
+      sales_amount: '12,345円',
+      contact_date: '2024-01-15',
+      deal_status: 'closed',
+      appointment_confirmed: true
     };
+    const approver_user_id = 'USER-APPROVER-001';
 
-    // 検証ルール：必須項目リスト
-    const required_fields = [
-      "customer_name",
-      "amount",
-      "billing_date",
-      "contact_date",
-      "status",
-    ];
-
-    // ケース 1: 修正後、必須項目（顧客名）が空欄に戻された場合
-    const corrupted_data_1 = {
-      record_id: corrected_record_id,
-      customer_name: "",
-      amount: corrected_amount,
-      billing_date: corrected_billing_date,
-      contact_date: corrected_contact_date,
-      status: corrected_status,
-    };
-
-    const result_1 = validateSalesDataAfterCorrection(
-      corrupted_data_1,
-      required_fields
-    );
-
-    expect(result_1).toEqual({
-      is_valid: false,
-      validation_status: "検証失敗",
-      judgment: "不合格",
-      missing_fields: ["customer_name"],
-      error_details: [
-        {
-          field_name: "customer_name",
-          error_message: "顧客名が空欄です",
+    const validation_result = validateSalesDataForApproval({
+      sales_data_id,
+      corrected_sales_data,
+      approver_user_id,
+      validation_rules: {
+        sales_amount: {
+          data_type: 'number',
+          required: true,
+          min_value: 0,
+          max_value: 999999999
         },
-      ],
+        customer_id: {
+          data_type: 'string',
+          required: true,
+          pattern: '^CUST-\\d+$'
+        },
+        service_id: {
+          data_type: 'string',
+          required: true,
+          pattern: '^SVC-\\d+$'
+        },
+        contact_date: {
+          data_type: 'string',
+          required: true,
+          pattern: '^\\d{4}-\\d{2}-\\d{2}$'
+        },
+        deal_status: {
+          data_type: 'string',
+          required: true,
+          allowed_values: ['open', 'closed', 'pending']
+        },
+        appointment_confirmed: {
+          data_type: 'boolean',
+          required: true
+        }
+      }
     });
 
-    // ケース 2: 修正後、必須項目（金額）が空欄に戻された場合
-    const corrupted_data_2 = {
-      record_id: corrected_record_id,
-      customer_name: corrected_customer_name,
-      amount: null,
-      billing_date: corrected_billing_date,
-      contact_date: corrected_contact_date,
-      status: corrected_status,
+    expect(validation_result.is_approved).toBe(false);
+    expect(validation_result.approval_status).toBe('拒否');
+    expect(validation_result.validation_errors).toHaveLength(1);
+    expect(validation_result.validation_errors[0].field_name).toBe('sales_amount');
+    expect(validation_result.validation_errors[0].error_code).toBe('DATA_TYPE_MISMATCH');
+    expect(validation_result.validation_errors[0].error_message).toMatch(/営業金額は数値型である必要があります/);
+    expect(validation_result.should_return_to_corrector).toBe(true);
+    expect(validation_result.rejection_reason).toMatch(/営業金額/);
+  });
+
+  test('修正済みデータが形式要件を満たし、承認が受理される', () => {
+    const sales_data_id = 'SD-20240115-002';
+    const corrected_sales_data = {
+      customer_id: 'CUST-54321',
+      service_id: 'SVC-11111',
+      sales_amount: 25000,
+      contact_date: '2024-01-15',
+      deal_status: 'closed',
+      appointment_confirmed: true
     };
+    const approver_user_id = 'USER-APPROVER-001';
 
-    const result_2 = validateSalesDataAfterCorrection(
-      corrupted_data_2,
-      required_fields
-    );
-
-    expect(result_2).toEqual({
-      is_valid: false,
-      validation_status: "検証失敗",
-      judgment: "不合格",
-      missing_fields: ["amount"],
-      error_details: [
-        {
-          field_name: "amount",
-          error_message: "金額が空欄です",
+    const validation_result = validateSalesDataForApproval({
+      sales_data_id,
+      corrected_sales_data,
+      approver_user_id,
+      validation_rules: {
+        sales_amount: {
+          data_type: 'number',
+          required: true,
+          min_value: 0,
+          max_value: 999999999
         },
-      ],
+        customer_id: {
+          data_type: 'string',
+          required: true,
+          pattern: '^CUST-\\d+$'
+        },
+        service_id: {
+          data_type: 'string',
+          required: true,
+          pattern: '^SVC-\\d+$'
+        },
+        contact_date: {
+          data_type: 'string',
+          required: true,
+          pattern: '^\\d{4}-\\d{2}-\\d{2}$'
+        },
+        deal_status: {
+          data_type: 'string',
+          required: true,
+          allowed_values: ['open', 'closed', 'pending']
+        },
+        appointment_confirmed: {
+          data_type: 'boolean',
+          required: true
+        }
+      }
     });
 
-    // ケース 3: 修正後、複数の必須項目（請求日・ステータス）が空欄に戻された場合
-    const corrupted_data_3 = {
-      record_id: corrected_record_id,
-      customer_name: corrected_customer_name,
-      amount: corrected_amount,
-      billing_date: "",
-      contact_date: corrected_contact_date,
-      status: "",
+    expect(validation_result.is_approved).toBe(true);
+    expect(validation_result.approval_status).toBe('承認');
+    expect(validation_result.validation_errors).toHaveLength(0);
+    expect(validation_result.should_return_to_corrector).toBe(false);
+    expect(validation_result.approved_by_user_id).toBe('USER-APPROVER-001');
+    expect(validation_result.approval_timestamp).toBeDefined();
+  });
+
+  test('複数の形式エラーが検出され、すべてがエラーリストに含まれる', () => {
+    const sales_data_id = 'SD-20240115-003';
+    const corrected_sales_data = {
+      customer_id: 'INVALID-001',
+      service_id: 'SVC-22222',
+      sales_amount: '無効な金額',
+      contact_date: '2024/01/15',
+      deal_status: 'unknown',
+      appointment_confirmed: 'true'
     };
+    const approver_user_id = 'USER-APPROVER-002';
 
-    const result_3 = validateSalesDataAfterCorrection(
-      corrupted_data_3,
-      required_fields
-    );
-
-    expect(result_3).toEqual({
-      is_valid: false,
-      validation_status: "検証失敗",
-      judgment: "不合格",
-      missing_fields: ["billing_date", "status"],
-      error_details: [
-        {
-          field_name: "billing_date",
-          error_message: "請求日が空欄です",
+    const validation_result = validateSalesDataForApproval({
+      sales_data_id,
+      corrected_sales_data,
+      approver_user_id,
+      validation_rules: {
+        sales_amount: {
+          data_type: 'number',
+          required: true,
+          min_value: 0,
+          max_value: 999999999
         },
-        {
-          field_name: "status",
-          error_message: "ステータスが空欄です",
+        customer_id: {
+          data_type: 'string',
+          required: true,
+          pattern: '^CUST-\\d+$'
         },
-      ],
+        service_id: {
+          data_type: 'string',
+          required: true,
+          pattern: '^SVC-\\d+$'
+        },
+        contact_date: {
+          data_type: 'string',
+          required: true,
+          pattern: '^\\d{4}-\\d{2}-\\d{2}$'
+        },
+        deal_status: {
+          data_type: 'string',
+          required: true,
+          allowed_values: ['open', 'closed', 'pending']
+        },
+        appointment_confirmed: {
+          data_type: 'boolean',
+          required: true
+        }
+      }
     });
 
-    // ケース 4: 修正後、すべての必須項目が入力されている場合（成功ケース）
-    const valid_data = {
-      record_id: corrected_record_id,
-      customer_name: corrected_customer_name,
-      amount: corrected_amount,
-      billing_date: corrected_billing_date,
-      contact_date: corrected_contact_date,
-      status: corrected_status,
-    };
-
-    const result_4 = validateSalesDataAfterCorrection(
-      valid_data,
-      required_fields
+    expect(validation_result.is_approved).toBe(false);
+    expect(validation_result.approval_status).toBe('拒否');
+    expect(validation_result.validation_errors.length).toBeGreaterThan(1);
+    expect(validation_result.validation_errors.map((e: any) => e.field_name)).toEqual(
+      expect.arrayContaining(['sales_amount', 'customer_id', 'contact_date', 'deal_status', 'appointment_confirmed'])
     );
+    expect(validation_result.should_return_to_corrector).toBe(true);
+  });
 
-    expect(result_4).toEqual({
-      is_valid: true,
-      validation_status: "検証成功",
-      judgment: "合格",
-      missing_fields: [],
-      error_details: [],
+  test('必須項目が欠落し、承認が拒否される', () => {
+    const sales_data_id = 'SD-20240115-004';
+    const corrected_sales_data = {
+      customer_id: 'CUST-99999',
+      service_id: 'SVC-33333',
+      contact_date: '2024-01-15',
+      deal_status: 'closed'
+    };
+    const approver_user_id = 'USER-APPROVER-001';
+
+    const validation_result = validateSalesDataForApproval({
+      sales_data_id,
+      corrected_sales_data,
+      approver_user_id,
+      validation_rules: {
+        sales_amount: {
+          data_type: 'number',
+          required: true,
+          min_value: 0,
+          max_value: 999999999
+        },
+        customer_id: {
+          data_type: 'string',
+          required: true,
+          pattern: '^CUST-\\d+$'
+        },
+        service_id: {
+          data_type: 'string',
+          required: true,
+          pattern: '^SVC-\\d+$'
+        },
+        contact_date: {
+          data_type: 'string',
+          required: true,
+          pattern: '^\\d{4}-\\d{2}-\\d{2}$'
+        },
+        deal_status: {
+          data_type: 'string',
+          required: true,
+          allowed_values: ['open', 'closed', 'pending']
+        },
+        appointment_confirmed: {
+          data_type: 'boolean',
+          required: true
+        }
+      }
     });
+
+    expect(validation_result.is_approved).toBe(false);
+    expect(validation_result.approval_status).toBe('拒否');
+    expect(validation_result.validation_errors.map((e: any) => e.field_name)).toEqual(
+      expect.arrayContaining(['sales_amount', 'appointment_confirmed'])
+    );
+    expect(validation_result.validation_errors.some((e: any) => e.error_code === 'REQUIRED_FIELD_MISSING')).toBe(true);
+  });
+
+  test('数値の範囲外エラーが検出され、承認が拒否される', () => {
+    const sales_data_id = 'SD-20240115-005';
+    const corrected_sales_data = {
+      customer_id: 'CUST-88888',
+      service_id: 'SVC-44444',
+      sales_amount: 9999999999,
+      contact_date: '2024-01-15',
+      deal_status: 'closed',
+      appointment_confirmed: true
+    };
+    const approver_user_id = 'USER-APPROVER-001';
+
+    const validation_result = validateSalesDataForApproval({
+      sales_data_id,
+      corrected_sales_data,
+      approver_user_id,
+      validation_rules: {
+        sales_amount: {
+          data_type: 'number',
+          required: true,
+          min_value: 0,
+          max_value: 999999999
+        },
+        customer_id: {
+          data_type: 'string',
+          required: true,
+          pattern: '^CUST-\\d+$'
+        },
+        service_id: {
+          data_type: 'string',
+          required: true,
+          pattern: '^SVC-\\d+$'
+        },
+        contact_date: {
+          data_type: 'string',
+          required: true,
+          pattern: '^\\d{4}-\\d{2}-\\d{2}$'
+        },
+        deal_status: {
+          data_type: 'string',
+          required: true,
+          allowed_values: ['open', 'closed', 'pending']
+        },
+        appointment_confirmed: {
+          data_type: 'boolean',
+          required: true
+        }
+      }
+    });
+
+    expect(validation_result.is_approved).toBe(false);
+    expect(validation_result.approval_status).toBe('拒否');
+    expect(validation_result.validation_errors.some((e: any) => e.field_name === 'sales_amount')).toBe(true);
+    expect(validation_result.validation_errors.find((e: any) => e.field_name === 'sales_amount')?.error_code).toMatch(/RANGE|VALUE/);
   });
 });

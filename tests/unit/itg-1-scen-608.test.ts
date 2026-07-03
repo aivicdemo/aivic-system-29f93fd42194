@@ -1,192 +1,130 @@
-import { extractBillingTargetItems, aggregateBillingAmountByCustomer } from '../../src/logic/it-1781935279444-1-1-1';
+import { generateInvoiceAndReport } from '../../src/logic/it-1-br-1781935279444-1-2-1';
 
-describe('営業データ項目のメタデータ管理機能 - 請求対象項目抽出・請求額集計', () => {
-  test('SCEN-608: 複数顧客の営業データが顧客ごとに正確に分離集計される', () => {
-    // ========== テストデータ準備 ==========
-    // 3社以上の異なる顧客データを準備（顧客ID、売上金額、請求対象項目を含む）
-    const salesData = [
-      {
-        customerId: 'CUST-001',
-        customerName: '顧客A',
-        saleAmount: 100000,
-        serviceType: 'SERVICE_A',
-        appointmentCount: 5,
-        contractCount: 2,
-        isInvoicingTarget: true,
+describe('月次サマリーテンプレートの定義・管理機能', () => {
+  // SCEN-608: [normal] 請求書・成果レポート自動生成機能
+  test('定義済みテンプレートに基づき請求書・成果レポートが正確に自動生成される', async () => {
+    const input = {
+      templateId: 'tpl_invoice_001',
+      reportTemplateId: 'tpl_report_001',
+      targetPeriod: {
+        startDate: '2024-01-01',
+        endDate: '2024-01-31',
       },
-      {
-        customerId: 'CUST-001',
-        customerName: '顧客A',
-        saleAmount: 50000,
-        serviceType: 'SERVICE_B',
-        appointmentCount: 3,
-        contractCount: 1,
-        isInvoicingTarget: true,
-      },
-      {
-        customerId: 'CUST-002',
-        customerName: '顧客B',
-        saleAmount: 200000,
-        serviceType: 'SERVICE_A',
+      customers: [
+        {
+          customerId: 'cust_001',
+          customerName: '顧客A企業',
+          contractId: 'contract_001',
+          serviceName: 'サービスA',
+          unitPrice: 50000,
+          quantity: 2,
+          discountRate: 0.1,
+        },
+        {
+          customerId: 'cust_002',
+          customerName: '顧客B企業',
+          contractId: 'contract_002',
+          serviceName: 'サービスB',
+          unitPrice: 75000,
+          quantity: 1,
+          discountRate: 0.05,
+        },
+      ],
+      performanceMetrics: [
+        {
+          customerId: 'cust_001',
+          appointmentCount: 10,
+          contractCount: 3,
+          customerResponse: 'positive',
+        },
+        {
+          customerId: 'cust_002',
+          appointmentCount: 8,
+          contractCount: 2,
+          customerResponse: 'neutral',
+        },
+      ],
+      outputFormat: 'pdf',
+    };
+
+    const result = await generateInvoiceAndReport(input);
+
+    // 生成ステータスの確認
+    expect(result.status).toBe('success');
+
+    // 請求書の生成確認
+    expect(result.invoices).toHaveLength(2);
+    expect(result.invoices[0]).toEqual(
+      expect.objectContaining({
+        customerId: 'cust_001',
+        customerName: '顧客A企業',
+        invoiceAmount: 90000, // (50000 * 2) * (1 - 0.1) = 90000
+        invoiceDate: '2024-01-31',
+        outputFormat: 'pdf',
+      })
+    );
+    expect(result.invoices[1]).toEqual(
+      expect.objectContaining({
+        customerId: 'cust_002',
+        customerName: '顧客B企業',
+        invoiceAmount: 71250, // (75000 * 1) * (1 - 0.05) = 71250
+        invoiceDate: '2024-01-31',
+        outputFormat: 'pdf',
+      })
+    );
+
+    // 成果レポートの生成確認
+    expect(result.reports).toHaveLength(2);
+    expect(result.reports[0]).toEqual(
+      expect.objectContaining({
+        customerId: 'cust_001',
+        customerName: '顧客A企業',
         appointmentCount: 10,
-        contractCount: 4,
-        isInvoicingTarget: true,
-      },
-      {
-        customerId: 'CUST-002',
-        customerName: '顧客B',
-        saleAmount: 75000,
-        serviceType: 'SERVICE_C',
-        appointmentCount: 2,
-        contractCount: 1,
-        isInvoicingTarget: true,
-      },
-      {
-        customerId: 'CUST-003',
-        customerName: '顧客C',
-        saleAmount: 150000,
-        serviceType: 'SERVICE_B',
-        appointmentCount: 8,
         contractCount: 3,
-        isInvoicingTarget: true,
-      },
-      {
-        customerId: 'CUST-003',
-        customerName: '顧客C',
-        saleAmount: 125000,
-        serviceType: 'SERVICE_A',
-        appointmentCount: 6,
+        customerResponse: 'positive',
+        reportDate: '2024-01-31',
+        outputFormat: 'pdf',
+      })
+    );
+    expect(result.reports[1]).toEqual(
+      expect.objectContaining({
+        customerId: 'cust_002',
+        customerName: '顧客B企業',
+        appointmentCount: 8,
         contractCount: 2,
-        isInvoicingTarget: true,
-      },
-    ];
-
-    // ========== 請求対象項目抽出機能を実行 ==========
-    const extractedBillingItems = extractBillingTargetItems(salesData);
-
-    // ========== 各顧客のデータが顧客IDごとに正確に分離されていることを確認 ==========
-    // 抽出結果に含まれる顧客IDのセット
-    const uniqueCustomerIds = new Set(
-      extractedBillingItems.map((item) => item.customerId)
-    );
-    expect(uniqueCustomerIds.size).toBe(3);
-    expect(uniqueCustomerIds.has('CUST-001')).toBe(true);
-    expect(uniqueCustomerIds.has('CUST-002')).toBe(true);
-    expect(uniqueCustomerIds.has('CUST-003')).toBe(true);
-
-    // 顧客Aのデータ件数が正確に2件であることを確認
-    const custAItems = extractedBillingItems.filter(
-      (item) => item.customerId === 'CUST-001'
-    );
-    expect(custAItems.length).toBe(2);
-
-    // 顧客Bのデータ件数が正確に2件であることを確認
-    const custBItems = extractedBillingItems.filter(
-      (item) => item.customerId === 'CUST-002'
-    );
-    expect(custBItems.length).toBe(2);
-
-    // 顧客Cのデータ件数が正確に2件であることを確認
-    const custCItems = extractedBillingItems.filter(
-      (item) => item.customerId === 'CUST-003'
-    );
-    expect(custCItems.length).toBe(2);
-
-    // ========== 顧客ごとの請求額集計機能を実行 ==========
-    const billingAggregation = aggregateBillingAmountByCustomer(
-      extractedBillingItems
+        customerResponse: 'neutral',
+        reportDate: '2024-01-31',
+        outputFormat: 'pdf',
+      })
     );
 
-    // ========== 顧客Aの売上データを集計し、合計金額を検証 ==========
-    // 顧客A: 100,000 + 50,000 = 150,000
-    const custABillingAmount = billingAggregation.find(
-      (agg) => agg.customerId === 'CUST-001'
-    );
-    expect(custABillingAmount).toBeDefined();
-    expect(custABillingAmount?.totalBillingAmount).toBe(150000);
-    expect(custABillingAmount?.customerName).toBe('顧客A');
-    expect(custABillingAmount?.itemCount).toBe(2);
+    // 請求書と成果レポートのデータ一致確認
+    expect(result.invoices[0].customerName).toBe(result.reports[0].customerName);
+    expect(result.invoices[0].customerId).toBe(result.reports[0].customerId);
+    expect(result.invoices[1].customerName).toBe(result.reports[1].customerName);
+    expect(result.invoices[1].customerId).toBe(result.reports[1].customerId);
 
-    // ========== 顧客Bの売上データを集計し、合計金額を検証 ==========
-    // 顧客B: 200,000 + 75,000 = 275,000
-    const custBBillingAmount = billingAggregation.find(
-      (agg) => agg.customerId === 'CUST-002'
-    );
-    expect(custBBillingAmount).toBeDefined();
-    expect(custBBillingAmount?.totalBillingAmount).toBe(275000);
-    expect(custBBillingAmount?.customerName).toBe('顧客B');
-    expect(custBBillingAmount?.itemCount).toBe(2);
+    // PDF出力形式の確認
+    expect(result.invoices[0].outputFormat).toBe('pdf');
+    expect(result.invoices[1].outputFormat).toBe('pdf');
+    expect(result.reports[0].outputFormat).toBe('pdf');
+    expect(result.reports[1].outputFormat).toBe('pdf');
 
-    // ========== 顧客Cの売上データを集計し、合計金額を検証 ==========
-    // 顧客C: 150,000 + 125,000 = 275,000
-    const custCBillingAmount = billingAggregation.find(
-      (agg) => agg.customerId === 'CUST-003'
-    );
-    expect(custCBillingAmount).toBeDefined();
-    expect(custCBillingAmount?.totalBillingAmount).toBe(275000);
-    expect(custCBillingAmount?.customerName).toBe('顧客C');
-    expect(custCBillingAmount?.itemCount).toBe(2);
+    // 一括処理の完全性確認
+    expect(result.invoices.every(inv => inv.invoiceDate === '2024-01-31')).toBe(true);
+    expect(result.reports.every(rep => rep.reportDate === '2024-01-31')).toBe(true);
 
-    // ========== 各顧客の請求対象項目が他の顧客と混在していないことを確認 ==========
-    // 顧客Aのアイテムはすべて顧客A IDのみであることを確認
-    const custAHasMixedCustomerId = custAItems.some(
-      (item) => item.customerId !== 'CUST-001'
-    );
-    expect(custAHasMixedCustomerId).toBe(false);
-
-    // 顧客Bのアイテムはすべて顧客B IDのみであることを確認
-    const custBHasMixedCustomerId = custBItems.some(
-      (item) => item.customerId !== 'CUST-002'
-    );
-    expect(custBHasMixedCustomerId).toBe(false);
-
-    // 顧客Cのアイテムはすべて顧客C IDのみであることを確認
-    const custCHasMixedCustomerId = custCItems.some(
-      (item) => item.customerId !== 'CUST-003'
-    );
-    expect(custCHasMixedCustomerId).toBe(false);
-
-    // ========== 全顧客の集計合計が元データの総合計と一致することを確認 ==========
-    // 元データの総合計: 100,000 + 50,000 + 200,000 + 75,000 + 150,000 + 125,000 = 700,000
-    const expectedTotalAmount = 700000;
-    const actualTotalAmount = billingAggregation.reduce(
-      (sum, agg) => sum + agg.totalBillingAmount,
-      0
-    );
-    expect(actualTotalAmount).toBe(expectedTotalAmount);
-
-    // 集計結果の顧客数が3であることを確認
-    expect(billingAggregation.length).toBe(3);
-
-    // 各顧客の集計結果がすべて有効な正の金額であることを確認
-    billingAggregation.forEach((agg) => {
-      expect(agg.totalBillingAmount).toBeGreaterThan(0);
-      expect(agg.customerId).toMatch(/^CUST-\d{3}$/);
-      expect(agg.itemCount).toBeGreaterThan(0);
+    // テンプレート適用確認
+    expect(result.appliedTemplates).toEqual({
+      invoiceTemplate: 'tpl_invoice_001',
+      reportTemplate: 'tpl_report_001',
     });
 
-    // ========== 詳細な集計値の正確性を最終検証 ==========
-    expect(billingAggregation).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          customerId: 'CUST-001',
-          customerName: '顧客A',
-          totalBillingAmount: 150000,
-          itemCount: 2,
-        }),
-        expect.objectContaining({
-          customerId: 'CUST-002',
-          customerName: '顧客B',
-          totalBillingAmount: 275000,
-          itemCount: 2,
-        }),
-        expect.objectContaining({
-          customerId: 'CUST-003',
-          customerName: '顧客C',
-          totalBillingAmount: 275000,
-          itemCount: 2,
-        }),
-      ])
-    );
+    // 生成ファイル情報の確認
+    expect(result.generatedFiles).toBeDefined();
+    expect(result.generatedFiles.invoiceFiles).toHaveLength(2);
+    expect(result.generatedFiles.reportFiles).toHaveLength(2);
+    expect(result.generatedFiles.invoiceFiles[0]).toMatch(/\.pdf$/);
+    expect(result.generatedFiles.reportFiles[0]).toMatch(/\.pdf$/);
   });
 });

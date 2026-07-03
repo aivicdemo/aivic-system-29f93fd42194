@@ -1,36 +1,92 @@
-import { calculateContractChangeVerificationDeadline } from "../../src/logic/it-1-1-1";
+import { detectAnomalousValues } from '../../src/logic/it-1781935279444-2-2-1';
 
-describe("営業成果データの自動検証ルール定義と異常検出機能", () => {
-  // SCEN-878: [edge] 契約変更検証完了期限の自動計算 - 営業日ベースの期限計算で休業日が正しく除外される
-  test("開始日が金曜日で営業日ベース5日間設定時、土日と祝日を除外して翌週金曜日を期限とする", () => {
-    // 前提: 開始日が金曜日（2024年1月12日）、営業日ベース5日間の期限設定、システムカレンダーに土日と祝日が登録済み
-    // 手順: 契約変更検証完了期限の自動計算を実行
-    const start_date = new Date("2024-01-12T09:00:00Z"); // 金曜日
-    const business_days_required = 5;
-    const holidays = [
-      new Date("2024-01-15T00:00:00Z"), // 成人の日（月曜日）
-    ];
+describe('営業データの完全性・正確性を自動検証し、不足データ・誤りを検出・通知する機能', () => {
+  // SCEN-878
+  test('[normal] 営業データ異常値自動検出機能 - 営業データの値が許容範囲外の場合に「警告」ステータスと詳細情報が返される', () => {
+    const input_sales_amount = -50000;
+    const input_discount_rate = 150;
+    const input_appointment_count = 0;
+    const input_contract_count = -5;
 
-    const result = calculateContractChangeVerificationDeadline({
-      start_date: start_date,
-      business_days_required: business_days_required,
-      holidays: holidays,
-    });
+    const permitted_sales_min = 0;
+    const permitted_sales_max = 10000000;
+    const permitted_discount_min = 0;
+    const permitted_discount_max = 100;
+    const permitted_appointment_min = 0;
+    const permitted_appointment_max = 1000;
+    const permitted_contract_min = 0;
+    const permitted_contract_max = 500;
 
-    // 期待結果: 土曜日・日曜日・祝日を除外して営業日5日間後の金曜日（2024年1月19日）が期限として計算される
-    // 計算ロジック:
-    // - 開始日: 2024-01-12（金曜日）
-    // - 営業日1日目: 2024-01-12（金曜日）
-    // - 営業日2日目: 2024-01-15を除外（成人の日・祝日）、2024-01-16（火曜日）
-    // - 営業日3日目: 2024-01-17（水曜日）
-    // - 営業日4日目: 2024-01-18（木曜日）
-    // - 営業日5日目: 2024-01-19（金曜日）
-    // - 期限日付: 2024-01-19T23:59:59Z
+    const test_data = {
+      sales_amount: input_sales_amount,
+      discount_rate: input_discount_rate,
+      appointment_count: input_appointment_count,
+      contract_count: input_contract_count,
+      customer_id: 'CUST001',
+      service_type: 'SERVICE_A',
+      record_date: '2024-01-15'
+    };
 
-    expect(result.deadline).toEqual(new Date("2024-01-19T23:59:59Z"));
-    expect(result.business_days_count).toBe(5);
-    expect(result.excluded_weekends).toBe(2); // 土曜日（2024-01-13）、日曜日（2024-01-14）
-    expect(result.excluded_holidays).toBe(1); // 成人の日（2024-01-15）
-    expect(result.total_excluded_days).toBe(3);
+    const validation_rules = {
+      sales_amount: {
+        min: permitted_sales_min,
+        max: permitted_sales_max,
+        type: 'number'
+      },
+      discount_rate: {
+        min: permitted_discount_min,
+        max: permitted_discount_max,
+        type: 'number'
+      },
+      appointment_count: {
+        min: permitted_appointment_min,
+        max: permitted_appointment_max,
+        type: 'number'
+      },
+      contract_count: {
+        min: permitted_contract_min,
+        max: permitted_contract_max,
+        type: 'number'
+      }
+    };
+
+    const result = detectAnomalousValues(test_data, validation_rules);
+
+    expect(result.status).toBe('警告');
+    expect(result.details).toBeDefined();
+    expect(Array.isArray(result.details)).toBe(true);
+    expect(result.details.length).toBeGreaterThan(0);
+
+    const sales_anomaly = result.details.find(
+      (item: any) => item.field_name === 'sales_amount'
+    );
+    expect(sales_anomaly).toBeDefined();
+    expect(sales_anomaly.detected_value).toBe(input_sales_amount);
+    expect(sales_anomaly.permitted_min).toBe(permitted_sales_min);
+    expect(sales_anomaly.permitted_max).toBe(permitted_sales_max);
+    expect(sales_anomaly.anomaly_type).toBe('範囲外');
+
+    const discount_anomaly = result.details.find(
+      (item: any) => item.field_name === 'discount_rate'
+    );
+    expect(discount_anomaly).toBeDefined();
+    expect(discount_anomaly.detected_value).toBe(input_discount_rate);
+    expect(discount_anomaly.permitted_min).toBe(permitted_discount_min);
+    expect(discount_anomaly.permitted_max).toBe(permitted_discount_max);
+    expect(discount_anomaly.anomaly_type).toBe('範囲外');
+
+    const contract_anomaly = result.details.find(
+      (item: any) => item.field_name === 'contract_count'
+    );
+    expect(contract_anomaly).toBeDefined();
+    expect(contract_anomaly.detected_value).toBe(input_contract_count);
+    expect(contract_anomaly.permitted_min).toBe(permitted_contract_min);
+    expect(contract_anomaly.permitted_max).toBe(permitted_contract_max);
+    expect(contract_anomaly.anomaly_type).toBe('範囲外');
+
+    const appointment_anomaly = result.details.find(
+      (item: any) => item.field_name === 'appointment_count'
+    );
+    expect(appointment_anomaly).toBeUndefined();
   });
 });

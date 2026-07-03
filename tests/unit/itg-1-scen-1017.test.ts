@@ -1,238 +1,173 @@
-import { describe, test, expect } from "@jest/globals";
-import {
-  validateBillingHandbookConsistency,
-  identifyDiscrepancies,
-  updateExceptionProcessingRules,
-  verifyBillingCalculationWithUpdatedRules,
-  confirmHandbookReflection,
-  validateNoSideEffects,
-} from "../../src/logic/it-1-1-1";
+import { classifyCustomerInquiry } from "../../src/logic/it-1-2-1";
 
-describe("営業成果データの自動検証ルール定義と異常検出機能", () => {
-  // SCEN-1017: [normal] 請求ロジック・割引基準・例外パターンの文書化と体制確保 - 既存の手順書に矛盾が判明したときに例外処理ルールが更新される
-  test("既存手順書と実システム割引ロジックの矛盾を検出し、例外処理ルールを更新・反映・検証する", () => {
-    // ステップ1: 既存の請求ロジック手順書を確認し、現在の割引基準と例外処理ルールを把握
-    const handbookVersion = "v2.1";
-    const handbookDiscountRules = {
-      baseDiscount: 0.1, // 基本割引 10%
-      volumeThreshold: 5, // 5件以上
-      volumeDiscountRate: 0.15, // ボリューム割引 15%
-      maxDiscountRate: 0.2, // 最大割引率 20%
-      specialCustomerDiscount: 0.05, // 特別顧客割引 5%
-    };
-
-    const handbookValidationResult = validateBillingHandbookConsistency({
-      handbookVersion,
-      discountRules: handbookDiscountRules,
-    });
-    expect(handbookValidationResult.isValid).toBe(true);
-    expect(handbookValidationResult.handbookVersion).toBe("v2.1");
-
-    // ステップ2: 請求処理システムで実際に適用されている割引計算ロジックを確認
-    const systemAppliedDiscountLogic = {
-      baseDiscount: 0.1,
-      volumeThreshold: 5,
-      volumeDiscountRate: 0.15,
-      maxDiscountRate: 0.25, // システムは 25% を上限としている（矛盾！）
-      specialCustomerDiscount: 0.05,
-      cascadingApply: true, // 割引を段階適用（手順書未記載）
-    };
-
-    // ステップ3: 手順書と実際のシステムロジックを比較して矛盾箇所を特定
-    const discrepancies = identifyDiscrepancies({
-      handbookRules: handbookDiscountRules,
-      systemRules: systemAppliedDiscountLogic,
-    });
-
-    expect(discrepancies.discrepanciesFound).toBe(true);
-    expect(discrepancies.discrepancyItems).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          field: "maxDiscountRate",
-          handbookValue: 0.2,
-          systemValue: 0.25,
-        }),
-        expect.objectContaining({
-          field: "cascadingApply",
-          handbookValue: undefined,
-          systemValue: true,
-        }),
-      ])
-    );
-
-    // ステップ4: 矛盾が判明した場合、例外処理ルール更新の申請フローを実行
-    const exceptionUpdateRequest = {
-      discrepancyId: "disc_001",
-      affectedField: "maxDiscountRate",
-      previousValue: 0.2,
-      newValue: 0.25,
-      reason: "システム実装で上限 25% が確認された",
-      requestedBy: "billing_admin",
-      requestedAt: new Date("2024-01-15T10:00:00Z").toISOString(),
-      priority: "high",
-    };
-
-    const updateResult = updateExceptionProcessingRules(exceptionUpdateRequest);
-    expect(updateResult.success).toBe(true);
-    expect(updateResult.updatedRuleId).toBe("rule_exc_001");
-    expect(updateResult.maxDiscountRateAfterUpdate).toBe(0.25);
-    expect(updateResult.cascadingApplyAfterUpdate).toBe(true);
-    expect(updateResult.updateTimestamp).toBeDefined();
-
-    // ステップ5: 更新されたルールがシステムの例外処理テーブルに反映されたことを確認
-    const testBillingDataSet = {
-      customerId: "cust_A",
-      serviceId: "svc_premium",
-      baseAmount: 1000,
-      transactionVolume: 8, // 5件以上でボリューム割引対象
-      isSpecialCustomer: false,
-    };
-
-    const calculationWithUpdatedRules = verifyBillingCalculationWithUpdatedRules(
+describe("顧客質問内容分類・優先度判定機能", () => {
+  test("SCEN-1017: 複数キーワードを含む質問内容が最も優先度の高い分類に正確に割り当てられる", () => {
+    // テストデータ: 複数の優先度レベルに対応する分類カテゴリを定義
+    const classificationCategories = [
       {
-        ...testBillingDataSet,
-        appliedRules: {
-          baseDiscount: 0.1,
-          volumeDiscountRate: 0.15,
-          maxDiscountRate: 0.25,
-          cascadingApply: true,
-        },
-      }
-    );
-
-    // 期待値計算:
-    // baseAmount: 1000
-    // baseDiscount: 1000 * 0.1 = 100
-    // 残額: 1000 - 100 = 900
-    // volumeDiscount (段階適用): 900 * 0.15 = 135
-    // 合計割引: 100 + 135 = 235
-    // 割引率: 235 / 1000 = 0.235 (最大 0.25 以下なので OK)
-    // 最終金額: 1000 - 235 = 765
-    expect(calculationWithUpdatedRules.finalAmount).toBe(765);
-    expect(calculationWithUpdatedRules.totalDiscountAmount).toBe(235);
-    expect(calculationWithUpdatedRules.appliedDiscountRate).toBe(0.235);
-    expect(calculationWithUpdatedRules.maxDiscountRateLimitApplied).toBe(false);
-
-    // ステップ6: 更新後の例外処理ルールで実際に請求計算を実行し、期待値と一致することを検証
-    const additionalTestCase = {
-      customerId: "cust_B",
-      serviceId: "svc_standard",
-      baseAmount: 2000,
-      transactionVolume: 10,
-      isSpecialCustomer: true,
-    };
-
-    const calculationAdditional = verifyBillingCalculationWithUpdatedRules({
-      ...additionalTestCase,
-      appliedRules: {
-        baseDiscount: 0.1,
-        volumeDiscountRate: 0.15,
-        maxDiscountRate: 0.25,
-        specialCustomerDiscount: 0.05,
-        cascadingApply: true,
-      },
-    });
-
-    // 期待値計算:
-    // baseAmount: 2000
-    // baseDiscount: 2000 * 0.1 = 200
-    // 残額: 2000 - 200 = 1800
-    // volumeDiscount (段階適用): 1800 * 0.15 = 270
-    // 残額: 1800 - 270 = 1530
-    // specialCustomerDiscount (段階適用): 1530 * 0.05 = 76.5
-    // 合計割引: 200 + 270 + 76.5 = 546.5
-    // 割引率: 546.5 / 2000 = 0.2733 (最大 0.25 を超える → 上限適用)
-    // 最大割引額: 2000 * 0.25 = 500
-    // 最終金額: 2000 - 500 = 1500
-    expect(calculationAdditional.finalAmount).toBe(1500);
-    expect(calculationAdditional.totalDiscountAmount).toBe(500);
-    expect(calculationAdditional.appliedDiscountRate).toBe(0.25);
-    expect(calculationAdditional.maxDiscountRateLimitApplied).toBe(true);
-
-    // ステップ7: 更新された例外処理ルールが手順書に反映されたことを確認
-    const handbookReflectionStatus = confirmHandbookReflection({
-      handbookVersion: "v2.2", // 新バージョン
-      discrepancyId: "disc_001",
-      expectedUpdates: {
-        maxDiscountRate: 0.25,
-        cascadingApply: true,
-      },
-    });
-
-    expect(handbookReflectionStatus.handbookUpdated).toBe(true);
-    expect(handbookReflectionStatus.updatedVersion).toBe("v2.2");
-    expect(handbookReflectionStatus.reflectionTimestamp).toBeDefined();
-    expect(handbookReflectionStatus.updateItems).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          field: "maxDiscountRate",
-          oldValue: 0.2,
-          newValue: 0.25,
-          documentedAt: expect.any(String),
-        }),
-        expect.objectContaining({
-          field: "cascadingApply",
-          oldValue: undefined,
-          newValue: true,
-          documentedAt: expect.any(String),
-        }),
-      ])
-    );
-
-    // ステップ8: 他の関連する請求パターンに対して副作用がないことを確認
-    const sideEffectValidationCases = [
-      {
-        name: "基本割引のみ対象",
-        testCase: {
-          customerId: "cust_C",
-          baseAmount: 500,
-          transactionVolume: 2, // ボリューム割引非対象
-          isSpecialCustomer: false,
-        },
-        expectedAmount: 450, // 500 * (1 - 0.1) = 450
+        id: "cat_001",
+        name: "緊急・システム障害",
+        keywords: ["緊急", "システム障害", "本番環境"],
+        priorityLevel: 1,
+        priorityScore: 100,
       },
       {
-        name: "特別顧客割引のみ対象",
-        testCase: {
-          customerId: "cust_D",
-          baseAmount: 800,
-          transactionVolume: 2,
-          isSpecialCustomer: true,
-        },
-        expectedAmount: 760, // 800 * (1 - 0.05) = 760
+        id: "cat_002",
+        name: "請求内容確認",
+        keywords: ["請求", "金額", "請求額"],
+        priorityLevel: 2,
+        priorityScore: 50,
       },
       {
-        name: "ボリューム割引のみ対象",
-        testCase: {
-          customerId: "cust_E",
-          baseAmount: 1200,
-          transactionVolume: 7,
-          isSpecialCustomer: false,
-        },
-        expectedAmount: 1020, // 1200 * 0.1 = 120, 1080 * 0.15 = 162, 合計 282, 1200 - 282 = 918
+        id: "cat_003",
+        name: "一般問い合わせ",
+        keywords: ["確認", "質問", "情報"],
+        priorityLevel: 3,
+        priorityScore: 10,
       },
     ];
 
-    const sideEffectResult = validateNoSideEffects({
-      updatedRuleId: "rule_exc_001",
-      testCases: sideEffectValidationCases.map((tc) => ({
-        name: tc.name,
-        input: {
-          ...tc.testCase,
-          appliedRules: {
-            baseDiscount: 0.1,
-            volumeDiscountRate: 0.15,
-            maxDiscountRate: 0.25,
-            specialCustomerDiscount: 0.05,
-            cascadingApply: true,
-          },
-        },
-      })),
-    });
+    // 複数キーワードを含む顧客質問テキスト: 『緊急』『システム障害』『本番環境』
+    const customerInquiryText =
+      "本番環境でシステム障害が発生しました。緊急対応をお願いします。請求に関する確認もあります。";
 
-    expect(sideEffectResult.noSideEffectsDetected).toBe(true);
-    expect(sideEffectResult.validatedCaseCount).toBe(3);
-    expect(sideEffectResult.failedCases).toEqual([]);
-    expect(sideEffectResult.validationCompletedAt).toBeDefined();
+    // 質問内容分類エンジンにテキストを送信し、キーワード抽出と優先度判定処理を実行
+    const classificationResult = classifyCustomerInquiry(
+      customerInquiryText,
+      classificationCategories
+    );
+
+    // 抽出されたキーワードを検証
+    expect(classificationResult.extractedKeywords).toContain("緊急");
+    expect(classificationResult.extractedKeywords).toContain(
+      "システム障害"
+    );
+    expect(classificationResult.extractedKeywords).toContain("本番環境");
+    expect(classificationResult.extractedKeywords).toContain("請求");
+
+    // 各分類の優先度レベルを確認: 複数の優先度が検出された場合
+    expect(classificationResult.detectedPriorities).toEqual([
+      { categoryId: "cat_001", priorityLevel: 1, priorityScore: 100 },
+      { categoryId: "cat_002", priorityLevel: 2, priorityScore: 50 },
+    ]);
+
+    // 最も優先度の高い分類が選定されているか検証
+    expect(classificationResult.selectedCategory.id).toBe("cat_001");
+    expect(classificationResult.selectedCategory.name).toBe(
+      "緊急・システム障害"
+    );
+    expect(classificationResult.selectedCategory.priorityLevel).toBe(1);
+
+    // 判定根拠となるキーワードが正しく記録されているか確認
+    expect(classificationResult.matchedKeywords).toEqual([
+      "緊急",
+      "システム障害",
+      "本番環境",
+    ]);
+
+    // 判定スコア値が正しく適用されているか確認
+    expect(classificationResult.finalPriorityScore).toBe(100);
+
+    // 判定ロジックが正しく適用されているか確認: 最高優先度スコアが記録される
+    expect(classificationResult.reasonForSelection).toBe(
+      "最高優先度(1)のキーワード[緊急, システム障害, 本番環境]が検出されました"
+    );
+
+    // 同一優先度の分類が複数存在する場合のテスト
+    const sameScoreCategories = [
+      {
+        id: "cat_high_1",
+        name: "システム問題A",
+        keywords: ["障害", "エラー"],
+        priorityLevel: 1,
+        priorityScore: 100,
+      },
+      {
+        id: "cat_high_2",
+        name: "システム問題B",
+        keywords: ["障害", "ダウン"],
+        priorityLevel: 1,
+        priorityScore: 100,
+      },
+      {
+        id: "cat_low",
+        name: "一般問い合わせ",
+        keywords: ["質問"],
+        priorityLevel: 3,
+        priorityScore: 10,
+      },
+    ];
+
+    const inquiryWithHighPriority = "システム障害が発生しました。";
+
+    const sameScoreResult = classifyCustomerInquiry(
+      inquiryWithHighPriority,
+      sameScoreCategories
+    );
+
+    // 同一優先度が複数存在する場合、最初にマッチした最高優先度カテゴリが選定される
+    expect(sameScoreResult.selectedCategory.priorityLevel).toBe(1);
+    expect(sameScoreResult.selectedCategory.priorityScore).toBe(100);
+    expect(sameScoreResult.finalPriorityScore).toBe(100);
+
+    // 複数のキーワードを含む分類が複数存在する複雑なテスト
+    const complexCategories = [
+      {
+        id: "cat_urgent",
+        name: "緊急対応",
+        keywords: ["緊急", "即座に", "今すぐ"],
+        priorityLevel: 1,
+        priorityScore: 150,
+      },
+      {
+        id: "cat_billing",
+        name: "請求関連",
+        keywords: ["請求", "金額", "料金"],
+        priorityLevel: 2,
+        priorityScore: 75,
+      },
+      {
+        id: "cat_scheduling",
+        name: "スケジューリング",
+        keywords: ["日程", "予定", "納期"],
+        priorityLevel: 2,
+        priorityScore: 75,
+      },
+    ];
+
+    const complexInquiry =
+      "請求額の計算が間違っている可能性があります。緊急に確認をお願いしたいのですが、いつ対応可能でしょうか？";
+
+    const complexResult = classifyCustomerInquiry(
+      complexInquiry,
+      complexCategories
+    );
+
+    // 複数の優先度が検出された場合、最も優先度の高い分類が確実に選定される
+    expect(complexResult.selectedCategory.id).toBe("cat_urgent");
+    expect(complexResult.selectedCategory.priorityLevel).toBe(1);
+    expect(complexResult.selectedCategory.priorityScore).toBe(150);
+    expect(complexResult.finalPriorityScore).toBe(150);
+
+    // 複数の優先度が検出された詳細情報を確認
+    expect(complexResult.detectedPriorities.length).toBeGreaterThanOrEqual(2);
+    expect(complexResult.detectedPriorities[0].priorityLevel).toBeLessThan(
+      complexResult.detectedPriorities[1].priorityLevel
+    );
+
+    // エラーケース: 空の質問テキスト
+    expect(() => {
+      classifyCustomerInquiry("", classificationCategories);
+    }).toThrow(/質問内容/);
+
+    // エラーケース: 空の分類カテゴリ配列
+    expect(() => {
+      classifyCustomerInquiry(customerInquiryText, []);
+    }).toThrow(/分類/);
+
+    // エラーケース: null値の質問テキスト
+    expect(() => {
+      classifyCustomerInquiry(null as any, classificationCategories);
+    }).toThrow(/質問内容/);
   });
 });

@@ -1,132 +1,55 @@
-import { extractSalesActivityData } from '../../src/logic/it-1-2-1';
+import { validateDataConsistency } from '../../src/logic/it-1781935279444-2-2-1';
 
-describe('営業活動データ検索機能', () => {
-  // SCEN-1192
-  test('指定期間・顧客・営業担当者で営業活動データが正しく抽出される', () => {
-    const search_params = {
-      start_date: '2024-01-01',
-      end_date: '2024-01-31',
-      customer_id: 'CUST_A',
-      sales_rep_id: 'REP_001',
+describe('営業データの完全性・正確性を自動検証し、不足データ・誤りを検出・通知する機能', () => {
+  // SCEN-1192: [edge] データ不一致の自動判定機能 - 複数の不一致要因が同時に存在する場合、優先度順に判定結果が返される
+  test('複数の不一致要因が同時に存在する場合、優先度ルールに従って順序付けられた判定結果が返される', () => {
+    const testData = {
+      reportedAmount: 150000,
+      actualAmount: 120000,
+      reportedDate: '2024-01-15',
+      actualDate: '2024-01-10',
+      reportedCustomerId: 'CUST-001',
+      actualCustomerId: 'CUST-002',
+      serviceType: 'service-A',
+      contractId: 'CONTRACT-123',
     };
 
-    const all_activity_records = [
-      {
-        activity_id: 'ACT_001',
-        activity_date: '2024-01-05',
-        customer_id: 'CUST_A',
-        sales_rep_id: 'REP_001',
-        activity_type: 'appointment',
-        result_status: 'confirmed',
-      },
-      {
-        activity_id: 'ACT_002',
-        activity_date: '2024-01-10',
-        customer_id: 'CUST_A',
-        sales_rep_id: 'REP_001',
-        activity_type: 'negotiation',
-        result_status: 'pending',
-      },
-      {
-        activity_id: 'ACT_003',
-        activity_date: '2024-01-15',
-        customer_id: 'CUST_A',
-        sales_rep_id: 'REP_002',
-        activity_type: 'appointment',
-        result_status: 'confirmed',
-      },
-      {
-        activity_id: 'ACT_004',
-        activity_date: '2024-01-20',
-        customer_id: 'CUST_B',
-        sales_rep_id: 'REP_001',
-        activity_type: 'follow_up',
-        result_status: 'completed',
-      },
-      {
-        activity_id: 'ACT_005',
-        activity_date: '2024-02-05',
-        customer_id: 'CUST_A',
-        sales_rep_id: 'REP_001',
-        activity_type: 'appointment',
-        result_status: 'confirmed',
-      },
-      {
-        activity_id: 'ACT_006',
-        activity_date: '2023-12-25',
-        customer_id: 'CUST_A',
-        sales_rep_id: 'REP_001',
-        activity_type: 'appointment',
-        result_status: 'confirmed',
-      },
-    ];
+    const result = validateDataConsistency(testData);
 
-    const result = extractSalesActivityData(search_params, all_activity_records);
+    expect(result).toBeDefined();
+    expect(Array.isArray(result.discrepancies)).toBe(true);
+    expect(result.discrepancies.length).toBe(3);
 
-    // 検索条件に合致するレコードは ACT_001 と ACT_002 の 2 件
-    expect(result.total_count).toBe(2);
-    expect(result.records.length).toBe(2);
-
-    // 各レコードが正しいフィールドを含む
-    expect(result.records[0]).toEqual({
-      activity_id: 'ACT_001',
-      activity_date: '2024-01-05',
-      customer_id: 'CUST_A',
-      sales_rep_id: 'REP_001',
-      activity_type: 'appointment',
-      result_status: 'confirmed',
+    // 優先度順の確認: 金額不一致 > 日付不一致 > 顧客情報不一致
+    expect(result.discrepancies[0].type).toBe('amount_mismatch');
+    expect(result.discrepancies[0].priority).toBe(1);
+    expect(result.discrepancies[0].details).toEqual({
+      reported: 150000,
+      actual: 120000,
+      difference: 30000,
     });
 
-    expect(result.records[1]).toEqual({
-      activity_id: 'ACT_002',
-      activity_date: '2024-01-10',
-      customer_id: 'CUST_A',
-      sales_rep_id: 'REP_001',
-      activity_type: 'negotiation',
-      result_status: 'pending',
+    expect(result.discrepancies[1].type).toBe('date_mismatch');
+    expect(result.discrepancies[1].priority).toBe(2);
+    expect(result.discrepancies[1].details).toEqual({
+      reported: '2024-01-15',
+      actual: '2024-01-10',
     });
 
-    // すべてのレコードが指定期間内
-    result.records.forEach((record) => {
-      const record_date = new Date(record.activity_date);
-      const start = new Date(search_params.start_date);
-      const end = new Date(search_params.end_date);
-      expect(record_date.getTime()).toBeGreaterThanOrEqual(start.getTime());
-      expect(record_date.getTime()).toBeLessThanOrEqual(end.getTime());
+    expect(result.discrepancies[2].type).toBe('customer_mismatch');
+    expect(result.discrepancies[2].priority).toBe(3);
+    expect(result.discrepancies[2].details).toEqual({
+      reported: 'CUST-001',
+      actual: 'CUST-002',
     });
 
-    // すべてのレコードが指定顧客
-    result.records.forEach((record) => {
-      expect(record.customer_id).toBe(search_params.customer_id);
-    });
+    // 最初の要素が最も優先度の高い不一致であることを検証
+    expect(result.discrepancies[0].priority).toBeLessThan(result.discrepancies[1].priority);
+    expect(result.discrepancies[1].priority).toBeLessThan(result.discrepancies[2].priority);
 
-    // すべてのレコードが指定営業担当者
-    result.records.forEach((record) => {
-      expect(record.sales_rep_id).toBe(search_params.sales_rep_id);
-    });
-
-    // データフォーマット検証
-    result.records.forEach((record) => {
-      expect(typeof record.activity_id).toBe('string');
-      expect(typeof record.activity_date).toBe('string');
-      expect(typeof record.customer_id).toBe('string');
-      expect(typeof record.sales_rep_id).toBe('string');
-      expect(['appointment', 'negotiation', 'follow_up']).toContain(
-        record.activity_type,
-      );
-      expect([
-        'confirmed',
-        'pending',
-        'completed',
-        'cancelled',
-      ]).toContain(record.result_status);
-    });
-
-    // 指定条件に合致しないレコードが除外されていることを確認
-    const excluded_ids = result.records.map((r) => r.activity_id);
-    expect(excluded_ids).not.toContain('ACT_003');
-    expect(excluded_ids).not.toContain('ACT_004');
-    expect(excluded_ids).not.toContain('ACT_005');
-    expect(excluded_ids).not.toContain('ACT_006');
+    // 判定結果の判定ステータスが不一致を示していること
+    expect(result.isConsistent).toBe(false);
+    expect(result.totalDiscrepancies).toBe(3);
+    expect(result.highestPriorityDiscrepancy).toEqual(result.discrepancies[0]);
   });
 });

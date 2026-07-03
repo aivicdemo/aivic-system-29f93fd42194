@@ -1,186 +1,138 @@
-import { describe, test, expect, beforeEach, afterEach } from "@jest/globals";
-import {
-  extractContractDifferences,
-  validateDifferenceFields,
-  calculateNumericDifference,
-  formatDifferenceOutput,
-} from "../../src/logic/it-1781935279444-2-2-1";
+import { validateContractChangeConsistency } from '../../src/logic/it-1-1-1';
 
-describe("契約変更前後の比較・差分可視化機能", () => {
-  beforeEach(() => {
-    jest.clearAllMocks();
-  });
-
-  afterEach(() => {
-    jest.clearAllMocks();
-  });
-
-  // SCEN-855
-  test("複数項目が同時に変更されたときにすべての差分が正しく抽出・表示される", () => {
-    // 契約変更前のスナップショット（5項目以上を含める）
-    const contractBefore = {
-      contractId: "CT-2024-001",
-      contractAmount: 500000,
-      contractStartDate: "2024-01-01",
-      contractEndDate: "2024-12-31",
-      customerName: "顧客A",
-      serviceContent: "基本パッケージ",
-      discountRate: 10,
-      paymentTerms: "月末払い",
-      billingCycle: "月次",
-      taxRate: 10,
+describe('営業成果データの自動検証ルール定義と異常検出機能', () => {
+  // SCEN-855: [edge] 契約変更前後の整合性検証機能 - 変更前後の契約期間が重複する境界ケースで整合性が正確に判定される
+  test('SCEN-855: 契約変更前後の整合性検証 - 同一日付重複と1日重複の境界ケース', () => {
+    // テストケース1: 変更前契約（開始日：2024/01/01、終了日：2024/12/31）
+    //              変更後契約（開始日：2024/12/31、終了日：2025/12/31）
+    // 期待：同一日付で重複（2024/12/31が共通）
+    const previousContract1 = {
+      contract_id: 'C001',
+      start_date: new Date('2024-01-01T00:00:00Z'),
+      end_date: new Date('2024-12-31T00:00:00Z'),
     };
 
-    // 契約変更後のスナップショット（複数項目を同時変更）
-    const contractAfter = {
-      contractId: "CT-2024-001",
-      contractAmount: 600000,
-      contractStartDate: "2024-01-15",
-      contractEndDate: "2025-12-31",
-      customerName: "顧客A株式会社",
-      serviceContent: "プレミアムパッケージ",
-      discountRate: 15,
-      paymentTerms: "翌月末払い",
-      billingCycle: "月次",
-      taxRate: 10,
+    const changedContract1 = {
+      contract_id: 'C001',
+      start_date: new Date('2024-12-31T00:00:00Z'),
+      end_date: new Date('2025-12-31T00:00:00Z'),
     };
 
-    const changedBy = "operator001";
-    const changedAt = new Date("2024-01-10T14:30:00Z");
+    const result1 = validateContractChangeConsistency(previousContract1, changedContract1);
 
-    // 差分可視化機能を実行
-    const differences = extractContractDifferences(
-      contractBefore,
-      contractAfter,
-      changedBy,
-      changedAt
-    );
+    expect(result1.is_overlap).toBe(true);
+    expect(result1.overlap_days).toBe(1);
+    expect(result1.overlap_start_date).toEqual(new Date('2024-12-31T00:00:00Z'));
+    expect(result1.overlap_end_date).toEqual(new Date('2024-12-31T00:00:00Z'));
+    expect(result1.is_continuous).toBe(true);
+    expect(result1.has_error).toBe(false);
 
-    // 変更されたすべての項目が差分結果に含まれていることを確認
-    expect(differences.length).toBe(7); // contractAmount, contractStartDate, contractEndDate, customerName, serviceContent, discountRate, paymentTerms
+    // テストケース2: 変更前契約（開始日：2024/01/01、終了日：2024/12/31）
+    //              変更後契約（開始日：2024/12/30、終了日：2025/12/31）
+    // 期待：1日重複（2024/12/30 と 2024/12/31）
+    const previousContract2 = {
+      contract_id: 'C002',
+      start_date: new Date('2024-01-01T00:00:00Z'),
+      end_date: new Date('2024-12-31T00:00:00Z'),
+    };
 
-    // 各差分について検証：変更前の値、変更後の値、変更項目名、変更日時、変更者情報
-    const contractAmountDiff = differences.find(
-      (d) => d.fieldName === "contractAmount"
-    );
-    expect(contractAmountDiff).toBeDefined();
-    expect(contractAmountDiff?.fieldName).toBe("contractAmount");
-    expect(contractAmountDiff?.beforeValue).toBe(500000);
-    expect(contractAmountDiff?.afterValue).toBe(600000);
-    expect(contractAmountDiff?.changedBy).toBe("operator001");
-    expect(contractAmountDiff?.changedAt).toEqual(
-      new Date("2024-01-10T14:30:00Z")
-    );
+    const changedContract2 = {
+      contract_id: 'C002',
+      start_date: new Date('2024-12-30T00:00:00Z'),
+      end_date: new Date('2025-12-31T00:00:00Z'),
+    };
 
-    const contractStartDateDiff = differences.find(
-      (d) => d.fieldName === "contractStartDate"
-    );
-    expect(contractStartDateDiff?.beforeValue).toBe("2024-01-01");
-    expect(contractStartDateDiff?.afterValue).toBe("2024-01-15");
+    const result2 = validateContractChangeConsistency(previousContract2, changedContract2);
 
-    const contractEndDateDiff = differences.find(
-      (d) => d.fieldName === "contractEndDate"
-    );
-    expect(contractEndDateDiff?.beforeValue).toBe("2024-12-31");
-    expect(contractEndDateDiff?.afterValue).toBe("2025-12-31");
+    expect(result2.is_overlap).toBe(true);
+    expect(result2.overlap_days).toBe(2);
+    expect(result2.overlap_start_date).toEqual(new Date('2024-12-30T00:00:00Z'));
+    expect(result2.overlap_end_date).toEqual(new Date('2024-12-31T00:00:00Z'));
+    expect(result2.is_continuous).toBe(false);
+    expect(result2.has_error).toBe(false);
 
-    const customerNameDiff = differences.find(
-      (d) => d.fieldName === "customerName"
-    );
-    expect(customerNameDiff?.beforeValue).toBe("顧客A");
-    expect(customerNameDiff?.afterValue).toBe("顧客A株式会社");
+    // テストケース3: 重複がないケース（変更前終了日と変更後開始日が異なる）
+    //              変更前契約（開始日：2024/01/01、終了日：2024/12/30）
+    //              変更後契約（開始日：2024/12/31、終了日：2025/12/31）
+    // 期待：重複なし、ギャップあり
+    const previousContract3 = {
+      contract_id: 'C003',
+      start_date: new Date('2024-01-01T00:00:00Z'),
+      end_date: new Date('2024-12-30T00:00:00Z'),
+    };
 
-    const serviceContentDiff = differences.find(
-      (d) => d.fieldName === "serviceContent"
-    );
-    expect(serviceContentDiff?.beforeValue).toBe("基本パッケージ");
-    expect(serviceContentDiff?.afterValue).toBe("プレミアムパッケージ");
+    const changedContract3 = {
+      contract_id: 'C003',
+      start_date: new Date('2024-12-31T00:00:00Z'),
+      end_date: new Date('2025-12-31T00:00:00Z'),
+    };
 
-    const discountRateDiff = differences.find(
-      (d) => d.fieldName === "discountRate"
-    );
-    expect(discountRateDiff?.beforeValue).toBe(10);
-    expect(discountRateDiff?.afterValue).toBe(15);
+    const result3 = validateContractChangeConsistency(previousContract3, changedContract3);
 
-    const paymentTermsDiff = differences.find(
-      (d) => d.fieldName === "paymentTerms"
-    );
-    expect(paymentTermsDiff?.beforeValue).toBe("月末払い");
-    expect(paymentTermsDiff?.afterValue).toBe("翌月末払い");
+    expect(result3.is_overlap).toBe(false);
+    expect(result3.overlap_days).toBe(0);
+    expect(result3.is_continuous).toBe(false);
+    expect(result3.has_error).toBe(false);
+    expect(result3.gap_days).toBe(1);
 
-    // taxRate と billingCycle は変更されていないため差分に含まれない
-    const taxRateDiff = differences.find((d) => d.fieldName === "taxRate");
-    expect(taxRateDiff).toBeUndefined();
+    // テストケース4: 完全に連続するケース（変更前終了日の翌日が変更後開始日）
+    //              変更前契約（開始日：2024/01/01、終了日：2024/12/31）
+    //              変更後契約（開始日：2025/01/01、終了日：2025/12/31）
+    // 期待：重複なし、ギャップなし、連続フラグ=true
+    const previousContract4 = {
+      contract_id: 'C004',
+      start_date: new Date('2024-01-01T00:00:00Z'),
+      end_date: new Date('2024-12-31T00:00:00Z'),
+    };
 
-    const billingCycleDiff = differences.find(
-      (d) => d.fieldName === "billingCycle"
-    );
-    expect(billingCycleDiff).toBeUndefined();
+    const changedContract4 = {
+      contract_id: 'C004',
+      start_date: new Date('2025-01-01T00:00:00Z'),
+      end_date: new Date('2025-12-31T00:00:00Z'),
+    };
 
-    // 数値項目の差分計算が正確であることを確認（金額差分など）
-    const amountNumericDiff = calculateNumericDifference(
-      contractAmountDiff?.beforeValue,
-      contractAmountDiff?.afterValue
-    );
-    expect(amountNumericDiff).toBe(100000);
+    const result4 = validateContractChangeConsistency(previousContract4, changedContract4);
 
-    const discountRateNumericDiff = calculateNumericDifference(
-      discountRateDiff?.beforeValue,
-      discountRateDiff?.afterValue
-    );
-    expect(discountRateNumericDiff).toBe(5);
+    expect(result4.is_overlap).toBe(false);
+    expect(result4.overlap_days).toBe(0);
+    expect(result4.is_continuous).toBe(true);
+    expect(result4.has_error).toBe(false);
+    expect(result4.gap_days).toBe(0);
 
-    // 差分の表示順序と整合性を確認
-    expect(differences[0].fieldName).toBe("contractAmount");
-    expect(differences[1].fieldName).toBe("contractStartDate");
-    expect(differences[2].fieldName).toBe("contractEndDate");
-    expect(differences[3].fieldName).toBe("customerName");
-    expect(differences[4].fieldName).toBe("serviceContent");
-    expect(differences[5].fieldName).toBe("discountRate");
-    expect(differences[6].fieldName).toBe("paymentTerms");
+    // テストケース5: エラーケース - 無効な日付（開始日 > 終了日）
+    const invalidContract = {
+      contract_id: 'C005',
+      start_date: new Date('2024-12-31T00:00:00Z'),
+      end_date: new Date('2024-01-01T00:00:00Z'),
+    };
 
-    // 各差分フィールドの検証
-    const fieldValidation = validateDifferenceFields(differences);
-    expect(fieldValidation.isValid).toBe(true);
-    expect(fieldValidation.missingFields).toEqual([]);
-    expect(fieldValidation.invalidFields).toEqual([]);
+    expect(() => {
+      validateContractChangeConsistency(previousContract1, invalidContract);
+    }).toThrow(/日付範囲/);
 
-    // 差分データをエクスポート（CSV形式）して、データ形式と内容が正確であることを確認
-    const csvOutput = formatDifferenceOutput(differences, "csv");
-    expect(csvOutput).toContain("fieldName,beforeValue,afterValue,changedBy");
-    expect(csvOutput).toContain(
-      "contractAmount,500000,600000,operator001"
-    );
-    expect(csvOutput).toContain(
-      "contractStartDate,2024-01-01,2024-01-15,operator001"
-    );
-    expect(csvOutput).toContain(
-      "contractEndDate,2024-12-31,2025-12-31,operator001"
-    );
-    expect(csvOutput).toContain(
-      "customerName,顧客A,顧客A株式会社,operator001"
-    );
-    expect(csvOutput).toContain(
-      "serviceContent,基本パッケージ,プレミアムパッケージ,operator001"
-    );
-    expect(csvOutput).toContain("discountRate,10,15,operator001");
-    expect(csvOutput).toContain("paymentTerms,月末払い,翌月末払い,operator001");
+    // テストケース6: 複数日間の重複ケース
+    //              変更前契約（開始日：2024/01/01、終了日：2024/12/31）
+    //              変更後契約（開始日：2024/12/15、終了日：2025/12/31）
+    // 期待：17日間の重複（12/15〜12/31）
+    const previousContract6 = {
+      contract_id: 'C006',
+      start_date: new Date('2024-01-01T00:00:00Z'),
+      end_date: new Date('2024-12-31T00:00:00Z'),
+    };
 
-    // 差分データをエクスポート（JSON形式）して検証
-    const jsonOutput = formatDifferenceOutput(differences, "json");
-    const jsonParsed = JSON.parse(jsonOutput);
-    expect(jsonParsed).toBeInstanceOf(Array);
-    expect(jsonParsed.length).toBe(7);
-    expect(jsonParsed[0]).toHaveProperty("fieldName");
-    expect(jsonParsed[0]).toHaveProperty("beforeValue");
-    expect(jsonParsed[0]).toHaveProperty("afterValue");
-    expect(jsonParsed[0]).toHaveProperty("changedBy");
-    expect(jsonParsed[0]).toHaveProperty("changedAt");
+    const changedContract6 = {
+      contract_id: 'C006',
+      start_date: new Date('2024-12-15T00:00:00Z'),
+      end_date: new Date('2025-12-31T00:00:00Z'),
+    };
 
-    // 差分データをエクスポート（Excel形式）して検証
-    const excelOutput = formatDifferenceOutput(differences, "excel");
-    expect(excelOutput).toBeDefined();
-    expect(typeof excelOutput).toBe("string");
-    expect(excelOutput.length).toBeGreaterThan(0);
+    const result6 = validateContractChangeConsistency(previousContract6, changedContract6);
+
+    expect(result6.is_overlap).toBe(true);
+    expect(result6.overlap_days).toBe(17);
+    expect(result6.overlap_start_date).toEqual(new Date('2024-12-15T00:00:00Z'));
+    expect(result6.overlap_end_date).toEqual(new Date('2024-12-31T00:00:00Z'));
+    expect(result6.is_continuous).toBe(false);
+    expect(result6.has_error).toBe(false);
   });
 });

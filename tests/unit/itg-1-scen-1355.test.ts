@@ -1,112 +1,177 @@
-import { defineValidationRule } from '../../src/logic/it-1781935279444-2-2-1';
+import {
+  validateSalesDataConsistency,
+} from "../../src/logic/it-1781935279444-2-2-1";
 
-describe('営業データ品質検証ルール定義機能', () => {
-  // SCEN-1355: [error] 営業データ項目の定義に矛盾がある場合（データ型と許容範囲の不整合）にエラーが返される
-  test('データ型が整数型で許容値が文字列の場合、エラーを返す', () => {
-    const input = {
-      field_name: 'test_field',
-      data_type: 'integer',
-      min_value: -100,
-      max_value: 50,
-      allowed_values: ['あいうえお'],
-    };
+describe("営業データ完全性・正確性自動検証 - 金額計算一貫性検証", () => {
+  // SCEN-1355
+  test("請求対象項目の抽出前検証で金額計算の一貫性が確認される", () => {
+    // テストデータ: 複数の営業取引記録を含むサンプルデータセット
+    const sales_data_records = [
+      {
+        transaction_id: "TXN001",
+        customer_id: "CUST_A",
+        service_id: "SVC_001",
+        unit_price: 10000,
+        quantity: 5,
+        calculated_amount: 50000,
+        currency: "JPY",
+      },
+      {
+        transaction_id: "TXN002",
+        customer_id: "CUST_A",
+        service_id: "SVC_002",
+        unit_price: 15000,
+        quantity: 3,
+        calculated_amount: 45000,
+        currency: "JPY",
+      },
+      {
+        transaction_id: "TXN003",
+        customer_id: "CUST_B",
+        service_id: "SVC_001",
+        unit_price: 100,
+        quantity: 50,
+        calculated_amount: 5000,
+        currency: "USD",
+      },
+      {
+        transaction_id: "TXN004",
+        customer_id: "CUST_B",
+        service_id: "SVC_003",
+        unit_price: 25000.5,
+        quantity: 2,
+        calculated_amount: 50001,
+        currency: "JPY",
+      },
+      // 金額不一致ケース
+      {
+        transaction_id: "TXN005",
+        customer_id: "CUST_C",
+        service_id: "SVC_002",
+        unit_price: 12000,
+        quantity: 4,
+        calculated_amount: 48001, // 正確な計算値は 48000、不一致
+        currency: "JPY",
+      },
+      // 複数通貨の異なるレコード
+      {
+        transaction_id: "TXN006",
+        customer_id: "CUST_A",
+        service_id: "SVC_004",
+        unit_price: 50.5,
+        quantity: 100,
+        calculated_amount: 5050,
+        currency: "USD",
+      },
+    ];
 
-    expect(() => defineValidationRule(input)).toThrow(/データ型と許容範囲/);
-  });
+    // 請求対象項目の抽出前検証機能を実行
+    const validation_result = validateSalesDataConsistency(sales_data_records);
 
-  // 正常系: データ型と許容範囲が整合している場合、ルール定義が成功する
-  test('データ型が整数型で許容値が整数の場合、ルール定義が成功する', () => {
-    const input = {
-      field_name: 'test_field',
-      data_type: 'integer',
-      min_value: -100,
-      max_value: 50,
-      allowed_values: [10, 25, 40],
-    };
+    // 金額計算ロジック（単価×数量＝金額）の一貫性がチェックされていることを確認
+    expect(validation_result.is_validated).toBe(true);
 
-    const result = defineValidationRule(input);
-    expect(result).toEqual({
-      field_name: 'test_field',
-      data_type: 'integer',
-      min_value: -100,
-      max_value: 50,
-      allowed_values: [10, 25, 40],
-      validation_status: 'approved',
+    // 検証対象の各取引記録について、計算済み金額と再計算結果が一致するか検証
+    expect(validation_result.validated_records).toHaveLength(5);
+    expect(validation_result.validated_records[0]).toEqual({
+      transaction_id: "TXN001",
+      customer_id: "CUST_A",
+      service_id: "SVC_001",
+      unit_price: 10000,
+      quantity: 5,
+      calculated_amount: 50000,
+      currency: "JPY",
+      recalculated_amount: 50000,
+      is_amount_consistent: true,
+      validation_status: "passed",
     });
-  });
 
-  // 境界値テスト: 許容範囲の境界値が正しく検証される
-  test('許容値が範囲の境界値である場合、ルール定義が成功する', () => {
-    const input = {
-      field_name: 'boundary_field',
-      data_type: 'integer',
-      min_value: 0,
-      max_value: 100,
-      allowed_values: [0, 100],
-    };
+    expect(validation_result.validated_records[1]).toEqual({
+      transaction_id: "TXN002",
+      customer_id: "CUST_A",
+      service_id: "SVC_002",
+      unit_price: 15000,
+      quantity: 3,
+      calculated_amount: 45000,
+      currency: "JPY",
+      recalculated_amount: 45000,
+      is_amount_consistent: true,
+      validation_status: "passed",
+    });
 
-    const result = defineValidationRule(input);
-    expect(result.validation_status).toBe('approved');
-  });
+    // 複数通貨が含まれる場合、通貨別の金額計算が正確に行われているか確認
+    expect(validation_result.validated_records[2]).toEqual({
+      transaction_id: "TXN003",
+      customer_id: "CUST_B",
+      service_id: "SVC_001",
+      unit_price: 100,
+      quantity: 50,
+      calculated_amount: 5000,
+      currency: "USD",
+      recalculated_amount: 5000,
+      is_amount_consistent: true,
+      validation_status: "passed",
+    });
 
-  // エラー系: 複数の許容値に文字列が混在している場合
-  test('許容値の配列に文字列が含まれている場合、エラーを返す', () => {
-    const input = {
-      field_name: 'mixed_field',
-      data_type: 'integer',
-      min_value: -100,
-      max_value: 50,
-      allowed_values: [10, 'invalid_string', 25],
-    };
+    // 小数点処理とまるめ方法が統一されているか確認
+    expect(validation_result.validated_records[3]).toEqual({
+      transaction_id: "TXN004",
+      customer_id: "CUST_B",
+      service_id: "SVC_003",
+      unit_price: 25000.5,
+      quantity: 2,
+      calculated_amount: 50001,
+      currency: "JPY",
+      recalculated_amount: 50001,
+      is_amount_consistent: true,
+      validation_status: "passed",
+    });
 
-    expect(() => defineValidationRule(input)).toThrow(/データ型と許容範囲/);
-  });
+    // 複数通貨の異なる計算結果の確認
+    expect(validation_result.validated_records[4]).toEqual({
+      transaction_id: "TXN006",
+      customer_id: "CUST_A",
+      service_id: "SVC_004",
+      unit_price: 50.5,
+      quantity: 100,
+      calculated_amount: 5050,
+      currency: "USD",
+      recalculated_amount: 5050,
+      is_amount_consistent: true,
+      validation_status: "passed",
+    });
 
-  // エラー系: データ型が文字列型なのに許容値が数値の場合
-  test('データ型が文字列型で許容値が数値の場合、エラーを返す', () => {
-    const input = {
-      field_name: 'string_field',
-      data_type: 'string',
-      min_value: 0,
-      max_value: 100,
-      allowed_values: [10, 20, 30],
-    };
+    // 検証エラーまたは不一致が検出された場合、エラーメッセージと詳細情報が正しく記録されるか確認
+    expect(validation_result.error_records).toHaveLength(1);
+    expect(validation_result.error_records[0]).toEqual({
+      transaction_id: "TXN005",
+      customer_id: "CUST_C",
+      service_id: "SVC_002",
+      unit_price: 12000,
+      quantity: 4,
+      calculated_amount: 48001,
+      currency: "JPY",
+      recalculated_amount: 48000,
+      is_amount_consistent: false,
+      validation_status: "failed",
+      error_message: "金額不一致",
+      error_detail:
+        "単価(12000) × 数量(4) = 計算値(48000)、記録値(48001)、差分(1)",
+    });
 
-    expect(() => defineValidationRule(input)).toThrow(/データ型と許容範囲/);
-  });
+    // 検証が完了し、一貫性が確認された項目のみが請求対象として抽出されることを確認
+    const billable_items = validation_result.validated_records;
+    expect(billable_items.length).toBe(5);
+    expect(billable_items.every((item) => item.is_amount_consistent)).toBe(
+      true
+    );
 
-  // 正常系: データ型が文字列型で許容値が文字列の場合
-  test('データ型が文字列型で許容値が文字列の場合、ルール定義が成功する', () => {
-    const input = {
-      field_name: 'string_field',
-      data_type: 'string',
-      allowed_values: ['sales', 'support', 'engineering'],
-    };
-
-    const result = defineValidationRule(input);
-    expect(result.validation_status).toBe('approved');
-    expect(result.allowed_values).toEqual(['sales', 'support', 'engineering']);
-  });
-
-  // エラー系: 空の許容値配列で定義する場合
-  test('許容値が空配列の場合、エラーを返す', () => {
-    const input = {
-      field_name: 'empty_field',
-      data_type: 'integer',
-      allowed_values: [],
-    };
-
-    expect(() => defineValidationRule(input)).toThrow(/許容値/);
-  });
-
-  // エラー系: データ型が不正な値の場合
-  test('データ型が不正な値の場合、エラーを返す', () => {
-    const input = {
-      field_name: 'invalid_type_field',
-      data_type: 'invalid_type',
-      allowed_values: [10, 20],
-    };
-
-    expect(() => defineValidationRule(input)).toThrow(/データ型/);
+    // 検証サマリー
+    expect(validation_result.total_records_processed).toBe(6);
+    expect(validation_result.total_records_passed).toBe(5);
+    expect(validation_result.total_records_failed).toBe(1);
+    expect(validation_result.pass_rate).toBe(
+      Math.round((5 / 6) * 100 * 100) / 100
+    );
   });
 });

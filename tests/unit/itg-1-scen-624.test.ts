@@ -1,89 +1,228 @@
-import { notifyContractChangeToCustomer } from "../../src/logic/it-1-2-1";
+import { generateMonthlySummary } from '../../src/logic/it-1-br-1781935279444-1-2-1';
 
-describe("営業成果データから請求対象項目を自動抽出し、顧客ごと・サービスごとの請求額を集計する機能", () => {
-  test("SCEN-624: 契約変更通知・メール自動送信機能 - 契約内容変更時に顧客企業の営業責任者へ変更内容のメールが正常に自動送信される", async () => {
-    // ===== setup =====
-    const existing_contract_id = "contract_001";
-    const customer_id = "cust_abc123";
-    const manager_email = "manager@customercorp.com";
-    const manager_name = "田中太郎";
-    const change_timestamp = new Date("2024-01-15T09:30:00Z");
-    const system_email = "billing-system@ourcompany.com";
-
-    const previous_contract = {
-      contract_id: existing_contract_id,
-      customer_id: customer_id,
-      service_type: "basic_plan",
-      monthly_fee: 100000,
-      start_date: "2024-01-01",
-      end_date: "2024-12-31",
+describe('月次サマリーテンプレート定義・管理機能', () => {
+  test('SCEN-624: 複数の月次サマリーテンプレートが定義されている場合、指定されたテンプレートに基づいてのみサマリーが生成される', () => {
+    // テンプレート定義
+    const templateA = {
+      template_id: 'tpl_a_001',
+      template_name: 'テンプレートA',
+      items: [
+        {
+          item_id: 'item_a_001',
+          item_name: '営業活動数',
+          display_order: 1,
+          calculation_logic: 'SUM(営業活動.件数)',
+          format_type: 'numeric',
+        },
+        {
+          item_id: 'item_a_002',
+          item_name: '成約数',
+          display_order: 2,
+          calculation_logic: 'SUM(成約.件数)',
+          format_type: 'numeric',
+        },
+      ],
+      created_at: new Date('2024-01-01T09:00:00Z'),
+      updated_at: new Date('2024-01-01T09:00:00Z'),
     };
 
-    const updated_contract = {
-      contract_id: existing_contract_id,
-      customer_id: customer_id,
-      service_type: "premium_plan",
-      monthly_fee: 150000,
-      start_date: "2024-01-01",
-      end_date: "2024-12-31",
+    const templateB = {
+      template_id: 'tpl_b_001',
+      template_name: 'テンプレートB',
+      items: [
+        {
+          item_id: 'item_b_001',
+          item_name: '売上高',
+          display_order: 1,
+          calculation_logic: 'SUM(営業データ.売上)',
+          format_type: 'currency',
+        },
+        {
+          item_id: 'item_b_002',
+          item_name: '顧客満足度',
+          display_order: 2,
+          calculation_logic: 'AVG(顧客反応.スコア)',
+          format_type: 'percentage',
+        },
+      ],
+      created_at: new Date('2024-01-01T09:00:00Z'),
+      updated_at: new Date('2024-01-01T09:00:00Z'),
     };
 
-    const change_record = {
-      contract_id: existing_contract_id,
-      customer_id: customer_id,
-      previous_state: previous_contract,
-      current_state: updated_contract,
-      changed_at: change_timestamp,
-      change_reason: "顧客要望によるプラン変更",
+    const templateC = {
+      template_id: 'tpl_c_001',
+      template_name: 'テンプレートC',
+      items: [
+        {
+          item_id: 'item_c_001',
+          item_name: '請求額合計',
+          display_order: 1,
+          calculation_logic: 'SUM(請求集計.金額)',
+          format_type: 'currency',
+        },
+        {
+          item_id: 'item_c_002',
+          item_name: '請求件数',
+          display_order: 2,
+          calculation_logic: 'COUNT(請求.ID)',
+          format_type: 'numeric',
+        },
+      ],
+      created_at: new Date('2024-01-01T09:00:00Z'),
+      updated_at: new Date('2024-01-01T09:00:00Z'),
     };
 
-    const customer_manager = {
-      customer_id: customer_id,
-      manager_email: manager_email,
-      manager_name: manager_name,
+    const monthly_period = {
+      year: 2024,
+      month: 1,
+      start_date: new Date('2024-01-01T00:00:00Z'),
+      end_date: new Date('2024-01-31T23:59:59Z'),
     };
 
-    // ===== execution =====
-    const email_result = await notifyContractChangeToCustomer({
-      change_record: change_record,
-      customer_manager: customer_manager,
-      system_email_address: system_email,
+    // テンプレートAでサマリー生成
+    const summaryA = generateMonthlySummary({
+      template_id: templateA.template_id,
+      monthly_period,
+      aggregated_data: {
+        営業活動件数: 45,
+        成約件数: 12,
+        売上高: 2500000,
+        顧客満足度スコア: 85.5,
+        請求額合計: 1800000,
+        請求件数: 8,
+      },
     });
 
-    // ===== assertions =====
-    // メール送信が成功したことを確認
-    expect(email_result.success).toBe(true);
+    // テンプレートAのサマリー検証
+    expect(summaryA).toEqual(
+      expect.objectContaining({
+        template_id: templateA.template_id,
+        monthly_period,
+        summary_data: expect.arrayContaining([
+          expect.objectContaining({
+            item_id: 'item_a_001',
+            item_name: '営業活動数',
+            value: 45,
+            display_order: 1,
+          }),
+          expect.objectContaining({
+            item_id: 'item_a_002',
+            item_name: '成約数',
+            value: 12,
+            display_order: 2,
+          }),
+        ]),
+      })
+    );
 
-    // 送信先メールアドレスが正確であることを確認
-    expect(email_result.sent_to).toBe(manager_email);
+    // テンプレートAにはテンプレートBの要素がないことを確認
+    const summaryA_item_names = summaryA.summary_data.map(
+      (item: { item_name: string }) => item.item_name
+    );
+    expect(summaryA_item_names).not.toContain('売上高');
+    expect(summaryA_item_names).not.toContain('顧客満足度');
 
-    // メール件名が契約変更通知であることを確認
-    expect(email_result.email_subject).toBe("【契約変更通知】契約内容が変更されました");
+    // テンプレートAにはテンプレートCの要素がないことを確認
+    expect(summaryA_item_names).not.toContain('請求額合計');
+    expect(summaryA_item_names).not.toContain('請求件数');
 
-    // メール本文に変更前の契約内容が記載されていることを確認
-    expect(email_result.email_body).toContain("basic_plan");
-    expect(email_result.email_body).toContain("100000");
+    // テンプレートBでサマリー生成
+    const summaryB = generateMonthlySummary({
+      template_id: templateB.template_id,
+      monthly_period,
+      aggregated_data: {
+        営業活動件数: 45,
+        成約件数: 12,
+        売上高: 2500000,
+        顧客満足度スコア: 85.5,
+        請求額合計: 1800000,
+        請求件数: 8,
+      },
+    });
 
-    // メール本文に変更後の契約内容が記載されていることを確認
-    expect(email_result.email_body).toContain("premium_plan");
-    expect(email_result.email_body).toContain("150000");
+    // テンプレートBのサマリー検証
+    expect(summaryB).toEqual(
+      expect.objectContaining({
+        template_id: templateB.template_id,
+        monthly_period,
+        summary_data: expect.arrayContaining([
+          expect.objectContaining({
+            item_id: 'item_b_001',
+            item_name: '売上高',
+            value: 2500000,
+            display_order: 1,
+          }),
+          expect.objectContaining({
+            item_id: 'item_b_002',
+            item_name: '顧客満足度',
+            value: 85.5,
+            display_order: 2,
+          }),
+        ]),
+      })
+    );
 
-    // メール本文に変更日時が記載されていることを確認
-    expect(email_result.email_body).toContain("2024-01-15T09:30:00Z");
+    // テンプレートBにはテンプレートAの要素がないことを確認
+    const summaryB_item_names = summaryB.summary_data.map(
+      (item: { item_name: string }) => item.item_name
+    );
+    expect(summaryB_item_names).not.toContain('営業活動数');
+    expect(summaryB_item_names).not.toContain('成約数');
 
-    // メール本文に変更理由が記載されていることを確認
-    expect(email_result.email_body).toContain("顧客要望によるプラン変更");
+    // テンプレートBにはテンプレートCの要素がないことを確認
+    expect(summaryB_item_names).not.toContain('請求額合計');
+    expect(summaryB_item_names).not.toContain('請求件数');
 
-    // From欄がシステムの正式なアドレスであることを確認
-    expect(email_result.email_from).toBe(system_email);
+    // テンプレートCでサマリー生成
+    const summaryC = generateMonthlySummary({
+      template_id: templateC.template_id,
+      monthly_period,
+      aggregated_data: {
+        営業活動件数: 45,
+        成約件数: 12,
+        売上高: 2500000,
+        顧客満足度スコア: 85.5,
+        請求額合計: 1800000,
+        請求件数: 8,
+      },
+    });
 
-    // メール送信日時がシステム上の変更確定時刻と一致することを確認
-    expect(email_result.sent_at).toEqual(change_timestamp);
+    // テンプレートCのサマリー検証
+    expect(summaryC).toEqual(
+      expect.objectContaining({
+        template_id: templateC.template_id,
+        monthly_period,
+        summary_data: expect.arrayContaining([
+          expect.objectContaining({
+            item_id: 'item_c_001',
+            item_name: '請求額合計',
+            value: 1800000,
+            display_order: 1,
+          }),
+          expect.objectContaining({
+            item_id: 'item_c_002',
+            item_name: '請求件数',
+            value: 8,
+            display_order: 2,
+          }),
+        ]),
+      })
+    );
 
-    // メール送信キューに正しく追加されたことを確認
-    expect(email_result.queued_for_delivery).toBe(true);
+    // テンプレートCにはテンプレートAの要素がないことを確認
+    const summaryC_item_names = summaryC.summary_data.map(
+      (item: { item_name: string }) => item.item_name
+    );
+    expect(summaryC_item_names).not.toContain('営業活動数');
+    expect(summaryC_item_names).not.toContain('成約数');
 
-    // 送信ステータスが 'pending' または 'sent' であることを確認
-    expect(["pending", "sent"]).toContain(email_result.delivery_status);
+    // テンプレートCにはテンプレートBの要素がないことを確認
+    expect(summaryC_item_names).not.toContain('売上高');
+    expect(summaryC_item_names).not.toContain('顧客満足度');
+
+    // 各テンプレートのサマリーデータ件数を確認
+    expect(summaryA.summary_data).toHaveLength(2);
+    expect(summaryB.summary_data).toHaveLength(2);
+    expect(summaryC.summary_data).toHaveLength(2);
   });
 });

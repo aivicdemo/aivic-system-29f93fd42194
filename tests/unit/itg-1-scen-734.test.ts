@@ -1,107 +1,77 @@
-import { describe, test, expect, beforeEach, afterEach } from "@jest/globals";
-import fetchMock from "jest-fetch-mock";
-import { validateSalesActivityData } from "../../src/logic/it-1781935279444-2-2-1";
+import { describe, it, expect, beforeEach, afterEach } from "@jest/globals";
+import { detectSalesDataMismatch } from "../../src/logic/it-1781935279444-2-2-1";
 
-fetchMock.enableMocks();
-
-describe("営業活動データ自動検証・エラー通知機能", () => {
-  beforeEach(() => {
-    fetchMock.resetMocks();
-  });
-
-  afterEach(() => {
-    fetchMock.resetMocks();
-  });
-
+describe("営業活動データ品質自動検出・通知機能", () => {
   // SCEN-734
-  test("矛盾値（アポ確定日が営業活動日より前）を検出し、修正が必要な項目として営業担当者に通知する", async () => {
-    const salesActivityDate = new Date("2024-01-15T09:00:00Z");
-    const appointmentConfirmedDate = new Date("2024-01-10T14:00:00Z");
-
-    const validationInput = {
-      recordId: "SALE-20240115-001",
-      salesPersonId: "SP-0001",
-      salesPersonEmail: "sales@example.com",
-      salesPersonName: "営業太郎",
-      activityDate: salesActivityDate,
-      appointmentConfirmedDate: appointmentConfirmedDate,
-      customerName: "顧客A",
-      customerId: "CUST-001",
-      activityType: "訪問",
-      result: "アポ確定",
-      serviceType: "サービスA",
+  it("営業活動データの商談内容と実績が矛盾し、不整合として修正通知が発行される", () => {
+    // 商談内容データ
+    const dealData = {
+      deal_id: "DEAL20240115001",
+      planned_contract_date: "2024-01-15",
+      planned_contract_amount: 5000000,
+      sales_rep_id: "SR001",
+      sales_rep_email: "sales@example.com",
     };
 
-    // API モック：エラー通知送信
-    fetchMock.mockResponseOnce(
-      JSON.stringify({
-        notificationId: "NOTIF-20240115-001",
-        status: "sent",
-        timestamp: "2024-01-15T10:30:00Z",
-      }),
-      { status: 200 }
-    );
+    // 実績データ
+    const performanceData = {
+      deal_id: "DEAL20240115001",
+      actual_contract_date: "2024-02-20",
+      actual_contract_amount: 3000000,
+    };
 
-    const result = await validateSalesActivityData(validationInput);
+    // データ品質自動検出機能を実行
+    const result = detectSalesDataMismatch({
+      deal: dealData,
+      performance: performanceData,
+      detection_timestamp: "2024-02-21T10:30:00Z",
+    });
 
-    // 検証結果の確認
-    expect(result).toBeDefined();
-    expect(result.isValid).toBe(false);
-    expect(result.errorCode).toBe("APPT_DATE_BEFORE_ACTIVITY");
-    expect(result.errorMessage).toContain("アポ確定日が営業活動日より前");
-    expect(result.conflictingFields).toEqual([
-      "activityDate",
-      "appointmentConfirmedDate",
-    ]);
+    // 不整合が検出されたことを確認
+    expect(result.mismatch_detected).toBe(true);
 
-    // 対象レコード情報の確認
-    expect(result.recordInfo).toBeDefined();
-    expect(result.recordInfo.recordId).toBe("SALE-20240115-001");
-    expect(result.recordInfo.salesPersonId).toBe("SP-0001");
-    expect(result.recordInfo.customerName).toBe("顧客A");
+    // 不整合の種別を確認
+    expect(result.mismatch_types).toContain("契約日ズレ");
+    expect(result.mismatch_types).toContain("金額ズレ");
 
-    // エラー詳細の確認
-    expect(result.errorDetails).toBeDefined();
-    expect(result.errorDetails.activityDate).toEqual(
-      new Date("2024-01-15T09:00:00Z")
-    );
-    expect(result.errorDetails.appointmentConfirmedDate).toEqual(
-      new Date("2024-01-10T14:00:00Z")
-    );
-    expect(result.errorDetails.daysDifference).toBe(-5);
+    // 対象商談IDを確認
+    expect(result.deal_id).toBe("DEAL20240115001");
 
-    // 修正が必要な項目の確認
-    expect(result.correctionRequired).toBe(true);
-    expect(result.requiredCorrections).toContain(
-      "アポ確定日が営業活動日より前であるため修正が必要"
-    );
+    // 詳細な不整合内容を検証
+    expect(result.mismatch_details).toMatchObject({
+      date_difference_days: 36,
+      amount_difference: 2000000,
+      planned_contract_date: "2024-01-15",
+      actual_contract_date: "2024-02-20",
+      planned_contract_amount: 5000000,
+      actual_contract_amount: 3000000,
+    });
 
-    // エラー通知送信の確認
-    expect(result.notificationStatus).toBeDefined();
-    expect(result.notificationStatus.sent).toBe(true);
-    expect(result.notificationStatus.recipientEmail).toBe(
-      "sales@example.com"
-    );
-    expect(result.notificationStatus.recipientName).toBe("営業太郎");
+    // 修正通知が生成されたことを確認
+    expect(result.correction_notification).toBeDefined();
 
-    // 通知内容の確認
-    expect(result.notificationContent).toBeDefined();
-    expect(result.notificationContent.subject).toContain("営業活動データ修正指示");
-    expect(result.notificationContent.body).toContain("アポ確定日");
-    expect(result.notificationContent.body).toContain("営業活動日より前");
-    expect(result.notificationContent.body).toContain("SALE-20240115-001");
-    expect(result.notificationContent.body).toContain("顧客A");
+    // 修正通知の内容を検証
+    const notification = result.correction_notification;
+    expect(notification.notification_id).toBeDefined();
+    expect(notification.deal_id).toBe("DEAL20240115001");
+    expect(notification.sales_rep_id).toBe("SR001");
+    expect(notification.sales_rep_email).toBe("sales@example.com");
 
-    // API 呼び出しの確認
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const callArgs = fetchMock.mock.calls[0];
-    expect(callArgs[0]).toContain("/notifications/send");
-    expect(callArgs[1]?.method).toBe("POST");
+    // 修正通知に不整合の具体的な差分情報が含まれていることを確認
+    expect(notification.content).toContain("契約日ズレ: 36日");
+    expect(notification.content).toContain("金額ズレ: 200万円");
 
-    const requestBody = JSON.parse(callArgs[1]?.body as string);
-    expect(requestBody.notificationType).toBe("validation_error");
-    expect(requestBody.priority).toBe("high");
-    expect(requestBody.salesPersonId).toBe("SP-0001");
-    expect(requestBody.recordId).toBe("SALE-20240115-001");
+    // 修正ステータスが「未対応」で初期化されていることを確認
+    expect(notification.status).toBe("未対応");
+
+    // 修正通知発行日時がシステム実行時刻と一致していることを確認
+    expect(notification.issued_at).toBe("2024-02-21T10:30:00Z");
+
+    // 修正通知が営業担当者に送信済みであることを確認
+    expect(notification.sent_to_sales_rep).toBe(true);
+    expect(notification.sent_timestamp).toBe("2024-02-21T10:30:00Z");
+
+    // 通知の優先度を確認
+    expect(notification.priority).toBe("high");
   });
 });

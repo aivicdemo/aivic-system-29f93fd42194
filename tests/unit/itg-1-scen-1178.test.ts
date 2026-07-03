@@ -1,109 +1,279 @@
-import { describeMonthlySummaryTemplate } from "../../src/logic/it-1-br-1781935279444-1-2-1";
+import { describe, test, expect, beforeEach, afterEach } from "@jest/globals";
+import fetchMock from "jest-fetch-mock";
+import {
+  structureValidationResultsWithEvidence,
+} from "../../src/logic/it-1781935279444-2-2-1";
 
-describe("月次サマリーテンプレートの定義・管理機能", () => {
-  test("SCEN-1178: レポート生成・配信期限管理 - 期限切れ直前のタイムスタンプでレポート完了判定が正確に行われる", () => {
-    // Setup: レポート生成タスクを作成し、期限を現在時刻から24時間後に設定
-    const baseTime = new Date("2025-01-15T10:00:00Z");
-    const deadlineTime = new Date("2025-01-16T10:00:00Z"); // 24時間後
-    const deadlineTimeMs = deadlineTime.getTime();
+fetchMock.enableMocks();
 
-    // Test Case 1: 期限まで23時間59分59秒の時点でレポート完了判定
-    const almostDeadlineTs = new Date("2025-01-16T09:59:59Z");
-    const almostDeadlineTsMs = almostDeadlineTs.getTime();
+describe("営業データ品質検証 - 検証結果と根拠資料の構造化整理", () => {
+  beforeEach(() => {
+    fetchMock.resetMocks();
+  });
 
-    const result_almost = describeMonthlySummaryTemplate({
-      task_id: "task_001",
-      generated_at: almostDeadlineTs.toISOString(),
-      deadline: deadlineTime.toISOString(),
-      is_completed: true,
+  afterEach(() => {
+    fetchMock.resetMocks();
+  });
+
+  // SCEN-1178
+  test("検証結果と複数の根拠資料が階層的・関連付け的に構造化され、画面表示・エクスポート時に構造が保持される", async () => {
+    // ========== 入力準備 ==========
+    const validation_result_id = "VR-20240115-001";
+    const sales_activity_record_id = "SAR-2024-001";
+    const contract_id = "CT-2024-001";
+    const proposal_material_id = "PM-2024-001";
+    const user_id = "USR-001";
+    const organization_id = "ORG-001";
+    const timestamp = new Date("2024-01-15T11:00:00Z").toISOString();
+
+    // 営業活動記録
+    const sales_activity_record = {
+      id: sales_activity_record_id,
+      customer_id: "CUST-001",
+      contact_date: "2024-01-15",
+      contact_type: "初回提案",
+      contact_outcome: "資料配布",
+      appointment_status: "未確定",
+      sales_staff_id: "STAFF-001",
+      notes: "顧客から好反応を得た",
+      created_at: timestamp,
+    };
+
+    // 契約書
+    const contract = {
+      id: contract_id,
+      customer_id: "CUST-001",
+      contract_type: "基本契約",
+      service_type: "営業代行",
+      contract_amount: 500000,
+      start_date: "2024-01-01",
+      end_date: "2024-12-31",
+      terms_and_conditions:
+        "月額成功報酬型。アポ成約数×単価",
+      version: "1.0",
+      created_at: timestamp,
+    };
+
+    // 提案資料
+    const proposal_material = {
+      id: proposal_material_id,
+      customer_id: "CUST-001",
+      material_title: "営業代行サービス提案資料",
+      material_content: "当社サービスの機能・価格・導入事例を記載",
+      version: "1.0",
+      created_date: "2024-01-15",
+      created_at: timestamp,
+    };
+
+    // 検証ルール実行結果（事前に実行完了と仮定）
+    const validation_execution_result = {
+      validation_rule_id: "VR-RULE-001",
+      sales_data_id: "SD-2024-001",
+      execution_status: "完了",
+      validation_passed: true,
+      detected_issues: [],
+      execution_timestamp: timestamp,
+    };
+
+    // 検証エラー（なし想定：正常系）
+    const validation_errors = [];
+
+    // ========== API モック設定 ==========
+    fetchMock.mockResponseOnce(
+      JSON.stringify({
+        id: sales_activity_record_id,
+        ...sales_activity_record,
+      }),
+      { status: 200 }
+    );
+
+    fetchMock.mockResponseOnce(
+      JSON.stringify({
+        id: contract_id,
+        ...contract,
+      }),
+      { status: 200 }
+    );
+
+    fetchMock.mockResponseOnce(
+      JSON.stringify({
+        id: proposal_material_id,
+        ...proposal_material,
+      }),
+      { status: 200 }
+    );
+
+    fetchMock.mockResponseOnce(
+      JSON.stringify({
+        validation_result_id: validation_result_id,
+        sales_activity_record_id: sales_activity_record_id,
+        contract_id: contract_id,
+        proposal_material_id: proposal_material_id,
+        validation_execution_result: validation_execution_result,
+        validation_errors: validation_errors,
+        structured_output: {
+          hierarchy_level: "root",
+          validation_result: {
+            id: validation_result_id,
+            status: "合格",
+            summary: "営業データの品質基準をすべて満たしています",
+            checked_at: timestamp,
+          },
+          evidence_materials: [
+            {
+              type: "sales_activity_record",
+              id: sales_activity_record_id,
+              title: "営業活動記録",
+              related_items: [
+                {
+                  field: "contact_outcome",
+                  value: "資料配布",
+                  validation_status: "OK",
+                },
+                {
+                  field: "appointment_status",
+                  value: "未確定",
+                  validation_status: "OK",
+                },
+              ],
+            },
+            {
+              type: "contract",
+              id: contract_id,
+              title: "契約書",
+              related_items: [
+                {
+                  field: "contract_amount",
+                  value: 500000,
+                  validation_status: "OK",
+                },
+                {
+                  field: "service_type",
+                  value: "営業代行",
+                  validation_status: "OK",
+                },
+              ],
+            },
+            {
+              type: "proposal_material",
+              id: proposal_material_id,
+              title: "提案資料",
+              related_items: [
+                {
+                  field: "material_version",
+                  value: "1.0",
+                  validation_status: "OK",
+                },
+              ],
+            },
+          ],
+          export_status: "準備完了",
+        },
+      }),
+      { status: 200 }
+    );
+
+    // ========== 関数実行 ==========
+    const result = await structureValidationResultsWithEvidence({
+      validation_result_id: validation_result_id,
+      sales_activity_record_id: sales_activity_record_id,
+      contract_id: contract_id,
+      proposal_material_id: proposal_material_id,
+      user_id: user_id,
+      organization_id: organization_id,
+      timestamp: timestamp,
     });
 
-    expect(result_almost.is_deadline_exceeded).toBe(false);
-    expect(result_almost.status).toBe("completed");
-    expect(deadlineTimeMs - almostDeadlineTsMs).toBeGreaterThanOrEqual(1000);
+    // ========== Assertion: 構造化されたデータが正しく返される ==========
+    expect(result).toBeDefined();
+    expect(result.validation_result_id).toBe(validation_result_id);
+    expect(result.sales_activity_record_id).toBe(sales_activity_record_id);
+    expect(result.contract_id).toBe(contract_id);
+    expect(result.proposal_material_id).toBe(proposal_material_id);
 
-    // Test Case 2: 期限まで残り1秒の時点で完了判定
-    const oneSecondBeforeDeadline = new Date("2025-01-16T09:59:59.999Z");
-    const oneSecondBeforeDeadlineMs = oneSecondBeforeDeadline.getTime();
+    // ========== Assertion: 構造化出力が階層的・関連付け的に整理されている ==========
+    expect(result.structured_output).toBeDefined();
+    expect(result.structured_output.hierarchy_level).toBe("root");
 
-    const result_one_sec = describeMonthlySummaryTemplate({
-      task_id: "task_002",
-      generated_at: oneSecondBeforeDeadline.toISOString(),
-      deadline: deadlineTime.toISOString(),
-      is_completed: true,
+    // ========== Assertion: 検証結果が含まれている ==========
+    expect(result.structured_output.validation_result).toBeDefined();
+    expect(result.structured_output.validation_result.id).toBe(
+      validation_result_id
+    );
+    expect(result.structured_output.validation_result.status).toBe("合格");
+    expect(result.structured_output.validation_result.summary).toBe(
+      "営業データの品質基準をすべて満たしています"
+    );
+    expect(result.structured_output.validation_result.checked_at).toBe(
+      timestamp
+    );
+
+    // ========== Assertion: 根拠資料が配列で含まれている ==========
+    expect(result.structured_output.evidence_materials).toBeDefined();
+    expect(Array.isArray(result.structured_output.evidence_materials)).toBe(
+      true
+    );
+    expect(result.structured_output.evidence_materials.length).toBe(3);
+
+    // ========== Assertion: 営業活動記録が正しく紐付いている ==========
+    const sales_activity_evidence =
+      result.structured_output.evidence_materials[0];
+    expect(sales_activity_evidence.type).toBe("sales_activity_record");
+    expect(sales_activity_evidence.id).toBe(sales_activity_record_id);
+    expect(sales_activity_evidence.title).toBe("営業活動記録");
+    expect(Array.isArray(sales_activity_evidence.related_items)).toBe(true);
+    expect(sales_activity_evidence.related_items.length).toBe(2);
+    expect(sales_activity_evidence.related_items[0]).toEqual({
+      field: "contact_outcome",
+      value: "資料配布",
+      validation_status: "OK",
+    });
+    expect(sales_activity_evidence.related_items[1]).toEqual({
+      field: "appointment_status",
+      value: "未確定",
+      validation_status: "OK",
     });
 
-    expect(result_one_sec.is_deadline_exceeded).toBe(false);
-    expect(result_one_sec.status).toBe("completed");
-    expect(deadlineTimeMs - oneSecondBeforeDeadlineMs).toBeGreaterThan(0);
-
-    // Test Case 3: 期限を1秒超過したタイムスタンプでレポート完了判定
-    const oneSecondAfterDeadline = new Date("2025-01-16T10:00:01Z");
-    const oneSecondAfterDeadlineMs = oneSecondAfterDeadline.getTime();
-
-    const result_exceeded = describeMonthlySummaryTemplate({
-      task_id: "task_003",
-      generated_at: oneSecondAfterDeadline.toISOString(),
-      deadline: deadlineTime.toISOString(),
-      is_completed: true,
+    // ========== Assertion: 契約書が正しく紐付いている ==========
+    const contract_evidence = result.structured_output.evidence_materials[1];
+    expect(contract_evidence.type).toBe("contract");
+    expect(contract_evidence.id).toBe(contract_id);
+    expect(contract_evidence.title).toBe("契約書");
+    expect(Array.isArray(contract_evidence.related_items)).toBe(true);
+    expect(contract_evidence.related_items.length).toBe(2);
+    expect(contract_evidence.related_items[0]).toEqual({
+      field: "contract_amount",
+      value: 500000,
+      validation_status: "OK",
+    });
+    expect(contract_evidence.related_items[1]).toEqual({
+      field: "service_type",
+      value: "営業代行",
+      validation_status: "OK",
     });
 
-    expect(result_exceeded.is_deadline_exceeded).toBe(true);
-    expect(result_exceeded.status).toBe("deadline_exceeded");
-    expect(oneSecondAfterDeadlineMs - deadlineTimeMs).toBe(1000);
-
-    // Test Case 4: 期限を大きく超過したタイムスタンプでレポート完了判定
-    const significantlyAfterDeadline = new Date("2025-01-16T11:30:00Z");
-    const significantlyAfterDeadlineMs = significantlyAfterDeadline.getTime();
-
-    const result_significantly_exceeded = describeMonthlySummaryTemplate({
-      task_id: "task_004",
-      generated_at: significantlyAfterDeadline.toISOString(),
-      deadline: deadlineTime.toISOString(),
-      is_completed: true,
+    // ========== Assertion: 提案資料が正しく紐付いている ==========
+    const proposal_evidence = result.structured_output.evidence_materials[2];
+    expect(proposal_evidence.type).toBe("proposal_material");
+    expect(proposal_evidence.id).toBe(proposal_material_id);
+    expect(proposal_evidence.title).toBe("提案資料");
+    expect(Array.isArray(proposal_evidence.related_items)).toBe(true);
+    expect(proposal_evidence.related_items.length).toBe(1);
+    expect(proposal_evidence.related_items[0]).toEqual({
+      field: "material_version",
+      value: "1.0",
+      validation_status: "OK",
     });
 
-    expect(result_significantly_exceeded.is_deadline_exceeded).toBe(true);
-    expect(result_significantly_exceeded.status).toBe("deadline_exceeded");
-    expect(significantlyAfterDeadlineMs - deadlineTimeMs).toBe(5400000); // 90分 = 5400000ms
+    // ========== Assertion: エクスポート状態が「準備完了」 ==========
+    expect(result.structured_output.export_status).toBe("準備完了");
 
-    // Test Case 5: 期限と同一時刻のタイムスタンプでレポート完了判定
-    const exactDeadlineTime = new Date("2025-01-16T10:00:00Z");
+    // ========== Assertion: 検証エラーがない（正常系） ==========
+    expect(result.validation_errors).toBeDefined();
+    expect(Array.isArray(result.validation_errors)).toBe(true);
+    expect(result.validation_errors.length).toBe(0);
 
-    const result_exact = describeMonthlySummaryTemplate({
-      task_id: "task_005",
-      generated_at: exactDeadlineTime.toISOString(),
-      deadline: deadlineTime.toISOString(),
-      is_completed: true,
-    });
-
-    expect(result_exact.is_deadline_exceeded).toBe(false);
-    expect(result_exact.status).toBe("completed");
-
-    // Test Case 6: ミリ秒単位の境界値検証 - 期限の999ミリ秒前
-    const millisBeforeDeadline = new Date("2025-01-16T09:59:59.001Z");
-
-    const result_millis_before = describeMonthlySummaryTemplate({
-      task_id: "task_006",
-      generated_at: millisBeforeDeadline.toISOString(),
-      deadline: deadlineTime.toISOString(),
-      is_completed: true,
-    });
-
-    expect(result_millis_before.is_deadline_exceeded).toBe(false);
-    expect(result_millis_before.status).toBe("completed");
-
-    // Test Case 7: ミリ秒単位の境界値検証 - 期限の1ミリ秒後
-    const millisAfterDeadline = new Date("2025-01-16T10:00:00.001Z");
-
-    const result_millis_after = describeMonthlySummaryTemplate({
-      task_id: "task_007",
-      generated_at: millisAfterDeadline.toISOString(),
-      deadline: deadlineTime.toISOString(),
-      is_completed: true,
-    });
-
-    expect(result_millis_after.is_deadline_exceeded).toBe(true);
-    expect(result_millis_after.status).toBe("deadline_exceeded");
+    // ========== Assertion: API 呼び出し回数の確認 ==========
+    expect(fetchMock.mock.calls.length).toBe(4);
   });
 });

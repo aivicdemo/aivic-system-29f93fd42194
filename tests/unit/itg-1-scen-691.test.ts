@@ -1,27 +1,42 @@
-import { validateSalesDataRange } from '../../src/logic/it-1781935279444-2-2-1';
+import { describe, it, expect } from "@jest/globals";
+import { validateSalesDataInput } from "../../src/logic/it-1781935279444-2-1-1";
 
-describe('営業データ値の範囲検証機能', () => {
-  // SCEN-691
-  test('数値項目が最小値ちょうどの場合に検証が合格する', () => {
-    const sales_data_item = {
-      item_id: 'apo_count',
-      item_name: 'アポ数',
-      data_type: 'number',
-      unit: '件',
-      min_value: 0,
-      max_value: 1000,
-      is_required: true,
+describe("営業データ入力時の品質検証ルール定義・実行機能", () => {
+  it("SCEN-691: 必須項目（顧客名、接触日時、成果内容）のいずれかが欠落した場合に検証エラーが検出される", () => {
+    // ケース1: 接触日時と成果内容が空
+    const input1 = {
+      customer_name: "テスト顧客",
+      contact_datetime: "",
+      achievement_content: "",
     };
+    expect(() => validateSalesDataInput(input1)).toThrow(/成果内容/);
 
-    const input_value = 0;
+    // ケース2: 接触日時が空
+    const input2 = {
+      customer_name: "テスト顧客",
+      contact_datetime: "",
+      achievement_content: "提案資料提出",
+    };
+    expect(() => validateSalesDataInput(input2)).toThrow(/接触日時/);
 
-    const result = validateSalesDataRange({
-      salesDataItem: sales_data_item,
-      inputValue: input_value,
+    // ケース3: 顧客名が空
+    const input3 = {
+      customer_name: "",
+      contact_datetime: "2024-01-15T10:00:00Z",
+      achievement_content: "提案資料提出",
+    };
+    expect(() => validateSalesDataInput(input3)).toThrow(/顧客名/);
+
+    // 成功ケース: すべての必須項目が入力されている
+    const inputValid = {
+      customer_name: "テスト顧客",
+      contact_datetime: "2024-01-15T10:00:00Z",
+      achievement_content: "提案資料提出",
+    };
+    const result = validateSalesDataInput(inputValid);
+    expect(result).toEqual({
+      is_valid: true,
+      errors: [],
     });
-
-    expect(result.isValid).toBe(true);
-    expect(result.errorMessage).toBe('');
-    expect(result.passedValue).toBe(0);
   });
 });

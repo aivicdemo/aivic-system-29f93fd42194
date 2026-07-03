@@ -1,102 +1,56 @@
-import { validateIntegratedThreeBusinesses } from "../../src/logic/it-1781935279444-2-2-1";
+import { detectAnomaliesAndMissingData } from '../../src/logic/it-1781935279444-2-2-1';
 
-describe("3業務統合検証・進行判定", () => {
-  test("SCEN-1108: 3業務すべてが合格時に次フェーズへ進行可能と判定される", () => {
-    // 入力: 請求書作成、営業報告書集計、契約書管理の3業務がすべて合格ステータス
-    const invoiceCreationResult = {
-      businessName: "請求書作成",
-      passFail: "合格",
-      validationItems: [
-        {
-          itemName: "必須項目完全性",
-          status: "合格",
-        },
-        {
-          itemName: "データ型整合性",
-          status: "合格",
-        },
-        {
-          itemName: "金額異常値検出",
-          status: "合格",
-        },
-      ],
-    };
+describe('営業データの完全性・正確性を自動検証し、不足データ・誤りを検出・通知する機能', () => {
+  // SCEN-1108: [edge] 異常値・欠落データ自動検出 - 空文字列と NULL が区別され、どちらも欠落として検出される
+  test('SCEN-1108: 空文字列と NULL 値の両方が欠落データとして正確に検出され、同じ欠落カテゴリに統一分類される', () => {
+    const testDataset = [
+      {
+        record_id: 'REC001',
+        customer_name: '',
+        contact_date: '2024-01-15',
+        deal_content: 'Sample deal',
+        appointment_status: 'confirmed',
+      },
+      {
+        record_id: 'REC002',
+        customer_name: null,
+        contact_date: '2024-01-16',
+        deal_content: 'Sample deal 2',
+        appointment_status: 'pending',
+      },
+      {
+        record_id: 'REC003',
+        customer_name: 'Valid Customer',
+        contact_date: '2024-01-17',
+        deal_content: 'Sample deal 3',
+        appointment_status: 'confirmed',
+      },
+    ];
 
-    const salesReportAggregationResult = {
-      businessName: "営業報告書集計",
-      passFail: "合格",
-      validationItems: [
-        {
-          itemName: "集計ロジック正確性",
-          status: "合格",
-        },
-        {
-          itemName: "計算式適用正確性",
-          status: "合格",
-        },
-        {
-          itemName: "異常値欠落検出",
-          status: "合格",
-        },
-      ],
-    };
+    const detection_result = detectAnomaliesAndMissingData(testDataset);
 
-    const contractManagementResult = {
-      businessName: "契約書管理",
-      passFail: "合格",
-      validationItems: [
-        {
-          itemName: "契約書バージョン管理",
-          status: "合格",
-        },
-        {
-          itemName: "顧客情報正確性",
-          status: "合格",
-        },
-        {
-          itemName: "最新版確認",
-          status: "合格",
-        },
-      ],
-    };
+    expect(detection_result.missing_data_records).toHaveLength(2);
 
-    // 関数実行
-    const result = validateIntegratedThreeBusinesses({
-      invoiceCreation: invoiceCreationResult,
-      salesReportAggregation: salesReportAggregationResult,
-      contractManagement: contractManagementResult,
-    });
+    const missing_record_ids = detection_result.missing_data_records.map(
+      (record: any) => record.record_id
+    );
+    expect(missing_record_ids).toContain('REC001');
+    expect(missing_record_ids).toContain('REC002');
 
-    // 期待結果: 進行判定が「次フェーズへ進行可能」
-    expect(result.progressJudgement).toBe("次フェーズへ進行可能");
-    expect(result.canProceedToNextPhase).toBe(true);
-    expect(result.allBusinessesPassed).toBe(true);
+    const empty_string_record = detection_result.missing_data_records.find(
+      (record: any) => record.record_id === 'REC001'
+    );
+    const null_record = detection_result.missing_data_records.find(
+      (record: any) => record.record_id === 'REC002'
+    );
 
-    // 3業務すべてが合格ステータスであることを確認
-    expect(result.businessResults.invoiceCreation.passFail).toBe("合格");
-    expect(result.businessResults.salesReportAggregation.passFail).toBe("合格");
-    expect(result.businessResults.contractManagement.passFail).toBe("合格");
+    expect(empty_string_record.classification).toBe('missing_data');
+    expect(null_record.classification).toBe('missing_data');
+    expect(empty_string_record.missing_field).toBe('customer_name');
+    expect(null_record.missing_field).toBe('customer_name');
 
-    // 各業務内の検証項目がすべて合格であることを確認
-    expect(
-      result.businessResults.invoiceCreation.validationItems.every(
-        (item) => item.status === "合格"
-      )
-    ).toBe(true);
-    expect(
-      result.businessResults.salesReportAggregation.validationItems.every(
-        (item) => item.status === "合格"
-      )
-    ).toBe(true);
-    expect(
-      result.businessResults.contractManagement.validationItems.every(
-        (item) => item.status === "合格"
-      )
-    ).toBe(true);
-
-    // フェーズ遷移が承認されたことを確認
-    expect(result.phaseTransitionApproved).toBe(true);
-    expect(result.passedBusinessCount).toBe(3);
-    expect(result.failedBusinessCount).toBe(0);
+    expect(detection_result.quality_score).toBe(66.67);
+    expect(detection_result.valid_record_count).toBe(1);
+    expect(detection_result.missing_data_count).toBe(2);
   });
 });

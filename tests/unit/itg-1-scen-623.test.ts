@@ -1,18 +1,29 @@
-import { approveBillingAmount } from '../../src/logic/it-1-2-1';
+import { generateMonthlySummary } from "../../src/logic/it-1-br-1781935279444-1-2-1";
 
-describe('営業成果データから請求対象項目を自動抽出し、顧客ごと・サービスごとの請求額を集計する機能', () => {
-  // SCEN-623: [error] 請求額確定フロー - 既に確定済みの請求額に対する再度の承認操作が適切に拒否される
-  test('既に確定済みの請求額に対する再度の承認操作は拒否される', () => {
-    const billingData = {
-      billingId: 'BILL-001',
-      customerId: 'CUST-123',
-      serviceId: 'SVC-456',
-      amount: 50000,
-      status: 'confirmed',
-      approvedAt: '2024-01-15T09:30:00Z',
-      approvedBy: 'USER-admin-001'
+describe("月次サマリーテンプレート定義・管理機能", () => {
+  test("SCEN-623: 月次サマリーテンプレートの項目定義が空である場合、サマリー生成がスキップされ警告が記録される", () => {
+    const emptyTemplateItems: any[] = [];
+    const templateId = "template_001";
+    const templateName = "テスト用テンプレート";
+    const salesData = {
+      customer_id: "cust_001",
+      service_id: "svc_001",
+      appointment_count: 5,
+      contract_count: 3,
+      customer_feedback: "良好",
     };
 
-    expect(() => approveBillingAmount(billingData)).toThrow(/既に確定済み/);
+    const result = generateMonthlySummary({
+      template_id: templateId,
+      template_name: templateName,
+      template_items: emptyTemplateItems,
+      sales_data: salesData,
+      execution_date: "2024-01-31",
+    });
+
+    expect(result.status).toBe("skipped");
+    expect(result.summary_content).toBeNull();
+    expect(result.warning_message).toMatch(/項目定義が空/);
+    expect(result.warning_logged).toBe(true);
   });
 });

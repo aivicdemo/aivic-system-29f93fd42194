@@ -1,168 +1,132 @@
-import { calculateBillingAmountWithDiscountValidation } from "../../src/logic/it-1-2-1";
+import { describeMonthlySummaryTemplate } from "../../src/logic/it-1-br-1781935279444-1-2-1";
 
-describe("営業成果データから請求対象項目を自動抽出し、顧客ごと・サービスごとの請求額を集計する機能", () => {
-  // SCEN-1284
-  test("[normal] 契約内容・割引基準との照合機能 - 抽出された請求情報が契約内容と完全に一致し、適用対象外の割引が正確に判定される", () => {
-    // 契約マスタデータの準備
-    const contractData = {
-      contractId: "CTR-2024-001",
-      customerId: "CUST-A",
-      serviceType: "premium",
-      baseAmount: 50000,
-      contractStartDate: new Date("2024-01-01T00:00:00Z"),
-      contractEndDate: new Date("2024-12-31T23:59:59Z"),
-      applicableDiscountTypes: ["early_payment_discount"],
-      discountExclusionRules: [
+describe("月次サマリーテンプレートの定義・管理機能", () => {
+  test("SCEN-1284: 配信対象顧客が1件のみの場合、当該顧客にレポートが配信される", () => {
+    // テストデータ: 配信対象となる顧客を1件のみ設定
+    const templateDefinition = {
+      template_id: "tpl_monthly_001",
+      template_name: "月次成果レポート",
+      description: "営業成果の月次集計レポート",
+      distribution_rules: {
+        target_customers: [
+          {
+            customer_id: "cust_001",
+            customer_name: "顧客A株式会社",
+            contract_id: "cont_001",
+            distribution_enabled: true,
+            delivery_channel: "email",
+            recipient_email: "manager@customer-a.jp",
+          },
+        ],
+        distribution_timing: "monthly_end",
+        distribution_timezone: "Asia/Tokyo",
+      },
+      template_sections: [
         {
-          ruleId: "DISC-EX-001",
-          discountType: "seasonal_campaign",
-          exclusionReason: "customer_segment_mismatch",
-          targetCustomerSegments: ["startup"],
+          section_id: "sec_001",
+          section_name: "営業成果指標",
+          sort_order: 1,
+          visible: true,
+          calculation_logic: "COUNT(appointments) as appointments_count",
         },
         {
-          ruleId: "DISC-EX-002",
-          discountType: "volume_discount",
-          exclusionReason: "service_type_mismatch",
-          targetServiceTypes: ["basic"],
-        },
-        {
-          ruleId: "DISC-EX-003",
-          discountType: "loyalty_discount",
-          exclusionReason: "contract_period_outside_promotion",
-          promotionStartDate: new Date("2025-01-01T00:00:00Z"),
-          promotionEndDate: new Date("2025-12-31T23:59:59Z"),
+          section_id: "sec_002",
+          section_name: "契約件数",
+          sort_order: 2,
+          visible: true,
+          calculation_logic: "COUNT(contracts) as contracts_count",
         },
       ],
+      created_at: "2024-01-01T09:00:00Z",
+      updated_at: "2024-01-15T10:00:00Z",
+      created_by: "admin_001",
     };
 
-    // 請求情報抽出（営業データから抽出された請求対象項目）
-    const extractedBillingInfo = {
-      contractId: "CTR-2024-001",
-      customerId: "CUST-A",
-      serviceType: "premium",
-      billingAmount: 50000,
-      billingPeriodStart: new Date("2024-01-01T00:00:00Z"),
-      billingPeriodEnd: new Date("2024-12-31T23:59:59Z"),
-      requestedDiscounts: [
-        { discountType: "early_payment_discount", discountRate: 0.05 },
-        { discountType: "seasonal_campaign", discountRate: 0.1 },
-        { discountType: "volume_discount", discountRate: 0.08 },
-        { discountType: "loyalty_discount", discountRate: 0.03 },
+    const monthlyData = {
+      month: "2024-01",
+      reporting_period_start: "2024-01-01",
+      reporting_period_end: "2024-01-31",
+      customer_id: "cust_001",
+      data_points: {
+        appointments_count: 12,
+        contracts_count: 3,
+        customer_response_rate: 0.85,
+        service_type: "Premium",
+      },
+    };
+
+    const result = describeMonthlySummaryTemplate({
+      template_definition: templateDefinition,
+      monthly_data: monthlyData,
+      action: "generate_and_deliver",
+    });
+
+    // 定義済みルール（配信条件）を確認し、該当する顧客が1件であることを検証
+    expect(result.applicable_customers).toHaveLength(1);
+    expect(result.applicable_customers[0].customer_id).toBe("cust_001");
+    expect(result.applicable_customers[0].customer_name).toBe("顧客A株式会社");
+
+    // 自動配信機能が実行されたことを検証
+    expect(result.distribution_status).toBe("completed");
+    expect(result.distribution_executed).toBe(true);
+
+    // 配信ログを確認し、対象顧客に対して配信が実行されたことを検証
+    expect(result.delivery_logs).toHaveLength(1);
+    const deliveryLog = result.delivery_logs[0];
+    expect(deliveryLog.customer_id).toBe("cust_001");
+    expect(deliveryLog.delivery_channel).toBe("email");
+    expect(deliveryLog.recipient_email).toBe("manager@customer-a.jp");
+    expect(deliveryLog.delivery_status).toBe("sent");
+    expect(deliveryLog.sent_at).toBe("2024-01-31T15:30:00Z");
+
+    // 対象顧客がレポートを受信したことを確認
+    expect(deliveryLog.delivery_confirmed).toBe(true);
+    expect(deliveryLog.received_at).toBe("2024-01-31T15:31:15Z");
+
+    // 配信されたレポートの内容が正確であることを検証
+    expect(result.generated_report).toEqual({
+      report_id: "rpt_001",
+      template_id: "tpl_monthly_001",
+      customer_id: "cust_001",
+      month: "2024-01",
+      report_title: "月次成果レポート - 2024年1月",
+      sections: [
+        {
+          section_id: "sec_001",
+          section_name: "営業成果指標",
+          sort_order: 1,
+          calculated_value: 12,
+          display_format: "appointments_count",
+          unit: "件",
+        },
+        {
+          section_id: "sec_002",
+          section_name: "契約件数",
+          sort_order: 2,
+          calculated_value: 3,
+          display_format: "contracts_count",
+          unit: "件",
+        },
       ],
-    };
+      generated_at: "2024-01-31T14:00:00Z",
+      content_hash: "hash_abc123def456",
+    });
 
-    // 割引基準マスタの準備
-    const discountRules = {
-      early_payment_discount: {
-        baseDiscountRate: 0.05,
-        applicable: true,
-        applicableCustomerSegments: ["all"],
-        applicableServiceTypes: ["all"],
-      },
-      seasonal_campaign: {
-        baseDiscountRate: 0.1,
-        applicable: true,
-        applicableCustomerSegments: ["enterprise", "mid_market"],
-        applicableServiceTypes: ["all"],
-      },
-      volume_discount: {
-        baseDiscountRate: 0.08,
-        applicable: true,
-        applicableCustomerSegments: ["all"],
-        applicableServiceTypes: ["premium", "standard"],
-      },
-      loyalty_discount: {
-        baseDiscountRate: 0.03,
-        applicable: true,
-        applicableCustomerSegments: ["all"],
-        applicableServiceTypes: ["all"],
-        promotionStartDate: new Date("2025-01-01T00:00:00Z"),
-        promotionEndDate: new Date("2025-12-31T23:59:59Z"),
-      },
-    };
+    // 配信ステータスが「完了」に更新されていることを確認
+    expect(result.distribution_status).toBe("completed");
+    expect(result.overall_success).toBe(true);
 
-    // 割引基準照合機能を実行
-    const result = calculateBillingAmountWithDiscountValidation(
-      extractedBillingInfo,
-      contractData,
-      discountRules
-    );
+    // 配信実行の詳細メトリクスを検証
+    expect(result.distribution_metrics).toEqual({
+      total_customers_targeted: 1,
+      successfully_delivered: 1,
+      failed_deliveries: 0,
+      delivery_rate: 1.0,
+      average_delivery_time_seconds: 75,
+    });
 
-    // 1. 抽出された請求情報がすべての契約内容項目と完全に一致することを検証
-    expect(result.contractValidation.contractIdMatch).toBe(true);
-    expect(result.contractValidation.billingAmountMatch).toBe(true);
-    expect(result.contractValidation.billingPeriodMatch).toBe(true);
-
-    // 2. 適用対象外の割引がすべて正確に判定・除外されることを検証
-    // 期待される結果：
-    // - early_payment_discount: 適用可能（顧客・サービス・期間すべて合致）
-    // - seasonal_campaign: 不適用（顧客区分がstartupではなくenterpriseが必要だが、CUST-Aは指定されていない）
-    // - volume_discount: 不適用（サービス種別がbasicに限定されているが、extractedはpremium）
-    // - loyalty_discount: 不適用（プロモーション期間が2025年のため、現在の契約期間2024年外）
-
-    // 適用対象外の割引の判定結果を確認
-    expect(result.discountValidationResults).toHaveLength(4);
-
-    const seasonalCampaignResult = result.discountValidationResults.find(
-      (d) => d.discountType === "seasonal_campaign"
-    );
-    expect(seasonalCampaignResult?.isApplicable).toBe(false);
-    expect(seasonalCampaignResult?.exclusionReason).toBe(
-      "customer_segment_mismatch"
-    );
-
-    const volumeDiscountResult = result.discountValidationResults.find(
-      (d) => d.discountType === "volume_discount"
-    );
-    expect(volumeDiscountResult?.isApplicable).toBe(false);
-    expect(volumeDiscountResult?.exclusionReason).toBe("service_type_mismatch");
-
-    const loyaltyDiscountResult = result.discountValidationResults.find(
-      (d) => d.discountType === "loyalty_discount"
-    );
-    expect(loyaltyDiscountResult?.isApplicable).toBe(false);
-    expect(loyaltyDiscountResult?.exclusionReason).toBe(
-      "contract_period_outside_promotion"
-    );
-
-    const earlyPaymentResult = result.discountValidationResults.find(
-      (d) => d.discountType === "early_payment_discount"
-    );
-    expect(earlyPaymentResult?.isApplicable).toBe(true);
-    expect(earlyPaymentResult?.appliedDiscountRate).toBe(0.05);
-
-    // 3. 適用対象外の割引が請求金額計算に反映されていないことを検証
-    // 基本金額 50000 × 適用割引（early_payment_discount 5%）= 50000 × 0.95 = 47500
-    const expectedFinalAmount = 50000 * (1 - 0.05);
-    expect(result.finalBillingAmount).toBe(expectedFinalAmount);
-    expect(result.finalBillingAmount).toBe(47500);
-
-    // 4. 複数の割引ルールが混在する場合、各々が正確に判定されることを確認
-    expect(result.discountValidationResults).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          discountType: "early_payment_discount",
-          isApplicable: true,
-        }),
-        expect.objectContaining({
-          discountType: "seasonal_campaign",
-          isApplicable: false,
-        }),
-        expect.objectContaining({
-          discountType: "volume_discount",
-          isApplicable: false,
-        }),
-        expect.objectContaining({
-          discountType: "loyalty_discount",
-          isApplicable: false,
-        }),
-      ])
-    );
-
-    // 5. 統計情報の検証
-    expect(result.discountValidationResults.filter((d) => d.isApplicable)).toHaveLength(1);
-    expect(result.discountValidationResults.filter((d) => !d.isApplicable)).toHaveLength(3);
-    expect(result.totalDiscountAmount).toBe(2500); // 50000 × 0.05
-    expect(result.appliedDiscountRate).toBe(0.05);
+    // 配信対象顧客が正確に1件であることを再確認
+    expect(result.delivery_logs.filter((log) => log.delivery_status === "sent"))
+      .toHaveLength(1);
   });
 });

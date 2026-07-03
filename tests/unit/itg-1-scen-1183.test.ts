@@ -1,90 +1,191 @@
-import { searchSalesActivities } from '../../src/logic/it-1781935279444-1-1-1';
+import { describe, test, expect } from "@jest/globals";
+import { structureVerificationResultsAndSupportingMaterials } from "../../src/logic/it-1781935279444-2-2-1";
 
-describe('営業活動データ検索・抽出・検証', () => {
-  // SCEN-1183
-  test('指定期間・顧客・営業担当者で営業活動データが正確に抽出される', () => {
-    // 前提: テストシステムにログイン済み、営業活動データが営業システムに記録されている
-    const search_params = {
-      period_start: '2024-01-01',
-      period_end: '2024-03-31',
-      customer_id: 'CUST_A001',
-      customer_name: 'テスト顧客A',
-      sales_rep_id: 'REP_001',
-      sales_rep_name: 'テスト営業担当者001'
+describe("検証結果と根拠資料の構造化整理機能", () => {
+  test("SCEN-1183: 無効な判定内容が指定された場合、バリデーションエラーを返す", () => {
+    // 前提: 検証結果と根拠資料の構造化整理機能へのアクセス権限がある状態
+    // 発生条件: 無効な判定内容（null、空文字列、未定義の判定ステータス）を指定して検証リクエストを送信
+
+    // ケース 1: 判定内容が null の場合
+    const inputWithNullJudgment = {
+      verification_id: "VER-20240115-001",
+      judgment_result: null,
+      supporting_materials: [
+        {
+          material_id: "MAT-001",
+          material_type: "営業活動記録",
+          reference_info: "顧客A との接触日時: 2024-01-10"
+        }
+      ],
+      verification_timestamp: "2024-01-15T11:00:00Z"
     };
 
-    // 検索実行
-    const result = searchSalesActivities(search_params);
+    expect(() =>
+      structureVerificationResultsAndSupportingMaterials(inputWithNullJudgment)
+    ).toThrow(/判定内容/);
 
-    // 期待結果: 指定条件に一致する営業活動データが抽出される
-    expect(result).toBeDefined();
-    expect(Array.isArray(result.records)).toBe(true);
+    // ケース 2: 判定内容が空文字列の場合
+    const inputWithEmptyJudgment = {
+      verification_id: "VER-20240115-002",
+      judgment_result: "",
+      supporting_materials: [
+        {
+          material_id: "MAT-002",
+          material_type: "契約書",
+          reference_info: "契約書第3条: 請求ルール定義"
+        }
+      ],
+      verification_timestamp: "2024-01-15T11:00:00Z"
+    };
 
-    // 検索結果の件数確認
-    expect(result.records.length).toBeGreaterThan(0);
+    expect(() =>
+      structureVerificationResultsAndSupportingMaterials(inputWithEmptyJudgment)
+    ).toThrow(/判定内容/);
 
-    // 各レコードが検索条件に完全に一致することを検証
-    result.records.forEach((record) => {
-      // 日付が指定期間内であること
-      const activity_date = new Date(record.activity_date);
-      const period_start_date = new Date(search_params.period_start);
-      const period_end_date = new Date(search_params.period_end);
+    // ケース 3: 判定内容が未定義の判定ステータスの場合
+    const inputWithInvalidStatus = {
+      verification_id: "VER-20240115-003",
+      judgment_result: "UNKNOWN_STATUS",
+      supporting_materials: [
+        {
+          material_id: "MAT-003",
+          material_type: "提案資料",
+          reference_info: "提案資料: 割引ルール変更"
+        }
+      ],
+      verification_timestamp: "2024-01-15T11:00:00Z"
+    };
 
-      expect(activity_date.getTime()).toBeGreaterThanOrEqual(period_start_date.getTime());
-      expect(activity_date.getTime()).toBeLessThanOrEqual(
-        period_end_date.getTime() + 24 * 60 * 60 * 1000 - 1
-      );
+    expect(() =>
+      structureVerificationResultsAndSupportingMaterials(inputWithInvalidStatus)
+    ).toThrow(/判定ステータス/);
 
-      // 顧客が指定された顧客と一致していること
-      expect(record.customer_id).toBe(search_params.customer_id);
-      expect(record.customer_name).toBe(search_params.customer_name);
+    // ケース 4: 正常系 - 有効な判定内容が指定された場合、エラーを返さない
+    const inputWithValidJudgment = {
+      verification_id: "VER-20240115-004",
+      judgment_result: "正確",
+      supporting_materials: [
+        {
+          material_id: "MAT-004",
+          material_type: "営業活動記録",
+          reference_info: "顧客B との成約日時: 2024-01-12"
+        },
+        {
+          material_id: "MAT-005",
+          material_type: "契約書",
+          reference_info: "契約ID: CTR-20240101-001"
+        }
+      ],
+      verification_timestamp: "2024-01-15T11:00:00Z"
+    };
 
-      // 営業担当者が指定された担当者と一致していること
-      expect(record.sales_rep_id).toBe(search_params.sales_rep_id);
-      expect(record.sales_rep_name).toBe(search_params.sales_rep_name);
+    const result = structureVerificationResultsAndSupportingMaterials(
+      inputWithValidJudgment
+    );
 
-      // レコード基本項目の存在確認
-      expect(record.activity_id).toBeDefined();
-      expect(typeof record.activity_id).toBe('string');
-      expect(record.activity_type).toBeDefined();
-      expect(['アポ', '成約', '顧客反応'].includes(record.activity_type)).toBe(true);
+    expect(result).toEqual({
+      verification_id: "VER-20240115-004",
+      judgment_result: "正確",
+      supporting_materials: [
+        {
+          material_id: "MAT-004",
+          material_type: "営業活動記録",
+          reference_info: "顧客B との成約日時: 2024-01-12"
+        },
+        {
+          material_id: "MAT-005",
+          material_type: "契約書",
+          reference_info: "契約ID: CTR-20240101-001"
+        }
+      ],
+      verification_timestamp: "2024-01-15T11:00:00Z",
+      structured_status: "確定"
     });
 
-    // エクスポート機能の検証
-    const export_result = result.export_data;
-    expect(export_result).toBeDefined();
-    expect(export_result.format).toBe('csv');
-    expect(export_result.filename).toBe(
-      `sales_activities_${search_params.period_start}_to_${search_params.period_end}.csv`
+    // ケース 5: 有効な判定内容「誤り」の場合
+    const inputWithErrorJudgment = {
+      verification_id: "VER-20240115-005",
+      judgment_result: "誤り",
+      supporting_materials: [
+        {
+          material_id: "MAT-006",
+          material_type: "営業活動記録",
+          reference_info: "営業データ: アポ数計算誤り"
+        }
+      ],
+      verification_timestamp: "2024-01-15T11:00:00Z"
+    };
+
+    const resultWithError = structureVerificationResultsAndSupportingMaterials(
+      inputWithErrorJudgment
     );
-    expect(export_result.file_content).toBeDefined();
-    expect(typeof export_result.file_content).toBe('string');
 
-    // エクスポートされたCSVファイルのデータ整合性確認
-    const csv_lines = export_result.file_content.trim().split('\n');
-    expect(csv_lines.length).toBeGreaterThan(1); // ヘッダー + データ行
+    expect(resultWithError).toEqual({
+      verification_id: "VER-20240115-005",
+      judgment_result: "誤り",
+      supporting_materials: [
+        {
+          material_id: "MAT-006",
+          material_type: "営業活動記録",
+          reference_info: "営業データ: アポ数計算誤り"
+        }
+      ],
+      verification_timestamp: "2024-01-15T11:00:00Z",
+      structured_status: "要修正"
+    });
 
-    // CSVヘッダーの確認
-    const csv_header = csv_lines[0];
-    expect(csv_header).toContain('activity_id');
-    expect(csv_header).toContain('activity_date');
-    expect(csv_header).toContain('customer_id');
-    expect(csv_header).toContain('customer_name');
-    expect(csv_header).toContain('sales_rep_id');
-    expect(csv_header).toContain('sales_rep_name');
+    // ケース 6: 有効な判定内容「要確認」の場合
+    const inputWithRequiresConfirmation = {
+      verification_id: "VER-20240115-006",
+      judgment_result: "要確認",
+      supporting_materials: [
+        {
+          material_id: "MAT-007",
+          material_type: "提案資料",
+          reference_info: "提案資料バージョン確認必要"
+        }
+      ],
+      verification_timestamp: "2024-01-15T11:00:00Z"
+    };
 
-    // CSVデータ行数が検索結果と一致することを確認
-    const csv_data_line_count = csv_lines.length - 1;
-    expect(csv_data_line_count).toBe(result.records.length);
+    const resultRequiresConfirmation =
+      structureVerificationResultsAndSupportingMaterials(
+        inputWithRequiresConfirmation
+      );
 
-    // CSVに含まれるデータが検索結果と一致することを確認
-    for (let i = 1; i < csv_lines.length; i++) {
-      const csv_row = csv_lines[i];
-      const record = result.records[i - 1];
+    expect(resultRequiresConfirmation).toEqual({
+      verification_id: "VER-20240115-006",
+      judgment_result: "要確認",
+      supporting_materials: [
+        {
+          material_id: "MAT-007",
+          material_type: "提案資料",
+          reference_info: "提案資料バージョン確認必要"
+        }
+      ],
+      verification_timestamp: "2024-01-15T11:00:00Z",
+      structured_status: "確認待ち"
+    });
 
-      expect(csv_row).toContain(record.activity_id);
-      expect(csv_row).toContain(record.customer_id);
-      expect(csv_row).toContain(record.sales_rep_id);
-    }
+    // ケース 7: 支援資料が空配列の場合でも、判定内容が有効なら処理継続
+    const inputWithEmptySupportingMaterials = {
+      verification_id: "VER-20240115-007",
+      judgment_result: "正確",
+      supporting_materials: [],
+      verification_timestamp: "2024-01-15T11:00:00Z"
+    };
+
+    const resultEmptyMaterials =
+      structureVerificationResultsAndSupportingMaterials(
+        inputWithEmptySupportingMaterials
+      );
+
+    expect(resultEmptyMaterials).toEqual({
+      verification_id: "VER-20240115-007",
+      judgment_result: "正確",
+      supporting_materials: [],
+      verification_timestamp: "2024-01-15T11:00:00Z",
+      structured_status: "確定"
+    });
   });
 });

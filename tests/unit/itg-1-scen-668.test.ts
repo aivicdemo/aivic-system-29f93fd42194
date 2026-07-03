@@ -1,285 +1,143 @@
-import { aggregateSalesMetricsByPeriod } from '../../src/logic/it-1-2-1';
+import { validateReportQualityChecklistAndReturnRejectionDecision } from "../../src/logic/it-1-br-1781935279444-1-2-1";
 
-describe('月次成果指標自動集計機能 - 集計対象期間外のデータが除外される', () => {
-  test('SCEN-668: 当月データのみが集計対象として処理され、前月・翌月のデータが除外される', () => {
-    // テストデータの準備
-    const previousMonthData = [
+describe("月次サマリーテンプレートの定義・管理機能 - 自動生成レポート品質チェック", () => {
+  test("SCEN-668: チェックリスト項目の一部が不合格の場合、差戻し判定が正確に行われる", () => {
+    // 背景: 自動生成レポートがテンプレートに基づき生成され、品質チェック検証が開始される段階
+    // トリガー: チェックリスト内の複数項目の一部が不合格状態で品質チェック検証プロセスが実行される
+    // 期待結果: 不合格項目が正確に特定され、差戻し判定フラグが true に設定され、差戻し理由に不合格項目がすべて明記される
+
+    const checklistItems = [
       {
-        id: 'pm-001',
-        date: '2023-12-01',
-        customerId: 'cust-001',
-        serviceId: 'svc-001',
-        appointmentCount: 2,
-        contractCount: 1,
+        id: "item_001",
+        name: "顧客ごとの売上集計合計",
+        status: "合格",
+        validationRule: "必須項目・データ型・値の範囲チェック",
       },
       {
-        id: 'pm-002',
-        date: '2023-12-05',
-        customerId: 'cust-002',
-        serviceId: 'svc-002',
-        appointmentCount: 3,
-        contractCount: 1,
+        id: "item_002",
+        name: "サービス別売上の内訳",
+        status: "不合格",
+        validationRule: "必須項目チェック",
+        failureReason: "サービス種別BのデータがNULL",
       },
       {
-        id: 'pm-003',
-        date: '2023-12-10',
-        customerId: 'cust-001',
-        serviceId: 'svc-001',
-        appointmentCount: 1,
-        contractCount: 0,
+        id: "item_003",
+        name: "割引額の計算根拠",
+        status: "合格",
+        validationRule: "計算式検証",
       },
       {
-        id: 'pm-004',
-        date: '2023-12-15',
-        customerId: 'cust-003',
-        serviceId: 'svc-003',
-        appointmentCount: 2,
-        contractCount: 1,
+        id: "item_004",
+        name: "請求期間の妥当性",
+        status: "不合格",
+        validationRule: "日付範囲チェック",
+        failureReason: "請求開始日が請求終了日より後",
       },
       {
-        id: 'pm-005',
-        date: '2023-12-28',
-        customerId: 'cust-002',
-        serviceId: 'svc-001',
-        appointmentCount: 1,
-        contractCount: 0,
+        id: "item_005",
+        name: "異常値検出フラグ",
+        status: "不合格",
+        validationRule: "異常値判定",
+        failureReason: "請求額が前月比で+250%（上限:+50%を超過）",
       },
     ];
 
-    const currentMonthData = [
-      {
-        id: 'cm-001',
-        date: '2024-01-01',
-        customerId: 'cust-001',
-        serviceId: 'svc-001',
-        appointmentCount: 5,
-        contractCount: 2,
+    const reportData = {
+      reportId: "report_20240131_cust_A",
+      customerId: "customer_001",
+      reportPeriod: {
+        startDate: "2024-01-01",
+        endDate: "2024-01-31",
       },
-      {
-        id: 'cm-002',
-        date: '2024-01-02',
-        customerId: 'cust-002',
-        serviceId: 'svc-002',
-        appointmentCount: 3,
-        contractCount: 1,
-      },
-      {
-        id: 'cm-003',
-        date: '2024-01-05',
-        customerId: 'cust-001',
-        serviceId: 'svc-002',
-        appointmentCount: 2,
-        contractCount: 1,
-      },
-      {
-        id: 'cm-004',
-        date: '2024-01-10',
-        customerId: 'cust-003',
-        serviceId: 'svc-001',
-        appointmentCount: 4,
-        contractCount: 2,
-      },
-      {
-        id: 'cm-005',
-        date: '2024-01-12',
-        customerId: 'cust-002',
-        serviceId: 'svc-003',
-        appointmentCount: 1,
-        contractCount: 0,
-      },
-      {
-        id: 'cm-006',
-        date: '2024-01-15',
-        customerId: 'cust-001',
-        serviceId: 'svc-003',
-        appointmentCount: 2,
-        contractCount: 1,
-      },
-      {
-        id: 'cm-007',
-        date: '2024-01-18',
-        customerId: 'cust-003',
-        serviceId: 'svc-002',
-        appointmentCount: 3,
-        contractCount: 1,
-      },
-      {
-        id: 'cm-008',
-        date: '2024-01-20',
-        customerId: 'cust-002',
-        serviceId: 'svc-001',
-        appointmentCount: 2,
-        contractCount: 0,
-      },
-      {
-        id: 'cm-009',
-        date: '2024-01-25',
-        customerId: 'cust-001',
-        serviceId: 'svc-002',
-        appointmentCount: 1,
-        contractCount: 1,
-      },
-      {
-        id: 'cm-010',
-        date: '2024-01-31',
-        customerId: 'cust-003',
-        serviceId: 'svc-003',
-        appointmentCount: 2,
-        contractCount: 1,
-      },
-    ];
+      generatedBy: "automated_system",
+      generatedAt: "2024-02-01T09:00:00Z",
+      checklistItems: checklistItems,
+    };
 
-    const nextMonthData = [
-      {
-        id: 'nm-001',
-        date: '2024-02-01',
-        customerId: 'cust-001',
-        serviceId: 'svc-001',
-        appointmentCount: 1,
-        contractCount: 1,
-      },
-      {
-        id: 'nm-002',
-        date: '2024-02-05',
-        customerId: 'cust-002',
-        serviceId: 'svc-002',
-        appointmentCount: 2,
-        contractCount: 0,
-      },
-      {
-        id: 'nm-003',
-        date: '2024-02-10',
-        customerId: 'cust-003',
-        serviceId: 'svc-001',
-        appointmentCount: 3,
-        contractCount: 1,
-      },
-    ];
-
-    const allData = [...previousMonthData, ...currentMonthData, ...nextMonthData];
-
-    // 集計対象期間を設定（2024年1月）
-    const periodStart = '2024-01-01';
-    const periodEnd = '2024-01-31';
-
-    // 集計処理を実行
-    const result = aggregateSalesMetricsByPeriod({
-      data: allData,
-      startDate: periodStart,
-      endDate: periodEnd,
-    });
-
-    // 集計結果から含まれたデータ件数をカウント
-    const includedRecordCount = result.records.length;
-    expect(includedRecordCount).toBe(10);
-
-    // 集計結果に前月のデータが含まれていないことを確認
-    const previousMonthIncluded = result.records.some((record) =>
-      previousMonthData.some((pm) => pm.id === record.id),
+    // 品質チェック検証プロセスを実行
+    const rejectionDecision = validateReportQualityChecklistAndReturnRejectionDecision(
+      reportData
     );
-    expect(previousMonthIncluded).toBe(false);
 
-    // 集計結果に翌月のデータが含まれていないことを確認
-    const nextMonthIncluded = result.records.some((record) =>
-      nextMonthData.some((nm) => nm.id === record.id),
+    // 差戻し判定フラグが true に設定されていることを検証
+    expect(rejectionDecision.isRejected).toBe(true);
+
+    // 不合格項目数が正確に特定されていることを検証（期待値: 3項目）
+    expect(rejectionDecision.failedItemCount).toBe(3);
+
+    // 不合格項目のIDリストが正確に含まれていることを検証
+    expect(rejectionDecision.failedItemIds).toEqual([
+      "item_002",
+      "item_004",
+      "item_005",
+    ]);
+
+    // 合格項目数が正確に特定されていることを検証（期待値: 2項目）
+    expect(rejectionDecision.passedItemCount).toBe(2);
+
+    // 合格項目のIDリストが正確に含まれていることを検証
+    expect(rejectionDecision.passedItemIds).toEqual(["item_001", "item_003"]);
+
+    // 差戻し理由に不合格項目がすべて明記されていることを検証
+    expect(rejectionDecision.rejectionReasons).toContain(
+      "item_002: サービス別売上の内訳 - サービス種別BのデータがNULL"
     );
-    expect(nextMonthIncluded).toBe(false);
+    expect(rejectionDecision.rejectionReasons).toContain(
+      "item_004: 請求期間の妥当性 - 請求開始日が請求終了日より後"
+    );
+    expect(rejectionDecision.rejectionReasons).toContain(
+      "item_005: 異常値検出フラグ - 請求額が前月比で+250%（上限:+50%を超過）"
+    );
 
-    // 集計結果の詳細データを確認し、すべてが当月の日付範囲内であることを検証
-    result.records.forEach((record) => {
-      const recordDate = new Date(record.date);
-      const startDateObj = new Date(periodStart);
-      const endDateObj = new Date(periodEnd);
+    // 不合格理由の個数が不合格項目数と一致することを検証
+    expect(rejectionDecision.rejectionReasons.length).toBe(3);
 
-      expect(recordDate.getTime()).toBeGreaterThanOrEqual(
-        startDateObj.getTime(),
-      );
-      expect(recordDate.getTime()).toBeLessThanOrEqual(endDateObj.getTime());
-    });
+    // 差戻し対象フラグが true に設定されていることを検証
+    expect(rejectionDecision.isReturnTarget).toBe(true);
 
-    // 顧客別・サービス別の集計結果を検証
-    const aggregatedByCustAndSvc = result.aggregatedByCustomerAndService;
+    // レポートID が正確に記録されていることを検証
+    expect(rejectionDecision.reportId).toBe("report_20240131_cust_A");
 
-    // 当月データから期待される集計値を検証
-    expect(aggregatedByCustAndSvc['cust-001']['svc-001']).toEqual({
-      customerId: 'cust-001',
-      serviceId: 'svc-001',
-      totalAppointmentCount: 5,
-      totalContractCount: 2,
-      recordCount: 1,
-    });
+    // 検証実行タイムスタンプが存在することを検証
+    expect(rejectionDecision.validatedAt).toBeDefined();
 
-    expect(aggregatedByCustAndSvc['cust-002']['svc-002']).toEqual({
-      customerId: 'cust-002',
-      serviceId: 'svc-002',
-      totalAppointmentCount: 3,
-      totalContractCount: 1,
-      recordCount: 1,
-    });
+    // 検証ステータスが「差戻し」に設定されていることを検証
+    expect(rejectionDecision.validationStatus).toBe("差戻し");
 
-    expect(aggregatedByCustAndSvc['cust-001']['svc-002']).toEqual({
-      customerId: 'cust-001',
-      serviceId: 'svc-002',
-      totalAppointmentCount: 3,
-      totalContractCount: 2,
-      recordCount: 2,
-    });
+    // 合格項目の詳細が保持されていることを検証（後続処理で利用可能にするため）
+    expect(rejectionDecision.passedItems).toEqual([
+      {
+        id: "item_001",
+        name: "顧客ごとの売上集計合計",
+        status: "合格",
+      },
+      {
+        id: "item_003",
+        name: "割引額の計算根拠",
+        status: "合格",
+      },
+    ]);
 
-    expect(aggregatedByCustAndSvc['cust-003']['svc-001']).toEqual({
-      customerId: 'cust-003',
-      serviceId: 'svc-001',
-      totalAppointmentCount: 4,
-      totalContractCount: 2,
-      recordCount: 1,
-    });
-
-    expect(aggregatedByCustAndSvc['cust-002']['svc-003']).toEqual({
-      customerId: 'cust-002',
-      serviceId: 'svc-003',
-      totalAppointmentCount: 1,
-      totalContractCount: 0,
-      recordCount: 1,
-    });
-
-    expect(aggregatedByCustAndSvc['cust-001']['svc-003']).toEqual({
-      customerId: 'cust-001',
-      serviceId: 'svc-003',
-      totalAppointmentCount: 2,
-      totalContractCount: 1,
-      recordCount: 1,
-    });
-
-    expect(aggregatedByCustAndSvc['cust-003']['svc-002']).toEqual({
-      customerId: 'cust-003',
-      serviceId: 'svc-002',
-      totalAppointmentCount: 3,
-      totalContractCount: 1,
-      recordCount: 1,
-    });
-
-    expect(aggregatedByCustAndSvc['cust-002']['svc-001']).toEqual({
-      customerId: 'cust-002',
-      serviceId: 'svc-001',
-      totalAppointmentCount: 2,
-      totalContractCount: 0,
-      recordCount: 1,
-    });
-
-    expect(aggregatedByCustAndSvc['cust-003']['svc-003']).toEqual({
-      customerId: 'cust-003',
-      serviceId: 'svc-003',
-      totalAppointmentCount: 2,
-      totalContractCount: 1,
-      recordCount: 1,
-    });
-
-    // 全体統計の検証
-    expect(result.summaryStats.totalRecordsInPeriod).toBe(10);
-    expect(result.summaryStats.totalAppointments).toBe(25);
-    expect(result.summaryStats.totalContracts).toBe(10);
-    expect(result.summaryStats.periodStart).toBe(periodStart);
-    expect(result.summaryStats.periodEnd).toBe(periodEnd);
-    expect(result.summaryStats.uniqueCustomerCount).toBe(3);
-    expect(result.summaryStats.uniqueServiceCount).toBe(3);
+    // 不合格項目の詳細が保持されていることを検証
+    expect(rejectionDecision.failedItems).toEqual([
+      {
+        id: "item_002",
+        name: "サービス別売上の内訳",
+        status: "不合格",
+        failureReason: "サービス種別BのデータがNULL",
+      },
+      {
+        id: "item_004",
+        name: "請求期間の妥当性",
+        status: "不合格",
+        failureReason: "請求開始日が請求終了日より後",
+      },
+      {
+        id: "item_005",
+        name: "異常値検出フラグ",
+        status: "不合格",
+        failureReason: "請求額が前月比で+250%（上限:+50%を超過）",
+      },
+    ]);
   });
 });

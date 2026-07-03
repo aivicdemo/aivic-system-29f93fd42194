@@ -1,96 +1,148 @@
-import { validateIntegratedBusinessOperations } from '../../src/logic/it-1781935279444-2-2-1';
+import { describe, test, expect, beforeEach, afterEach } from '@jest/globals';
+import { validateCustomerAggregationLogic } from '../../src/logic/it-1781935279444-1-1-1';
 
-describe('営業データ品質管理・請求自動化システム - 3業務統合検証', () => {
-  test('SCEN-1111: 3業務中2業務が合格、1業務が未評価の場合、判定保留となること', () => {
-    // Arrange
-    const businessOperationA = {
-      operationId: 'OP-A-001',
-      operationName: '営業データ品質チェック',
-      evaluationStatus: 'PASSED',
-      completionTimestamp: new Date('2024-01-15T10:30:00Z'),
-      evaluationDetails: {
-        requiredFieldsValidation: true,
-        dataTypeValidation: true,
-        valueRangeValidation: true,
-        anomalyDetection: false,
-      },
+describe('営業データ項目のメタデータ管理機能 - 顧客別成果指標集計ロジック検証', () => {
+  let mockLogData: Array<{ timestamp: string; message: string; level: string }> = [];
+
+  beforeEach(() => {
+    mockLogData = [];
+    jest.clearAllMocks();
+  });
+
+  afterEach(() => {
+    mockLogData = [];
+  });
+
+  // SCEN-1111: [error] 顧客別成果指標集計ロジック検証 - 計算ルール未定義の顧客に対してエラーが返される
+  test('should return error when aggregation logic is not defined for customer', () => {
+    const customerId = 'CUST-999-UNDEFINED';
+    const aggregationPeriod = '2024-01-01T00:00:00Z';
+    const salesMetricsData = {
+      appointmentCount: 15,
+      contractCount: 3,
+      customerReaction: 'positive',
     };
 
-    const businessOperationB = {
-      operationId: 'OP-B-001',
-      operationName: '請求対象項目抽出ルール確認',
-      evaluationStatus: 'PASSED',
-      completionTimestamp: new Date('2024-01-15T10:45:00Z'),
-      evaluationDetails: {
-        contractIntegrityCheck: true,
-        extractionRuleValidation: true,
-        amountCalculationLogicValidation: true,
-      },
+    const mockSystemLogger = {
+      error: jest.fn((message: string) => {
+        mockLogData.push({
+          timestamp: '2024-01-15T11:00:00Z',
+          message: message,
+          level: 'error',
+        });
+      }),
     };
 
-    const businessOperationC = {
-      operationId: 'OP-C-001',
-      operationName: '請求額計算結果検証',
-      evaluationStatus: 'PENDING',
-      completionTimestamp: null,
-      evaluationDetails: {
-        calculationAccuracyCheck: null,
-        discountApplicationValidation: null,
-        exceptionalPatternDetection: null,
-      },
+    expect(() =>
+      validateCustomerAggregationLogic(
+        customerId,
+        aggregationPeriod,
+        salesMetricsData,
+        mockSystemLogger
+      )
+    ).toThrow(/計算ルール/);
+
+    expect(mockSystemLogger.error).toHaveBeenCalled();
+    expect(mockLogData).toHaveLength(1);
+    expect(mockLogData[0].level).toBe('error');
+    expect(mockLogData[0].message).toMatch(/計算ルール/);
+  });
+
+  test('should return error code CALC_RULE_NOT_DEFINED when customer has no aggregation logic', () => {
+    const customerId = 'CUST-UNDEFINED-001';
+    const aggregationPeriod = '2024-02-15T00:00:00Z';
+    const salesMetricsData = {
+      appointmentCount: 20,
+      contractCount: 5,
+      customerReaction: 'neutral',
     };
 
-    const integrationInput = {
-      operationList: [
-        businessOperationA,
-        businessOperationB,
-        businessOperationC,
-      ],
-      evaluationTimestamp: new Date('2024-01-15T11:00:00Z'),
-      systemUserId: 'USER-001',
-      operationContextId: 'CTX-2024-01-15-001',
+    const mockSystemLogger = {
+      error: jest.fn(),
     };
 
-    // Act
-    const result = validateIntegratedBusinessOperations(integrationInput);
+    let caughtError: Error | null = null;
+    try {
+      validateCustomerAggregationLogic(
+        customerId,
+        aggregationPeriod,
+        salesMetricsData,
+        mockSystemLogger
+      );
+    } catch (err) {
+      caughtError = err as Error;
+    }
 
-    // Assert - 判定結果が「判定保留」であること
-    expect(result.integrationJudgment).toBe('JUDGMENT_PENDING');
-    expect(result.judgeableBusinessCount).toBe(2);
-    expect(result.pendingBusinessCount).toBe(1);
-    expect(result.failedBusinessCount).toBe(0);
-    expect(result.totalBusinessCount).toBe(3);
+    expect(caughtError).not.toBeNull();
+    expect(caughtError?.message).toMatch(/計算ルール/);
+    expect(mockSystemLogger.error).toHaveBeenCalledWith(expect.stringMatching(/計算ルール/));
+  });
 
-    // Assert - 判定保留理由に未評価業務が含まれていること
-    expect(result.judgementReason).toMatch(/未評価/);
-    expect(result.pendingOperationIds).toContain('OP-C-001');
+  test('should record error in system log with proper format when aggregation logic is missing', () => {
+    const customerId = 'CUST-NO-LOGIC-002';
+    const aggregationPeriod = '2024-03-20T00:00:00Z';
+    const salesMetricsData = {
+      appointmentCount: 8,
+      contractCount: 1,
+      customerReaction: 'negative',
+    };
 
-    // Assert - 後続処理実行フラグが false であること（請求自動化処理が実行されない）
-    expect(result.canProceedToAutomatedBilling).toBe(false);
+    const errorLog: Array<{ timestamp: string; level: string; customerId: string; message: string }> = [];
+    const mockSystemLogger = {
+      error: jest.fn((message: string) => {
+        errorLog.push({
+          timestamp: '2024-03-20T11:30:00Z',
+          level: 'error',
+          customerId: customerId,
+          message: message,
+        });
+      }),
+    };
 
-    // Assert - 各業務の評価ステータスが正確に記録されていること
-    expect(result.operationEvaluationSummary).toEqual({
-      passed: ['OP-A-001', 'OP-B-001'],
-      pending: ['OP-C-001'],
-      failed: [],
-    });
+    expect(() =>
+      validateCustomerAggregationLogic(
+        customerId,
+        aggregationPeriod,
+        salesMetricsData,
+        mockSystemLogger
+      )
+    ).toThrow(/計算ルール/);
 
-    // Assert - タイムスタンプが記録されていること
-    expect(result.judgementTimestamp).toEqual(
-      new Date('2024-01-15T11:00:00Z')
-    );
+    expect(errorLog).toHaveLength(1);
+    expect(errorLog[0].level).toBe('error');
+    expect(errorLog[0].customerId).toBe('CUST-NO-LOGIC-002');
+    expect(errorLog[0].message).toMatch(/計算ルール/);
+  });
 
-    // Assert - 判定保留中に追加の検証が必要なフィールドが明示されていること
-    expect(result.requiredFollowUpActions).toContain('OP-C-001');
-    expect(result.requiredFollowUpActions.length).toBeGreaterThanOrEqual(1);
+  test('should halt subsequent processing when aggregation logic validation fails', () => {
+    const customerId = 'CUST-HALT-TEST-003';
+    const aggregationPeriod = '2024-04-10T00:00:00Z';
+    const salesMetricsData = {
+      appointmentCount: 12,
+      contractCount: 2,
+      customerReaction: 'positive',
+    };
 
-    // Assert - システムログ用の判定ロジック実行記録が生成されていること
-    expect(result.auditLog).toBeDefined();
-    expect(result.auditLog.logTimestamp).toEqual(
-      new Date('2024-01-15T11:00:00Z')
-    );
-    expect(result.auditLog.userId).toBe('USER-001');
-    expect(result.auditLog.contextId).toBe('CTX-2024-01-15-001');
-    expect(result.auditLog.judgeLogic).toMatch(/統合判定ロジック/);
+    const processStates: string[] = [];
+    const mockSystemLogger = {
+      error: jest.fn((message: string) => {
+        processStates.push('error_logged');
+      }),
+    };
+
+    processStates.push('validation_started');
+
+    expect(() => {
+      validateCustomerAggregationLogic(
+        customerId,
+        aggregationPeriod,
+        salesMetricsData,
+        mockSystemLogger
+      );
+      processStates.push('calculation_executed');
+    }).toThrow(/計算ルール/);
+
+    expect(processStates).toEqual(['validation_started', 'error_logged']);
+    expect(processStates).not.toContain('calculation_executed');
   });
 });

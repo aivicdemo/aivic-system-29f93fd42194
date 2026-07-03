@@ -1,103 +1,145 @@
-import { describe, test, expect, beforeEach, afterEach } from "@jest/globals";
-import { recordContractDocumentMetadata } from "../../src/logic/it-1781935279444-1-1-1";
+import { describe, test, expect } from "@jest/globals";
+import { compareContractChanges } from "../../src/logic/it-1781935279444-2-1-1";
 
-const fetchMock = require("jest-fetch-mock");
-fetchMock.enableMocks();
-
-describe("営業データ項目のメタデータ管理機能", () => {
-  beforeEach(() => {
-    fetchMock.resetMocks();
-  });
-
-  afterEach(() => {
-    fetchMock.resetMocks();
-  });
-
-  // SCEN-840
-  test("新規アップロードされた契約書ファイルの変更日時・更新者・変更内容が正しく記録される", async () => {
-    const uploadedAtIso = "2024-02-15T09:30:00Z";
-    const uploadedAtDate = new Date(uploadedAtIso);
-    const testUserId = "user_test_001";
-    const testUserName = "テスト太郎";
-    const fileName = "contract_2024_v1.pdf";
-    const fileSize = 2048576;
-    const documentType = "contract";
-    const changeDescription = "新規ファイルアップロード";
-    const initialVersion = "1.0";
-    const documentId = "doc_20240215_001";
-
-    const mockMetadata = {
-      documentId: documentId,
-      fileName: fileName,
-      fileSize: fileSize,
-      documentType: documentType,
-      uploadedAt: uploadedAtIso,
-      uploadedByUserId: testUserId,
-      uploadedByUserName: testUserName,
-      versionNumber: initialVersion,
-      changeHistory: [
-        {
-          timestamp: uploadedAtIso,
-          userId: testUserId,
-          userName: testUserName,
-          description: changeDescription,
-          changeType: "upload"
-        }
-      ],
-      isActive: true,
-      createdAt: uploadedAtIso,
-      updatedAt: uploadedAtIso
+describe("Contract Change Comparison and Diff Visualization", () => {
+  test("SCEN-840: Contract conditions with zero change (0 yen) should clearly display no change status", () => {
+    // Pre-condition: Existing contract record with specific numeric values
+    const before_contract = {
+      contract_id: "C-12345",
+      customer_id: "CUST-001",
+      service_name: "Standard Service",
+      monthly_fee_yen: 50000,
+      discount_amount_yen: 5000,
+      setup_fee_yen: 10000,
+      cancellation_fee_yen: 0,
+      min_term_months: 12,
+      contract_start_date: "2024-01-01",
+      contract_end_date: "2024-12-31",
     };
 
-    fetchMock.mockResponseOnce(JSON.stringify(mockMetadata), { status: 200 });
-
-    const inputPayload = {
-      fileName: fileName,
-      fileSize: fileSize,
-      documentType: documentType,
-      uploadedByUserId: testUserId,
-      uploadedByUserName: testUserName,
-      uploadedAt: uploadedAtDate,
-      changeDescription: changeDescription
+    // Trigger: User updates numeric fields with same values (0 yen remains 0 yen)
+    const after_contract = {
+      contract_id: "C-12345",
+      customer_id: "CUST-001",
+      service_name: "Standard Service",
+      monthly_fee_yen: 50000,
+      discount_amount_yen: 5000,
+      setup_fee_yen: 10000,
+      cancellation_fee_yen: 0,
+      min_term_months: 12,
+      contract_start_date: "2024-01-01",
+      contract_end_date: "2024-12-31",
     };
 
-    const result = await recordContractDocumentMetadata(inputPayload);
-
-    expect(result).toEqual({
-      documentId: documentId,
-      fileName: fileName,
-      fileSize: fileSize,
-      documentType: documentType,
-      uploadedAt: uploadedAtIso,
-      uploadedByUserId: testUserId,
-      uploadedByUserName: testUserName,
-      versionNumber: initialVersion,
-      changeHistory: [
-        {
-          timestamp: uploadedAtIso,
-          userId: testUserId,
-          userName: testUserName,
-          description: changeDescription,
-          changeType: "upload"
-        }
-      ],
-      isActive: true,
-      createdAt: uploadedAtIso,
-      updatedAt: uploadedAtIso
+    // Execute comparison
+    const diff_result = compareContractChanges({
+      before: before_contract,
+      after: after_contract,
     });
 
-    expect(result.uploadedAt).toBe(uploadedAtIso);
-    expect(result.uploadedByUserId).toBe(testUserId);
-    expect(result.uploadedByUserName).toBe(testUserName);
-    expect(result.versionNumber).toBe(initialVersion);
-    expect(result.changeHistory[0].description).toBe(changeDescription);
-    expect(result.changeHistory[0].changeType).toBe("upload");
-    expect(result.documentType).toBe(documentType);
-    expect(result.fileName).toBe(fileName);
-    expect(result.isActive).toBe(true);
+    // Outcome: Verify no-change items are clearly marked and visually distinguished
+    expect(diff_result).toEqual({
+      contract_id: "C-12345",
+      changed_items: [],
+      unchanged_items: [
+        {
+          field_name: "monthly_fee_yen",
+          before_value: 50000,
+          after_value: 50000,
+          change_status: "no_change",
+          display_label: "変更なし",
+          visual_indicator: "—",
+        },
+        {
+          field_name: "discount_amount_yen",
+          before_value: 5000,
+          after_value: 5000,
+          change_status: "no_change",
+          display_label: "変更なし",
+          visual_indicator: "—",
+        },
+        {
+          field_name: "setup_fee_yen",
+          before_value: 10000,
+          after_value: 10000,
+          change_status: "no_change",
+          display_label: "変更なし",
+          visual_indicator: "—",
+        },
+        {
+          field_name: "cancellation_fee_yen",
+          before_value: 0,
+          after_value: 0,
+          change_status: "no_change",
+          display_label: "変更なし",
+          visual_indicator: "—",
+        },
+        {
+          field_name: "min_term_months",
+          before_value: 12,
+          after_value: 12,
+          change_status: "no_change",
+          display_label: "変更なし",
+          visual_indicator: "—",
+        },
+        {
+          field_name: "contract_start_date",
+          before_value: "2024-01-01",
+          after_value: "2024-01-01",
+          change_status: "no_change",
+          display_label: "変更なし",
+          visual_indicator: "—",
+        },
+        {
+          field_name: "contract_end_date",
+          before_value: "2024-12-31",
+          after_value: "2024-12-31",
+          change_status: "no_change",
+          display_label: "変更なし",
+          visual_indicator: "—",
+        },
+      ],
+      has_changes: false,
+      diff_list_excludes_unchanged: true,
+      visual_distinction_applied: true,
+      user_recognition_clear: true,
+    });
 
-    const callArgs = fetchMock.mock.calls[0];
-    expect(callArgs[0]).toMatch(/metadata|document|contract/i);
-    expect(callArgs[1].method).toMatch(/POST|PUT/);
+    // Verify no-change items are excluded from diff list
+    expect(diff_result.changed_items.length).toBe(0);
+
+    // Verify unchanged items are present and properly labeled
+    expect(diff_result.unchanged_items.length).toBe(7);
+    expect(
+      diff_result.unchanged_items.every(
+        (item) => item.change_status === "no_change"
+      )
+    ).toBe(true);
+
+    // Verify visual indicators are set for no-change items
+    expect(
+      diff_result.unchanged_items.every(
+        (item) => item.visual_indicator === "—"
+      )
+    ).toBe(true);
+
+    // Verify display labels clearly indicate no change
+    expect(
+      diff_result.unchanged_items.every(
+        (item) => item.display_label === "変更なし"
+      )
+    ).toBe(true);
+
+    // Verify overall diff result indicates no changes
+    expect(diff_result.has_changes).toBe(false);
+
+    // Verify that unchanged items are excluded from change list
+    expect(diff_result.diff_list_excludes_unchanged).toBe(true);
+
+    // Verify visual distinction is applied
+    expect(diff_result.visual_distinction_applied).toBe(true);
+
+    // Verify user can clearly recognize no change
+    expect(diff_result.user_recognition_clear).toBe(true);
   });
 });

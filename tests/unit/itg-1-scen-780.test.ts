@@ -1,135 +1,111 @@
-import { describe, test, expect, beforeEach } from '@jest/globals';
-import { filterDocumentsByEffectiveDateRange } from '../../src/logic/it-1781935279444-1-1-1';
+import { markObsoleteContractDocuments } from "../../src/logic/it-1781935279444-1-1-1";
 
-describe('資料検索・フィルタリング機能 - 有効期限の境界値判定', () => {
-  beforeEach(() => {
-    jest.clearAllMocks();
-  });
+describe("営業データ項目のメタデータ管理機能 - 旧版資料の廃棄対象自動マーク", () => {
+  test("SCEN-780: 有効期限を過ぎた資料を廃棄対象として正確に判定する", () => {
+    // 固定参照時刻: 2024-06-15T10:00:00Z
+    const reference_time = new Date("2024-06-15T10:00:00Z");
 
-  // SCEN-780
-  test('有効期限の開始当日・終了当日・終了翌日の境界値でフィルタリング結果が正確に変動する', () => {
-    // テスト用資料データ準備
-    const material_a = {
-      id: 'mat_001',
-      name: '資料A',
-      effective_start_date: new Date('2024-01-01T00:00:00Z'),
-      effective_end_date: new Date('2024-01-31T23:59:59Z'),
+    // テストデータ: 有効期限を過ぎた資料 (2件)
+    const expired_documents = [
+      {
+        document_id: "doc_001",
+        document_name: "契約書_v1.0",
+        expiry_datetime: new Date("2024-06-14T23:59:59Z"), // 1秒前に期限切れ
+        obsolete_flag: false,
+        document_type: "contract",
+      },
+      {
+        document_id: "doc_002",
+        document_name: "提案資料_v2.0",
+        expiry_datetime: new Date("2024-06-01T00:00:00Z"), // 14日前に期限切れ
+        obsolete_flag: false,
+        document_type: "proposal",
+      },
+    ];
+
+    // テストデータ: 有効期限内の資料 (2件)
+    const active_documents = [
+      {
+        document_id: "doc_003",
+        document_name: "契約書_v2.0",
+        expiry_datetime: new Date("2024-06-15T10:00:01Z"), // 1秒後に期限切れ
+        obsolete_flag: false,
+        document_type: "contract",
+      },
+      {
+        document_id: "doc_004",
+        document_name: "提案資料_v3.0",
+        expiry_datetime: new Date("2024-07-15T00:00:00Z"), // 30日後に期限切れ
+        obsolete_flag: false,
+        document_type: "proposal",
+      },
+    ];
+
+    // テストデータ: 境界値ケース (有効期限がちょうど現在時刻と同一)
+    const boundary_document = {
+      document_id: "doc_005",
+      document_name: "契約書_boundary",
+      expiry_datetime: new Date("2024-06-15T10:00:00Z"), // ちょうど現在時刻
+      obsolete_flag: false,
+      document_type: "contract",
     };
 
-    const material_b = {
-      id: 'mat_002',
-      name: '資料B',
-      effective_start_date: new Date('2024-02-01T00:00:00Z'),
-      effective_end_date: new Date('2024-02-29T23:59:59Z'),
-    };
+    // すべてのテストデータを統合
+    const all_documents = [
+      ...expired_documents,
+      ...active_documents,
+      boundary_document,
+    ];
 
-    const material_c = {
-      id: 'mat_003',
-      name: '資料C',
-      effective_start_date: new Date('2024-03-01T00:00:00Z'),
-      effective_end_date: new Date('2024-03-31T23:59:59Z'),
-    };
+    // 関数実行: 廃棄対象自動マーク機能
+    const result = markObsoleteContractDocuments(all_documents, reference_time);
 
-    const all_materials = [material_a, material_b, material_c];
+    // ===== Assertion 1: 有効期限を過ぎた資料が廃棄対象（廃棄フラグ=true）にマークされたことを確認 =====
+    expect(result.marked_documents.find((d) => d.document_id === "doc_001")?.obsolete_flag).toBe(
+      true
+    );
+    expect(result.marked_documents.find((d) => d.document_id === "doc_002")?.obsolete_flag).toBe(
+      true
+    );
 
-    // ケース1: 開始当日（2024年1月1日）でフィルタリング
-    // 期待: 資料Aが含まれる
-    const result_start_day = filterDocumentsByEffectiveDateRange(
-      all_materials,
-      new Date('2024-01-01T00:00:00Z')
+    // ===== Assertion 2: 有効期限内の資料が廃棄対象とマークされていないことを確認 =====
+    expect(result.marked_documents.find((d) => d.document_id === "doc_003")?.obsolete_flag).toBe(
+      false
     );
-    expect(result_start_day).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          id: 'mat_001',
-          name: '資料A',
-        }),
-      ])
+    expect(result.marked_documents.find((d) => d.document_id === "doc_004")?.obsolete_flag).toBe(
+      false
     );
-    expect(result_start_day.length).toBe(1);
 
-    // ケース2: 終了当日（2024年1月31日）でフィルタリング
-    // 期待: 資料Aが含まれる
-    const result_end_day = filterDocumentsByEffectiveDateRange(
-      all_materials,
-      new Date('2024-01-31T23:59:59Z')
+    // ===== Assertion 3: 境界値ケース（有効期限がちょうど参照時刻と同一）の判定を確認 =====
+    // 境界値では「<=」判定により廃棄対象（true）となることを期待
+    expect(result.marked_documents.find((d) => d.document_id === "doc_005")?.obsolete_flag).toBe(
+      true
     );
-    expect(result_end_day).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          id: 'mat_001',
-          name: '資料A',
-        }),
-      ])
-    );
-    expect(result_end_day.length).toBe(1);
 
-    // ケース3: 終了翌日（2024年2月1日）でフィルタリング
-    // 期待: 資料Aが含まれない、資料Bが含まれる
-    const result_after_end = filterDocumentsByEffectiveDateRange(
-      all_materials,
-      new Date('2024-02-01T00:00:00Z')
-    );
-    expect(result_after_end).not.toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          id: 'mat_001',
-        }),
-      ])
-    );
-    expect(result_after_end).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          id: 'mat_002',
-          name: '資料B',
-        }),
-      ])
-    );
-    expect(result_after_end.length).toBe(1);
+    // ===== Assertion 4: 廃棄対象としてマークされた資料の件数が期待値と一致することを確認 =====
+    // 期待値: 有効期限切れ 2件 + 境界値 1件 = 計 3件
+    const expected_obsolete_count = 3;
+    const actual_obsolete_count = result.marked_documents.filter(
+      (d) => d.obsolete_flag === true
+    ).length;
+    expect(actual_obsolete_count).toBe(expected_obsolete_count);
 
-    // ケース4: 資料Bの終了翌日（2024年3月1日）でフィルタリング
-    // 期待: 資料Bが含まれない、資料Cが含まれる
-    const result_b_after_end = filterDocumentsByEffectiveDateRange(
-      all_materials,
-      new Date('2024-03-01T00:00:00Z')
-    );
-    expect(result_b_after_end).not.toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          id: 'mat_002',
-        }),
-      ])
-    );
-    expect(result_b_after_end).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          id: 'mat_003',
-          name: '資料C',
-        }),
-      ])
-    );
-    expect(result_b_after_end.length).toBe(1);
+    // ===== Assertion 5: 処理完了ログに廃棄対象マーク件数が正確に記録されていることを確認 =====
+    expect(result.processing_log.marked_count).toBe(3);
+    expect(result.processing_log.total_documents_processed).toBe(5);
+    expect(result.processing_log.processing_timestamp).toEqual(reference_time);
 
-    // 境界値判定の正確性確認: 
-    // 開始当日: 資料が有効
-    expect(
-      filterDocumentsByEffectiveDateRange(all_materials, new Date('2024-01-01T00:00:00Z')).some(
-        (m) => m.id === 'mat_001'
-      )
-    ).toBe(true);
+    // ===== Assertion 6: マーク対象ドキュメントのIDが記録されていることを確認 =====
+    const expected_marked_ids = ["doc_001", "doc_002", "doc_005"];
+    expect(result.processing_log.marked_document_ids).toEqual(expected_marked_ids);
 
-    // 終了当日: 資料が有効
-    expect(
-      filterDocumentsByEffectiveDateRange(all_materials, new Date('2024-01-31T23:59:59Z')).some(
-        (m) => m.id === 'mat_001'
-      )
-    ).toBe(true);
-
-    // 終了翌日: 資料が無効（期限切れ）
-    expect(
-      filterDocumentsByEffectiveDateRange(all_materials, new Date('2024-02-01T00:00:00Z')).some(
-        (m) => m.id === 'mat_001'
-      )
-    ).toBe(false);
+    // ===== Assertion 7: すべての入力ドキュメントが結果に含まれていることを確認 =====
+    expect(result.marked_documents.length).toBe(5);
+    const result_ids = result.marked_documents.map((d) => d.document_id);
+    expect(result_ids).toContain("doc_001");
+    expect(result_ids).toContain("doc_002");
+    expect(result_ids).toContain("doc_003");
+    expect(result_ids).toContain("doc_004");
+    expect(result_ids).toContain("doc_005");
   });
 });

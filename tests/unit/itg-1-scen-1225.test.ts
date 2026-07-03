@@ -1,137 +1,105 @@
-import { validateContractChange } from '../../src/logic/it-1781935279444-2-1-1';
+import { recordAuditLog } from "../../src/logic/it-1781935279444-1-1-1";
 
-describe('営業データ入力時の品質検証ルール定義・実行機能', () => {
-  // SCEN-1225: [error] 営業データ変更の自動検知・通知機能 - 変更内容が無効なデータ型の場合、契約変更管理システへの登録が拒否されエラーが返される
-  test('契約金額に無効なデータ型（文字列）が入力された場合、登録が拒否され数値型エラーが返される', () => {
-    const invalidChangeRequest = {
-      contractId: 'CNT-20240115-001',
-      changeType: 'AMOUNT_CHANGE',
-      fieldName: '契約金額',
-      newValue: 'abc',
-      changedBy: 'user-001',
-      changedAt: new Date('2024-01-15T11:00:00Z').toISOString(),
-    };
+describe("営業データ項目のメタデータ管理機能", () => {
+  // SCEN-1225: [normal] 契約変更監査ログ自動記録機能 - 契約・請求データ更新時に変更内容・変更者・変更日時・差分が自動記録される
+  test("契約・請求データ更新時に変更内容・変更者・変更日時・差分が監査ログテーブルに自動記録される", () => {
+    const now = new Date("2024-01-15T11:00:00Z");
+    const auditLogs: Array<{
+      id: string;
+      dataType: string;
+      recordId: string;
+      changedBy: string;
+      changedAt: Date;
+      changeContent: string;
+      beforeValue: Record<string, unknown>;
+      afterValue: Record<string, unknown>;
+      diff: Record<string, { before: unknown; after: unknown }>;
+    }> = [];
 
-    expect(() => validateContractChange(invalidChangeRequest)).toThrow(/契約金額/);
-  });
-
-  test('契約金額に有効な数値が入力された場合、検証に成功し登録可能な状態が返される', () => {
-    const validChangeRequest = {
-      contractId: 'CNT-20240115-001',
-      changeType: 'AMOUNT_CHANGE',
-      fieldName: '契約金額',
-      newValue: 150000,
-      changedBy: 'user-001',
-      changedAt: new Date('2024-01-15T11:00:00Z').toISOString(),
-    };
-
-    const result = validateContractChange(validChangeRequest);
-
-    expect(result).toEqual({
-      isValid: true,
-      contractId: 'CNT-20240115-001',
-      changeType: 'AMOUNT_CHANGE',
-      fieldName: '契約金Amount',
-      newValue: 150000,
-      validationStatus: 'PASSED',
-      registrationAllowed: true,
+    // ステップ1: 契約データを更新し、監査ログに記録
+    const contractChangeResult = recordAuditLog({
+      dataType: "契約",
+      recordId: "CONTRACT_001",
+      changedBy: "TEST_USER_001",
+      changedAt: now,
+      beforeValue: { contractAmount: 100000, contractName: "営業代行契約A" },
+      afterValue: { contractAmount: 150000, contractName: "営業代行契約A" },
     });
-  });
 
-  test('納期に無効なデータ型（数値）が入力された場合、登録が拒否され日付型エラーが返される', () => {
-    const invalidDateChangeRequest = {
-      contractId: 'CNT-20240115-002',
-      changeType: 'DELIVERY_DATE_CHANGE',
-      fieldName: '納期',
-      newValue: 20240228,
-      changedBy: 'user-001',
-      changedAt: new Date('2024-01-15T11:30:00Z').toISOString(),
-    };
+    auditLogs.push(contractChangeResult);
 
-    expect(() => validateContractChange(invalidDateChangeRequest)).toThrow(/納期/);
-  });
+    // ステップ2: 契約更新処理が正常に完了したことを確認
+    expect(contractChangeResult).toBeDefined();
+    expect(contractChangeResult.id).toBeDefined();
+    expect(typeof contractChangeResult.id).toBe("string");
 
-  test('納期に有効なISO日付文字列が入力された場合、検証に成功し登録可能な状態が返される', () => {
-    const validDateChangeRequest = {
-      contractId: 'CNT-20240115-002',
-      changeType: 'DELIVERY_DATE_CHANGE',
-      fieldName: '納期',
-      newValue: '2024-02-28T23:59:59Z',
-      changedBy: 'user-001',
-      changedAt: new Date('2024-01-15T11:30:00Z').toISOString(),
-    };
+    // ステップ3: 記録された監査ログレコードの変更内容フィールドを検証
+    expect(contractChangeResult.changeContent).toBe(
+      "契約金額: 100000円 → 150000円"
+    );
 
-    const result = validateContractChange(validDateChangeRequest);
+    // ステップ4: 監査ログレコードの変更者フィールドを検証
+    expect(contractChangeResult.changedBy).toBe("TEST_USER_001");
 
-    expect(result).toEqual({
-      isValid: true,
-      contractId: 'CNT-20240115-002',
-      changeType: 'DELIVERY_DATE_CHANGE',
-      fieldName: '納期',
-      newValue: '2024-02-28T23:59:59Z',
-      validationStatus: 'PASSED',
-      registrationAllowed: true,
+    // ステップ5: 監査ログレコードの変更日時を検証
+    expect(contractChangeResult.changedAt).toEqual(now);
+
+    // ステップ6: 監査ログレコードの差分フィールドに詳細な変更情報が記録されていることを検証
+    expect(contractChangeResult.diff).toEqual({
+      contractAmount: { before: 100000, after: 150000 },
     });
-  });
+    expect(contractChangeResult.diff.contractAmount.before).toBe(100000);
+    expect(contractChangeResult.diff.contractAmount.after).toBe(150000);
 
-  test('契約IDが空文字列の場合、登録が拒否され必須項目エラーが返される', () => {
-    const missingContractIdRequest = {
-      contractId: '',
-      changeType: 'AMOUNT_CHANGE',
-      fieldName: '契約金額',
-      newValue: 200000,
-      changedBy: 'user-001',
-      changedAt: new Date('2024-01-15T12:00:00Z').toISOString(),
-    };
-
-    expect(() => validateContractChange(missingContractIdRequest)).toThrow(/契約ID/);
-  });
-
-  test('複数のフィールド変更リクエストで、1つが無効なデータ型の場合、全体が拒否される', () => {
-    const multiFieldInvalidRequest = {
-      contractId: 'CNT-20240115-003',
-      changeType: 'MULTI_CHANGE',
-      fieldName: '契約条件',
-      newValue: {
-        amount: 'invalid_number',
-        deliveryDate: '2024-03-31T23:59:59Z',
-        serviceName: 'Service A',
-      },
-      changedBy: 'user-002',
-      changedAt: new Date('2024-01-15T14:00:00Z').toISOString(),
-    };
-
-    expect(() => validateContractChange(multiFieldInvalidRequest)).toThrow(/契約条件/);
-  });
-
-  test('複数のフィールド変更リクエストで、すべて有効なデータ型の場合、検証に成功する', () => {
-    const multiFieldValidRequest = {
-      contractId: 'CNT-20240115-003',
-      changeType: 'MULTI_CHANGE',
-      fieldName: '契約条件',
-      newValue: {
-        amount: 250000,
-        deliveryDate: '2024-03-31T23:59:59Z',
-        serviceName: 'Service A',
-      },
-      changedBy: 'user-002',
-      changedAt: new Date('2024-01-15T14:00:00Z').toISOString(),
-    };
-
-    const result = validateContractChange(multiFieldValidRequest);
-
-    expect(result).toEqual({
-      isValid: true,
-      contractId: 'CNT-20240115-003',
-      changeType: 'MULTI_CHANGE',
-      fieldName: '契約条件',
-      newValue: {
-        amount: 250000,
-        deliveryDate: '2024-03-31T23:59:59Z',
-        serviceName: 'Service A',
-      },
-      validationStatus: 'PASSED',
-      registrationAllowed: true,
+    // ステップ7: 異なるユーザーで請求データを更新
+    const billingChangeTime = new Date("2024-01-15T12:30:00Z");
+    const billingChangeResult = recordAuditLog({
+      dataType: "請求",
+      recordId: "BILLING_001",
+      changedBy: "TEST_USER_002",
+      changedAt: billingChangeTime,
+      beforeValue: { billingAmount: 200000, billingStatus: "未確定" },
+      afterValue: { billingAmount: 220000, billingStatus: "確定" },
     });
+
+    auditLogs.push(billingChangeResult);
+
+    // ステップ8: 新しい監査ログレコードが記録されたことを確認
+    expect(billingChangeResult).toBeDefined();
+    expect(billingChangeResult.id).toBeDefined();
+    expect(billingChangeResult.id).not.toBe(contractChangeResult.id);
+
+    // ステップ9: 新しい監査ログレコードの変更者がTEST_USER_002であることを検証
+    expect(billingChangeResult.changedBy).toBe("TEST_USER_002");
+
+    // ステップ10: 新しい監査ログレコードの変更内容を検証
+    expect(billingChangeResult.changeContent).toContain("220000");
+
+    // ステップ11: 複数の監査ログレコードが正しい時系列順序で記録されていることを検証
+    expect(auditLogs.length).toBe(2);
+    expect(auditLogs[0].changedAt).toEqual(now);
+    expect(auditLogs[1].changedAt).toEqual(billingChangeTime);
+    expect(auditLogs[0].changedAt.getTime()).toBeLessThan(
+      auditLogs[1].changedAt.getTime()
+    );
+
+    // ステップ12: データ型が正確に記録されていることを検証
+    expect(auditLogs[0].dataType).toBe("契約");
+    expect(auditLogs[1].dataType).toBe("請求");
+
+    // ステップ13: recordIdが正確に記録されていることを検証
+    expect(auditLogs[0].recordId).toBe("CONTRACT_001");
+    expect(auditLogs[1].recordId).toBe("BILLING_001");
+
+    // ステップ14: 差分情報が複数フィールドをサポートしていることを検証
+    expect(Object.keys(billingChangeResult.diff).length).toBeGreaterThan(0);
+    expect(billingChangeResult.diff).toHaveProperty("billingAmount");
+    expect(billingChangeResult.diff).toHaveProperty("billingStatus");
+
+    // ステップ15: 各監査ログの前後の値が正確に記録されていることを検証
+    expect(contractChangeResult.beforeValue.contractAmount).toBe(100000);
+    expect(contractChangeResult.afterValue.contractAmount).toBe(150000);
+    expect(billingChangeResult.beforeValue.billingAmount).toBe(200000);
+    expect(billingChangeResult.afterValue.billingAmount).toBe(220000);
   });
 });

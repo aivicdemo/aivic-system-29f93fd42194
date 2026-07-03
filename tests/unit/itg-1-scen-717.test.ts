@@ -1,56 +1,92 @@
-import { generateCorrectionNotification } from "../../src/logic/it-1-1-1";
+import { validateSalesDataQuality } from "../../src/logic/it-1781935279444-2-2-1";
 
-describe("営業成果データの自動検証ルール定義と異常検出機能", () => {
-  // SCEN-717: [error] 修正指示通知生成 - 不備が検出されないデータに対して修正指示が生成されない
-  test("不備が検出されないデータに対して修正指示通知が生成されない", () => {
-    const validSalesData = {
-      sales_data_id: "SD-2024-001",
-      customer_id: "CUST-001",
-      service_id: "SVC-BASIC",
+describe("営業データ品質管理・修正データ自動再検証", () => {
+  // SCEN-717
+  test("修正されたデータが品質基準を満たす場合、合格判定が正確に行われる", () => {
+    // 初回検証: 品質基準を満たさないデータ
+    const initial_sales_record = {
+      sales_id: "SALE-001",
+      customer_name: "", // 必須項目が空（不合格要因）
       contact_date: "2024-01-15",
-      contact_time: "14:30",
+      service_type: "service_A",
       appointment_confirmed: true,
-      appointment_count: 3,
-      contract_count: 1,
-      customer_response: "positive",
-      amount: 150000,
-      status: "completed",
-      data_entry_date: "2024-01-15T11:00:00Z",
-      validated_at: "2024-01-15T11:05:00Z",
-      validation_status: "passed",
-      validation_errors: [] as string[],
-      has_defects: false,
+      sales_amount: 100000,
     };
 
-    const result = generateCorrectionNotification({
-      sales_data: validSalesData,
-      validation_errors: [],
-      has_defects: false,
-      checked_by: "operator-001",
-      checked_at: "2024-01-15T11:05:00Z",
-    });
+    // 初回検証実行
+    const initial_validation_result = validateSalesDataQuality(
+      initial_sales_record
+    );
 
-    expect(result).toEqual({
-      notification_id: null,
-      should_generate_notification: false,
-      notification_count: 0,
-      defects_detected: false,
-      system_message: "修正指示なし",
-      log_record: {
-        timestamp: "2024-01-15T11:05:00Z",
-        processed_data_id: "SD-2024-001",
-        status: "no_correction_needed",
-        message: "正常なデータのため修正指示は生成されません",
-        error_occurred: false,
-      },
-    });
+    // 初回検証で不合格
+    expect(initial_validation_result.status).toBe("不合格");
+    expect(initial_validation_result.errors).toContain(
+      expect.objectContaining({
+        field: "customer_name",
+        reason: "必須項目が空",
+      })
+    );
+    expect(initial_validation_result.record_id).toBe("SALE-001");
+    expect(typeof initial_validation_result.validation_timestamp).toBe(
+      "string"
+    );
 
-    expect(result.notification_id).toBeNull();
-    expect(result.should_generate_notification).toBe(false);
-    expect(result.notification_count).toBe(0);
-    expect(result.defects_detected).toBe(false);
-    expect(result.system_message).toBe("修正指示なし");
-    expect(result.log_record.status).toBe("no_correction_needed");
-    expect(result.log_record.error_occurred).toBe(false);
+    // 修正されたデータ（品質基準を満たす）
+    const corrected_sales_record = {
+      sales_id: "SALE-001",
+      customer_name: "株式会社ABC", // 必須項目を修正
+      contact_date: "2024-01-15",
+      service_type: "service_A",
+      appointment_confirmed: true,
+      sales_amount: 100000,
+      correction_reason: "顧客名を補正",
+      correction_timestamp: "2024-01-15T10:30:00Z",
+    };
+
+    // 再検証実行
+    const revalidation_result = validateSalesDataQuality(
+      corrected_sales_record
+    );
+
+    // 再検証で合格
+    expect(revalidation_result.status).toBe("合格");
+    expect(revalidation_result.errors.length).toBe(0);
+    expect(revalidation_result.record_id).toBe("SALE-001");
+
+    // 修正履歴が記録されていることを確認
+    expect(revalidation_result.correction_history).toBeDefined();
+    expect(revalidation_result.correction_history.reason).toBe("顧客名を補正");
+    expect(revalidation_result.correction_history.previous_value).toBe("");
+    expect(revalidation_result.correction_history.corrected_value).toBe(
+      "株式会社ABC"
+    );
+    expect(revalidation_result.correction_history.corrected_at).toBe(
+      "2024-01-15T10:30:00Z"
+    );
+
+    // 再検証タイムスタンプ
+    expect(typeof revalidation_result.revalidation_timestamp).toBe("string");
+
+    // 合格判定ステータスの更新
+    expect(revalidation_result.record_status).toBe("承認済み");
+
+    // 複数の検証ルール（データ型・範囲・形式）すべてをチェック
+    const multi_field_test_record = {
+      sales_id: "SALE-002",
+      customer_name: "株式会社XYZ",
+      contact_date: "2024-01-20", // 正しい日付形式
+      service_type: "service_B", // 有効なサービスタイプ
+      appointment_confirmed: false,
+      sales_amount: 250000, // 正しい金額範囲
+    };
+
+    const multi_field_validation = validateSalesDataQuality(
+      multi_field_test_record
+    );
+
+    expect(multi_field_validation.status).toBe("合格");
+    expect(multi_field_validation.errors.length).toBe(0);
+    expect(multi_field_validation.violations).toBeDefined();
+    expect(multi_field_validation.violations.length).toBe(0);
   });
 });

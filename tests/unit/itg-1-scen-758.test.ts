@@ -1,150 +1,108 @@
-import { validateSalesData } from "../../src/logic/it-1781935279444-2-2-1";
+import { recordDocumentVersionHistory } from "../../src/logic/it-1781935279444-1-1-1";
 
-describe("営業データの完全性・正確性を自動検証し、不足データ・誤りを検出・通知する機能", () => {
-  // SCEN-758: [error] 営業データ完全性・正確性の自動検証 - 営業データのアポ数が負の数で入力されている場合、データ正確性エラーとして検出される
-  test("アポ数が負の数の場合、データ正確性エラーとして検出される", () => {
-    const salesData = {
-      sales_rep_name: "山田太郎",
-      customer_name: "ABC株式会社",
-      contact_date: "2024-01-15",
-      service_type: "standard",
-      appointment_count: -5,
-      contract_count: 2,
-      customer_response: "positive",
+describe("営業データ項目メタデータ管理 - 契約書・提案資料バージョン履歴", () => {
+  test("SCEN-758: 新版登録時に更新者・日時・変更内容・有効期限が正確に記録される", () => {
+    // Precondition: 既存の契約書・提案資料が登録されている状態
+    // Trigger: 新版をアップロード/登録し、バージョン履歴に情報が記録される
+    // Expected: 更新者名、更新日時、変更内容、有効期限がすべて正確に記録される
+
+    // ===== Setup: テスト用入力データ =====
+    const current_user_id = "user_001";
+    const current_user_name = "山田太郎";
+    const document_id = "doc_contract_2024_001";
+    const document_type = "contract"; // "contract" | "proposal"
+    const previous_version = "v1.0";
+    const new_version = "v2.0";
+    const change_description = "表示価格から消費税を除外し、別途請求に変更";
+    const valid_from_date = new Date("2024-02-01T00:00:00Z");
+    const valid_until_date = new Date("2024-12-31T23:59:59Z");
+    const registration_timestamp = new Date("2024-01-31T14:30:45Z");
+
+    const input_payload = {
+      user_id: current_user_id,
+      user_name: current_user_name,
+      document_id: document_id,
+      document_type: document_type,
+      previous_version: previous_version,
+      new_version: new_version,
+      change_description: change_description,
+      valid_from_date: valid_from_date,
+      valid_until_date: valid_until_date,
+      registration_timestamp: registration_timestamp,
     };
 
-    expect(() => validateSalesData(salesData)).toThrow(/アポ数/);
-  });
+    // ===== Execution =====
+    const result = recordDocumentVersionHistory(input_payload);
 
-  test("アポ数が0の場合、検証成功", () => {
-    const salesData = {
-      sales_rep_name: "山田太郎",
-      customer_name: "ABC株式会社",
-      contact_date: "2024-01-15",
-      service_type: "standard",
-      appointment_count: 0,
-      contract_count: 0,
-      customer_response: "neutral",
-    };
+    // ===== Assertion: 更新者名が記録されたか =====
+    expect(result.recorded_version.updater_name).toBe(current_user_name);
+    expect(result.recorded_version.updater_user_id).toBe(current_user_id);
 
-    const result = validateSalesData(salesData);
-    expect(result.is_valid).toBe(true);
-    expect(result.error_messages).toEqual([]);
-  });
+    // ===== Assertion: 更新日時が記録されたか =====
+    expect(result.recorded_version.updated_at).toEqual(registration_timestamp);
 
-  test("アポ数が正の数の場合、検証成功", () => {
-    const salesData = {
-      sales_rep_name: "田中花子",
-      customer_name: "XYZ株式会社",
-      contact_date: "2024-01-16",
-      service_type: "premium",
-      appointment_count: 5,
-      contract_count: 2,
-      customer_response: "positive",
-    };
+    // ===== Assertion: 変更内容が完全に記録されたか =====
+    expect(result.recorded_version.change_description).toBe(change_description);
+    expect(result.recorded_version.change_description.length).toBe(
+      change_description.length
+    );
 
-    const result = validateSalesData(salesData);
-    expect(result.is_valid).toBe(true);
-    expect(result.error_messages).toEqual([]);
-  });
+    // ===== Assertion: 有効期限が正確に記録されたか =====
+    expect(result.recorded_version.valid_from_date).toEqual(valid_from_date);
+    expect(result.recorded_version.valid_until_date).toEqual(valid_until_date);
 
-  test("営業担当者名が空の場合、必須項目エラーとして検出される", () => {
-    const salesData = {
-      sales_rep_name: "",
-      customer_name: "ABC株式会社",
-      contact_date: "2024-01-15",
-      service_type: "standard",
-      appointment_count: 3,
-      contract_count: 1,
-      customer_response: "positive",
-    };
+    // ===== Assertion: 新版情報が記録されたか =====
+    expect(result.recorded_version.version_number).toBe(new_version);
+    expect(result.recorded_version.document_id).toBe(document_id);
+    expect(result.recorded_version.document_type).toBe(document_type);
 
-    expect(() => validateSalesData(salesData)).toThrow(/営業担当者名/);
-  });
+    // ===== Assertion: 複数版が存在する場合、時系列順に並んでいるか =====
+    expect(Array.isArray(result.version_history)).toBe(true);
+    expect(result.version_history.length).toBeGreaterThanOrEqual(2);
 
-  test("顧客名が空の場合、必須項目エラーとして検出される", () => {
-    const salesData = {
-      sales_rep_name: "山田太郎",
-      customer_name: "",
-      contact_date: "2024-01-15",
-      service_type: "standard",
-      appointment_count: 2,
-      contract_count: 1,
-      customer_response: "positive",
-    };
+    // 時系列順の確認（新しい順に並んでいる）
+    for (let i = 0; i < result.version_history.length - 1; i++) {
+      const current_updated_at = new Date(
+        result.version_history[i].updated_at
+      ).getTime();
+      const next_updated_at = new Date(
+        result.version_history[i + 1].updated_at
+      ).getTime();
+      expect(current_updated_at).toBeGreaterThanOrEqual(next_updated_at);
+    }
 
-    expect(() => validateSalesData(salesData)).toThrow(/顧客名/);
-  });
+    // ===== Assertion: 各版のメタデータが改ざんされていないか =====
+    const latest_version_in_history = result.version_history.find(
+      (v: any) => v.version_number === new_version
+    );
+    expect(latest_version_in_history).toBeDefined();
+    expect(latest_version_in_history.updater_name).toBe(current_user_name);
+    expect(latest_version_in_history.updated_at).toEqual(registration_timestamp);
+    expect(latest_version_in_history.change_description).toBe(
+      change_description
+    );
+    expect(latest_version_in_history.valid_until_date).toEqual(
+      valid_until_date
+    );
 
-  test("複数の検証エラーが発生した場合、すべてのエラーが記録される", () => {
-    const salesData = {
-      sales_rep_name: "山田太郎",
-      customer_name: "ABC株式会社",
-      contact_date: "2024-01-15",
-      service_type: "standard",
-      appointment_count: -3,
-      contract_count: -1,
-      customer_response: "positive",
-    };
+    // ===== Assertion: 前バージョンのメタデータも保持されているか =====
+    const previous_version_in_history = result.version_history.find(
+      (v: any) => v.version_number === previous_version
+    );
+    expect(previous_version_in_history).toBeDefined();
 
-    expect(() => validateSalesData(salesData)).toThrow(/アポ数|成約数/);
-  });
+    // ===== Assertion: 戻り値の構造が正しいか =====
+    expect(result).toHaveProperty("recorded_version");
+    expect(result).toHaveProperty("version_history");
+    expect(result).toHaveProperty("total_versions");
+    expect(result.total_versions).toBe(result.version_history.length);
 
-  test("成約数が負の数の場合、データ正確性エラーとして検出される", () => {
-    const salesData = {
-      sales_rep_name: "田中花子",
-      customer_name: "XYZ株式会社",
-      contact_date: "2024-01-16",
-      service_type: "premium",
-      appointment_count: 5,
-      contract_count: -2,
-      customer_response: "positive",
-    };
-
-    expect(() => validateSalesData(salesData)).toThrow(/成約数/);
-  });
-
-  test("接触日が日付形式でない場合、データ型エラーとして検出される", () => {
-    const salesData = {
-      sales_rep_name: "山田太郎",
-      customer_name: "ABC株式会社",
-      contact_date: "invalid-date",
-      service_type: "standard",
-      appointment_count: 2,
-      contract_count: 1,
-      customer_response: "positive",
-    };
-
-    expect(() => validateSalesData(salesData)).toThrow(/接触日/);
-  });
-
-  test("すべての必須項目が正常で、アポ数・成約数がともに0の場合、検証成功", () => {
-    const salesData = {
-      sales_rep_name: "鈴木次郎",
-      customer_name: "DEF株式会社",
-      contact_date: "2024-01-20",
-      service_type: "standard",
-      appointment_count: 0,
-      contract_count: 0,
-      customer_response: "neutral",
-    };
-
-    const result = validateSalesData(salesData);
-    expect(result.is_valid).toBe(true);
-    expect(result.error_messages).toEqual([]);
-  });
-
-  test("アポ数が整数でない場合、データ型エラーとして検出される", () => {
-    const salesData = {
-      sales_rep_name: "山田太郎",
-      customer_name: "ABC株式会社",
-      contact_date: "2024-01-15",
-      service_type: "standard",
-      appointment_count: 3.5,
-      contract_count: 1,
-      customer_response: "positive",
-    };
-
-    expect(() => validateSalesData(salesData)).toThrow(/アポ数/);
+    // ===== Assertion: 記録がシステムで一貫性を持つか =====
+    expect(result.recorded_version.version_number).toBe(
+      result.version_history[0].version_number
+    );
+    expect(result.recorded_version.updated_at).toEqual(
+      result.version_history[0].updated_at
+    );
   });
 });

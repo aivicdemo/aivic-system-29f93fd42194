@@ -1,180 +1,115 @@
-import { describe, test, expect, beforeEach } from "@jest/globals";
-import {
-  validateSalesActivityContactDateTime,
-} from "../../src/logic/it-1781935279444-2-2-1";
+import { calculateDaysUntilDeadline } from "../../src/logic/it-1781935279444-2-2-1";
 
-describe("営業データの完全性・正確性を自動検証し、不足データ・誤りを検出・通知する機能", () => {
-  beforeEach(() => {
-    jest.clearAllMocks();
-  });
+describe("修正期限管理・催促機能", () => {
+  test("// SCEN-714: 修正期限までの日数が正確に計算され、営業担当者に通知される", () => {
+    // テストデータ: 修正期限が設定された営業データレコード
+    const baseDate = new Date("2024-01-15T09:00:00Z");
+    const correctionDeadline = new Date("2024-01-22T23:59:59Z");
+    const recordsWithDeadline = [
+      {
+        recordId: "REC001",
+        customerId: "CUST001",
+        correctionStatus: "pending",
+        correctionDeadlineDate: correctionDeadline,
+        notificationSent: false,
+      },
+      {
+        recordId: "REC002",
+        customerId: "CUST002",
+        correctionStatus: "pending",
+        correctionDeadlineDate: new Date("2024-01-17T23:59:59Z"),
+        notificationSent: false,
+      },
+      {
+        recordId: "REC003",
+        customerId: "CUST003",
+        correctionStatus: "pending",
+        correctionDeadlineDate: new Date("2024-01-15T08:00:00Z"),
+        notificationSent: false,
+      },
+    ];
 
-  // SCEN-714: [error] 営業データ完全性・正確性検証 - 接触日時の形式が不正でNG判定となる
-  test("接触日時の形式が不正な場合、バリデーションエラーを検出してNG判定とし、エラーログに記録される", () => {
-    const invalid_contact_datetime = "2024/13/45 25:70:90";
-    const record_id = "REC001";
-    const customer_id = "CUST001";
-
-    const result = validateSalesActivityContactDateTime({
-      recordId: record_id,
-      customerId: customer_id,
-      contactDateTime: invalid_contact_datetime,
+    // 修正期限までの日数を計算
+    const result = calculateDaysUntilDeadline({
+      records: recordsWithDeadline,
+      baseDate: baseDate,
     });
 
-    expect(result.isValid).toBe(false);
-    expect(result.status).toBe("NG判定");
-    expect(result.errors).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          field: "contactDateTime",
-          message: expect.stringMatching(/接触日時|形式/),
-        }),
-      ])
-    );
-    expect(result.errorLog).toEqual(
-      expect.objectContaining({
-        recordId: record_id,
-        customerId: customer_id,
-        field: "contactDateTime",
-        invalidValue: invalid_contact_datetime,
-        errorType: "FORMAT_ERROR",
-        timestamp: expect.any(String),
-      })
-    );
-  });
+    // 計算結果が修正期限日から基準日を差し引いた日数と一致することを検証
+    expect(result.calculations).toHaveLength(3);
 
-  // 正常系テスト: 正しい形式の接触日時はOK判定となる
-  test("接触日時の形式が正当な場合、バリデーション成功してOK判定となる", () => {
-    const valid_contact_datetime = "2024-01-15T10:30:00Z";
-    const record_id = "REC002";
-    const customer_id = "CUST002";
-
-    const result = validateSalesActivityContactDateTime({
-      recordId: record_id,
-      customerId: customer_id,
-      contactDateTime: valid_contact_datetime,
+    // REC001: 2024-01-22 - 2024-01-15 = 7日
+    expect(result.calculations[0]).toEqual({
+      recordId: "REC001",
+      daysRemaining: 7,
+      isOverdue: false,
+      requiresNotification: true,
+      notificationMessage: "修正期限まで7日です。期限内の対応をお願いします。",
     });
 
-    expect(result.isValid).toBe(true);
-    expect(result.status).toBe("OK判定");
-    expect(result.errors).toEqual([]);
-    expect(result.errorLog).toBeNull();
-  });
-
-  // 境界値テスト: 月の上限超過
-  test("月が13を超える場合、バリデーションエラーで月超過を検出される", () => {
-    const month_exceeded_datetime = "2024-13-01T10:30:00Z";
-    const record_id = "REC003";
-    const customer_id = "CUST003";
-
-    const result = validateSalesActivityContactDateTime({
-      recordId: record_id,
-      customerId: customer_id,
-      contactDateTime: month_exceeded_datetime,
+    // REC002: 2024-01-17 - 2024-01-15 = 2日
+    expect(result.calculations[1]).toEqual({
+      recordId: "REC002",
+      daysRemaining: 2,
+      isOverdue: false,
+      requiresNotification: true,
+      notificationMessage: "修正期限まで2日です。期限内の対応をお願いします。",
     });
 
-    expect(result.isValid).toBe(false);
-    expect(result.status).toBe("NG判定");
-    expect(result.errors).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          field: "contactDateTime",
-          message: expect.stringMatching(/月|範囲/),
-        }),
-      ])
-    );
-  });
-
-  // 境界値テスト: 時間の上限超過
-  test("時間が24以上の場合、バリデーションエラーで時間超過を検出される", () => {
-    const hour_exceeded_datetime = "2024-01-15T25:30:00Z";
-    const record_id = "REC004";
-    const customer_id = "CUST004";
-
-    const result = validateSalesActivityContactDateTime({
-      recordId: record_id,
-      customerId: customer_id,
-      contactDateTime: hour_exceeded_datetime,
+    // REC003: 2024-01-15 08:00 < 2024-01-15 09:00 = 超過 (マイナス値)
+    expect(result.calculations[2]).toEqual({
+      recordId: "REC003",
+      daysRemaining: 0,
+      isOverdue: true,
+      requiresNotification: true,
+      notificationMessage: "修正期限を超過しました。至急対応をお願いします。",
     });
 
-    expect(result.isValid).toBe(false);
-    expect(result.status).toBe("NG判定");
-    expect(result.errors).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          field: "contactDateTime",
-          message: expect.stringMatching(/時間|範囲/),
-        }),
-      ])
+    // 修正期限までの日数が0日以下の場合、催促通知フラグが立つことを確認
+    expect(result.calculations[2].isOverdue).toBe(true);
+    expect(result.calculations[2].requiresNotification).toBe(true);
+
+    // 営業担当者へ通知するメッセージに正確な日数が含まれていることを検証
+    expect(result.calculations[0].notificationMessage).toContain("7日");
+    expect(result.calculations[1].notificationMessage).toContain("2日");
+    expect(result.calculations[2].notificationMessage).toContain("超過");
+
+    // 複数レコード処理時も計算精度が保たれることを確認
+    const allDaysCorrect = result.calculations.every(
+      (calc) =>
+        typeof calc.daysRemaining === "number" &&
+        typeof calc.isOverdue === "boolean"
     );
-  });
+    expect(allDaysCorrect).toBe(true);
 
-  // 境界値テスト: 分の上限超過
-  test("分が60以上の場合、バリデーションエラーで分超過を検出される", () => {
-    const minute_exceeded_datetime = "2024-01-15T10:70:00Z";
-    const record_id = "REC005";
-    const customer_id = "CUST005";
-
-    const result = validateSalesActivityContactDateTime({
-      recordId: record_id,
-      customerId: customer_id,
-      contactDateTime: minute_exceeded_datetime,
+    // 通知ログに修正期限までの日数が記録されていることを確認
+    expect(result.notificationLog).toBeDefined();
+    expect(result.notificationLog).toHaveLength(3);
+    expect(result.notificationLog[0]).toEqual({
+      recordId: "REC001",
+      daysRemaining: 7,
+      notificationTimestamp: baseDate.toISOString(),
+      notificationType: "reminder",
+    });
+    expect(result.notificationLog[1]).toEqual({
+      recordId: "REC002",
+      daysRemaining: 2,
+      notificationTimestamp: baseDate.toISOString(),
+      notificationType: "reminder",
+    });
+    expect(result.notificationLog[2]).toEqual({
+      recordId: "REC003",
+      daysRemaining: 0,
+      notificationTimestamp: baseDate.toISOString(),
+      notificationType: "urgent",
     });
 
-    expect(result.isValid).toBe(false);
-    expect(result.status).toBe("NG判定");
-    expect(result.errors).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          field: "contactDateTime",
-          message: expect.stringMatching(/分|範囲/),
-        }),
-      ])
-    );
-  });
-
-  // 空文字列テスト
-  test("接触日時が空文字列の場合、バリデーションエラーで必須項目エラーを検出される", () => {
-    const empty_datetime = "";
-    const record_id = "REC006";
-    const customer_id = "CUST006";
-
-    const result = validateSalesActivityContactDateTime({
-      recordId: record_id,
-      customerId: customer_id,
-      contactDateTime: empty_datetime,
+    // 全体的なサマリー検証
+    expect(result.summary).toEqual({
+      totalRecords: 3,
+      notRequiringAction: 0,
+      requiringReminder: 2,
+      overdueRecords: 1,
     });
-
-    expect(result.isValid).toBe(false);
-    expect(result.status).toBe("NG判定");
-    expect(result.errors).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          field: "contactDateTime",
-          message: expect.stringMatching(/必須|空/),
-        }),
-      ])
-    );
-  });
-
-  // 完全に無効な形式テスト
-  test("接触日時が完全に無効な形式の場合、バリデーションエラーで形式エラーを検出される", () => {
-    const completely_invalid_datetime = "not-a-date";
-    const record_id = "REC007";
-    const customer_id = "CUST007";
-
-    const result = validateSalesActivityContactDateTime({
-      recordId: record_id,
-      customerId: customer_id,
-      contactDateTime: completely_invalid_datetime,
-    });
-
-    expect(result.isValid).toBe(false);
-    expect(result.status).toBe("NG判定");
-    expect(result.errors.length).toBeGreaterThan(0);
-    expect(result.errorLog).toEqual(
-      expect.objectContaining({
-        errorType: "FORMAT_ERROR",
-      })
-    );
   });
 });

@@ -1,165 +1,85 @@
-import { validateContractVersionManagement } from "../../src/logic/it-1-1-1";
+import { validateSalesDataQuality } from "../../src/logic/it-1781935279444-2-2-1";
 
-describe("営業成果データの自動検証ルール定義と異常検出機能", () => {
-  // SCEN-1105: [error] 契約書管理チェックリスト検証 - バージョン管理が不適切な場合、不合格判定となること
-  test("バージョン情報が欠落している契約書は不合格と判定される", () => {
-    const contract_without_version = {
-      contract_id: "CTR-001",
-      customer_id: "CUST-123",
-      contract_name: "基本契約書",
-      version_number: undefined,
-      version_history: [],
-      last_updated_date: "2024-01-15",
-      updated_by: "user_001",
+describe("営業データ品質検証 - 複数異常値の同時検出", () => {
+  // SCEN-1105
+  test("複数の異常値が同時に存在する場合に全て検出され修正対象項目が通知される", () => {
+    // 準備: 複数の異常値を含む営業データレコード
+    const testSalesData = {
+      record_id: "SR20240115001",
+      customer_name: "",           // 異常1: 必須項目欠落（空白）
+      transaction_date: "2025-12-31",  // 異常2: 未来日
+      sales_amount: -50000,        // 異常3: 負の金額
+      discount_rate: 1.5,          // 異常4: 範囲外（0.0 ～ 1.0 を超過）
+      service_type: "standard",
+      appointment_count: 3,
+      contract_count: 1,
+      contact_date: "2024-01-15"
     };
 
-    const result = validateContractVersionManagement(contract_without_version);
+    // 実行: 異常値・欠落データ自動検出機能
+    const result = validateSalesDataQuality(testSalesData);
 
-    expect(result.is_valid).toBe(false);
-    expect(result.status).toBe("不合格");
-    expect(result.error_details).toContain("バージョン番号");
-  });
+    // 検証1: 検出された異常値の件数が複数存在することを確認
+    expect(result.anomalies.length).toBe(4);
 
-  test("バージョン履歴が完全に欠落している契約書は不合格と判定される", () => {
-    const contract_with_empty_history = {
-      contract_id: "CTR-002",
-      customer_id: "CUST-124",
-      contract_name: "個別契約書",
-      version_number: 1,
-      version_history: [],
-      last_updated_date: "2024-01-20",
-      updated_by: "user_002",
-    };
+    // 検証2: 各異常値に対応する修正対象項目が正確に特定されていることを確認
+    const anomalyTypes = result.anomalies.map((a: any) => a.field_name);
+    expect(anomalyTypes).toContain("customer_name");
+    expect(anomalyTypes).toContain("transaction_date");
+    expect(anomalyTypes).toContain("sales_amount");
+    expect(anomalyTypes).toContain("discount_rate");
 
-    const result = validateContractVersionManagement(
-      contract_with_empty_history
+    // 検証3: 修正対象項目の通知内容（項目名、異常値の種類、推奨修正内容）
+    const customerNameAnomaly = result.anomalies.find(
+      (a: any) => a.field_name === "customer_name"
     );
+    expect(customerNameAnomaly).toEqual({
+      field_name: "customer_name",
+      anomaly_type: "required_field_missing",
+      current_value: "",
+      recommended_action: "顧客名を入力してください"
+    });
 
-    expect(result.is_valid).toBe(false);
-    expect(result.status).toBe("不合格");
-    expect(result.error_details).toContain("バージョン履歴");
-  });
-
-  test("バージョン番号とバージョン履歴が不一致の場合は不合格と判定される", () => {
-    const contract_with_mismatch = {
-      contract_id: "CTR-003",
-      customer_id: "CUST-125",
-      contract_name: "変更契約書",
-      version_number: 3,
-      version_history: [
-        {
-          version: 1,
-          created_date: "2024-01-01",
-          created_by: "user_001",
-        },
-        {
-          version: 2,
-          created_date: "2024-01-10",
-          created_by: "user_002",
-        },
-      ],
-      last_updated_date: "2024-01-15",
-      updated_by: "user_003",
-    };
-
-    const result = validateContractVersionManagement(contract_with_mismatch);
-
-    expect(result.is_valid).toBe(false);
-    expect(result.status).toBe("不合格");
-    expect(result.error_details).toContain("不整合");
-  });
-
-  test("バージョン情報が正常に記録されている契約書は合格と判定される", () => {
-    const contract_valid = {
-      contract_id: "CTR-004",
-      customer_id: "CUST-126",
-      contract_name: "標準契約書",
-      version_number: 2,
-      version_history: [
-        {
-          version: 1,
-          created_date: "2024-01-01",
-          created_by: "user_001",
-        },
-        {
-          version: 2,
-          created_date: "2024-01-15",
-          created_by: "user_002",
-        },
-      ],
-      last_updated_date: "2024-01-15",
-      updated_by: "user_002",
-    };
-
-    const result = validateContractVersionManagement(contract_valid);
-
-    expect(result.is_valid).toBe(true);
-    expect(result.status).toBe("合格");
-    expect(result.error_details).toEqual([]);
-  });
-
-  test("バージョン情報の欠落時に適切なエラーメッセージが返却される", () => {
-    const contract_without_version = {
-      contract_id: "CTR-005",
-      customer_id: "CUST-127",
-      contract_name: "不正な契約書",
-      version_number: null,
-      version_history: [],
-      last_updated_date: "2024-01-20",
-      updated_by: "user_003",
-    };
-
-    expect(() => {
-      validateContractVersionManagement(contract_without_version);
-    }).toThrow(/バージョン/);
-  });
-
-  test("バージョン履歴が不正なタイムスタンプを含む場合は不合格と判定される", () => {
-    const contract_with_invalid_timestamp = {
-      contract_id: "CTR-006",
-      customer_id: "CUST-128",
-      contract_name: "タイムスタンプ不正契約書",
-      version_number: 2,
-      version_history: [
-        {
-          version: 1,
-          created_date: "invalid-date",
-          created_by: "user_001",
-        },
-        {
-          version: 2,
-          created_date: "2024-01-15",
-          created_by: "user_002",
-        },
-      ],
-      last_updated_date: "2024-01-15",
-      updated_by: "user_002",
-    };
-
-    const result = validateContractVersionManagement(
-      contract_with_invalid_timestamp
+    const transactionDateAnomaly = result.anomalies.find(
+      (a: any) => a.field_name === "transaction_date"
     );
+    expect(transactionDateAnomaly).toEqual({
+      field_name: "transaction_date",
+      anomaly_type: "future_date",
+      current_value: "2025-12-31",
+      recommended_action: "過去の日付に修正してください"
+    });
 
-    expect(result.is_valid).toBe(false);
-    expect(result.status).toBe("不合格");
-    expect(result.error_details).toContain("タイムスタンプ");
-  });
+    const salesAmountAnomaly = result.anomalies.find(
+      (a: any) => a.field_name === "sales_amount"
+    );
+    expect(salesAmountAnomaly).toEqual({
+      field_name: "sales_amount",
+      anomaly_type: "negative_amount",
+      current_value: -50000,
+      recommended_action: "正の金額に修正してください"
+    });
 
-  test("複数のバージョン情報欠落エラーが一括検出される", () => {
-    const contract_multiple_errors = {
-      contract_id: "CTR-007",
-      customer_id: "CUST-129",
-      contract_name: "複合エラー契約書",
-      version_number: undefined,
-      version_history: [],
-      last_updated_date: "invalid-date",
-      updated_by: "",
-    };
+    const discountRateAnomaly = result.anomalies.find(
+      (a: any) => a.field_name === "discount_rate"
+    );
+    expect(discountRateAnomaly).toEqual({
+      field_name: "discount_rate",
+      anomaly_type: "out_of_range",
+      current_value: 1.5,
+      recommended_action: "0.0 ～ 1.0 の範囲内に修正してください"
+    });
 
-    const result = validateContractVersionManagement(contract_multiple_errors);
+    // 検証4: 通知に含まれる全ての異常値が、準備したテストデータの異常値と一致
+    expect(result.validation_status).toBe("failed");
+    expect(result.record_id).toBe("SR20240115001");
+    expect(result.anomalies.length).toBe(4);
 
-    expect(result.is_valid).toBe(false);
-    expect(result.status).toBe("不合格");
-    expect(result.error_details.length).toBeGreaterThan(1);
+    // 検証5: 検出漏れなく全ての異常が報告される
+    expect(result.summary).toEqual({
+      total_anomalies_detected: 4,
+      validation_passed: false,
+      correction_required: true
+    });
   });
 });

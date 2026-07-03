@@ -1,24 +1,67 @@
-import { generateContractChangeNotificationEmail } from '../../src/logic/it-1781935279444-2-1-1';
+import { describe, test, expect } from "@jest/globals";
+import { determinePriorityForMultipleContractChanges } from "../../src/logic/it-1781935279444-2-1-1";
 
-describe('営業データ入力時の品質検証ルール定義・実行機能', () => {
-  // SCEN-1234: [edge] 契約変更通知メール自動生成機能 - 営業責任者のメールアドレスが登録されていない場合、メール生成がスキップされる
-  test('should skip email generation and log when sales manager email is not registered', async () => {
-    const contractRecord = {
-      contract_id: 'CT-2024-001',
-      customer_id: 'CUST-001',
-      sales_manager_email: null,
-      sales_manager_name: '田中太郎',
-      contract_change_type: 'pricing_update',
-      change_effective_date: '2024-02-01',
-      change_description: '単価を10%引き上げ',
+describe("複数契約変更優先順位自動判定機能", () => {
+  // SCEN-1234: [normal] 複数契約変更優先順位自動判定機能 - 影響範囲が同一の複数変更の場合、登録順序で優先順位が決定される
+  test("影響範囲が同一の複数変更の場合、登録順序に従い優先順位が決定される", () => {
+    const changeA = {
+      change_id: "CHG-001",
+      customer_id: "CUST-100",
+      service_id: "SVC-A",
+      change_type: "contract_term",
+      impact_scope: "billing",
+      registered_at: new Date("2024-01-10T09:00:00Z"),
+      registered_by: "user_001",
     };
 
-    const result = await generateContractChangeNotificationEmail(contractRecord);
+    const changeB = {
+      change_id: "CHG-002",
+      customer_id: "CUST-100",
+      service_id: "SVC-A",
+      change_type: "discount_rate",
+      impact_scope: "billing",
+      registered_at: new Date("2024-01-10T10:30:00Z"),
+      registered_by: "user_002",
+    };
 
-    expect(result.email_generated).toBe(false);
-    expect(result.skip_reason).toMatch(/メールアドレス/);
-    expect(result.email_sent).toBe(false);
-    expect(result.system_log_entry).toMatch(/スキップ/);
-    expect(result.error_occurred).toBe(false);
+    const changeC = {
+      change_id: "CHG-003",
+      customer_id: "CUST-100",
+      service_id: "SVC-A",
+      change_type: "payment_term",
+      impact_scope: "billing",
+      registered_at: new Date("2024-01-10T11:45:00Z"),
+      registered_by: "user_003",
+    };
+
+    const changes = [changeA, changeB, changeC];
+
+    const result = determinePriorityForMultipleContractChanges(changes);
+
+    expect(result).toEqual([
+      {
+        change_id: "CHG-001",
+        priority: 1,
+        registered_at: new Date("2024-01-10T09:00:00Z"),
+      },
+      {
+        change_id: "CHG-002",
+        priority: 2,
+        registered_at: new Date("2024-01-10T10:30:00Z"),
+      },
+      {
+        change_id: "CHG-003",
+        priority: 3,
+        registered_at: new Date("2024-01-10T11:45:00Z"),
+      },
+    ]);
+
+    expect(result[0].priority).toBe(1);
+    expect(result[1].priority).toBe(2);
+    expect(result[2].priority).toBe(3);
+
+    expect(result[0].change_id).toBe("CHG-001");
+    expect(result[1].change_id).toBe("CHG-002");
+    expect(result[2].change_id).toBe("CHG-003");
   });
 });

@@ -1,13 +1,14 @@
-import { defineExtractionRule } from "../../src/logic/it-1-br-1781935279444-1-2-1";
+import { validateSalesDataInput } from '../../src/logic/it-1781935279444-2-1-1';
 
-describe("月次サマリーテンプレートの定義・管理機能", () => {
-  test("SCEN-1025: 抽出ルールが未定義の状態ではエラーが返却される", () => {
-    // 抽出ルールが未定義（null/undefined）の状態でデータ抽出処理を実行
-    const undefinedExtractionRule = null;
+describe('営業データ入力時の品質検証ルール定義・実行機能', () => {
+  // SCEN-1025
+  test('必須項目が欠落している場合、エラーメッセージが表示される', () => {
+    const inputData = {
+      customerName: '',
+      amount: '',
+      productName: '',
+    };
 
-    // エラーが発生することを検証
-    expect(() => {
-      defineExtractionRule(undefinedExtractionRule);
-    }).toThrow(/抽出ルール/);
+    expect(() => validateSalesDataInput(inputData)).toThrow(/顧客名/);
   });
 });

@@ -1,300 +1,150 @@
 import { describe, test, expect } from '@jest/globals';
-import { extractAndAggregateInvoiceItems } from '../../src/logic/it-1-2-1';
+import {
+  executeValidationRules,
+} from '../../src/logic/it-1781935279444-2-1-1';
 
-describe('請求対象項目の自動抽出・集計機能', () => {
-  // SCEN-736
-  test('品質基準を通過した営業データから請求対象項目を顧客ごと・サービスごとに正確に抽出・集計する', () => {
-    const salesData = [
+describe('営業データ入力時の品質検証ルール定義・実行機能', () => {
+  // SCEN-736: [error] 営業データ自動検証ルール実行 - 検証ルール違反データが検出され、エラー内容が正確に記録される
+  test('should detect validation rule violations and record error details accurately', () => {
+    // Arrange: 複数の検証ルール定義
+    const validationRules = [
       {
-        id: 'sales_001',
-        customerId: 'cust_A',
-        serviceId: 'svc_01',
-        appointmentCount: 5,
-        contractCount: 2,
-        revenueAmount: 100000,
-        qualityCheckStatus: 'passed',
-        qualityCheckDate: '2024-01-15T09:00:00Z',
+        ruleId: 'RULE_001',
+        ruleName: '金額フォーマット',
+        fieldName: 'amount',
+        ruleType: 'range',
+        minValue: 0,
+        maxValue: 9999999,
+        isActive: true,
       },
       {
-        id: 'sales_002',
-        customerId: 'cust_A',
-        serviceId: 'svc_01',
-        appointmentCount: 3,
-        contractCount: 1,
-        revenueAmount: 60000,
-        qualityCheckStatus: 'passed',
-        qualityCheckDate: '2024-01-15T10:00:00Z',
+        ruleId: 'RULE_002',
+        ruleName: '顧客情報必須項目',
+        fieldName: 'customerId',
+        ruleType: 'required',
+        isActive: true,
       },
       {
-        id: 'sales_003',
-        customerId: 'cust_A',
-        serviceId: 'svc_02',
-        appointmentCount: 4,
-        contractCount: 2,
-        revenueAmount: 80000,
-        qualityCheckStatus: 'passed',
-        qualityCheckDate: '2024-01-15T11:00:00Z',
-      },
-      {
-        id: 'sales_004',
-        customerId: 'cust_B',
-        serviceId: 'svc_01',
-        appointmentCount: 6,
-        contractCount: 3,
-        revenueAmount: 150000,
-        qualityCheckStatus: 'passed',
-        qualityCheckDate: '2024-01-15T12:00:00Z',
-      },
-      {
-        id: 'sales_005',
-        customerId: 'cust_B',
-        serviceId: 'svc_03',
-        appointmentCount: 2,
-        contractCount: 1,
-        revenueAmount: 50000,
-        qualityCheckStatus: 'passed',
-        qualityCheckDate: '2024-01-15T13:00:00Z',
-      },
-      {
-        id: 'sales_006',
-        customerId: 'cust_C',
-        serviceId: 'svc_02',
-        appointmentCount: null,
-        contractCount: 0,
-        revenueAmount: 0,
-        qualityCheckStatus: 'failed',
-        qualityCheckDate: '2024-01-15T14:00:00Z',
+        ruleId: 'RULE_003',
+        ruleName: 'データ型チェック',
+        fieldName: 'amount',
+        ruleType: 'dataType',
+        expectedType: 'number',
+        isActive: true,
       },
     ];
 
-    const contractRules = [
+    // 検証ルール違反を含むテストデータセット
+    const testDataset = [
       {
-        customerId: 'cust_A',
-        serviceId: 'svc_01',
-        unitPrice: 10000,
-        discountRate: 0.1,
+        dataId: 'DATA_001',
+        customerId: '',
+        amount: 50000,
+        createdAt: '2024-01-15T09:00:00Z',
       },
       {
-        customerId: 'cust_A',
-        serviceId: 'svc_02',
-        unitPrice: 12000,
-        discountRate: 0.05,
+        dataId: 'DATA_002',
+        customerId: 'CUST_123',
+        amount: -30000,
+        createdAt: '2024-01-15T09:15:00Z',
       },
       {
-        customerId: 'cust_B',
-        serviceId: 'svc_01',
-        unitPrice: 15000,
-        discountRate: 0.0,
+        dataId: 'DATA_003',
+        customerId: 'CUST_456',
+        amount: 'invalid_amount',
+        createdAt: '2024-01-15T09:30:00Z',
       },
       {
-        customerId: 'cust_B',
-        serviceId: 'svc_03',
-        unitPrice: 20000,
-        discountRate: 0.15,
-      },
-      {
-        customerId: 'cust_C',
-        serviceId: 'svc_02',
-        unitPrice: 12000,
-        discountRate: 0.05,
+        dataId: 'DATA_004',
+        customerId: 'CUST_789',
+        amount: 100000,
+        createdAt: '2024-01-15T09:45:00Z',
       },
     ];
 
-    const result = extractAndAggregateInvoiceItems({
-      salesData,
-      contractRules,
-      periodStart: '2024-01-01',
-      periodEnd: '2024-01-31',
+    // Act: 検証ルール実行
+    const result = executeValidationRules({
+      validationRules,
+      testDataset,
+      executionTimestamp: '2024-01-15T10:00:00Z',
     });
 
-    expect(result).toEqual({
-      status: 'success',
-      aggregatedByCustomerAndService: [
-        {
-          customerId: 'cust_A',
-          serviceId: 'svc_01',
-          totalAppointmentCount: 8,
-          totalContractCount: 3,
-          totalRevenueAmount: 160000,
-          invoiceLineItems: [
-            {
-              itemId: 'item_cust_A_svc_01_01',
-              customerId: 'cust_A',
-              serviceId: 'svc_01',
-              itemType: 'appointment',
-              quantity: 8,
-              unitPrice: 10000,
-              subtotalBeforeDiscount: 80000,
-              discountRate: 0.1,
-              discountAmount: 8000,
-              subtotalAfterDiscount: 72000,
-            },
-            {
-              itemId: 'item_cust_A_svc_01_02',
-              customerId: 'cust_A',
-              serviceId: 'svc_01',
-              itemType: 'contract',
-              quantity: 3,
-              unitPrice: 10000,
-              subtotalBeforeDiscount: 30000,
-              discountRate: 0.1,
-              discountAmount: 3000,
-              subtotalAfterDiscount: 27000,
-            },
-          ],
-          serviceSubtotalBeforeDiscount: 110000,
-          serviceDiscountAmount: 11000,
-          serviceSubtotalAfterDiscount: 99000,
-        },
-        {
-          customerId: 'cust_A',
-          serviceId: 'svc_02',
-          totalAppointmentCount: 4,
-          totalContractCount: 2,
-          totalRevenueAmount: 80000,
-          invoiceLineItems: [
-            {
-              itemId: 'item_cust_A_svc_02_01',
-              customerId: 'cust_A',
-              serviceId: 'svc_02',
-              itemType: 'appointment',
-              quantity: 4,
-              unitPrice: 12000,
-              subtotalBeforeDiscount: 48000,
-              discountRate: 0.05,
-              discountAmount: 2400,
-              subtotalAfterDiscount: 45600,
-            },
-            {
-              itemId: 'item_cust_A_svc_02_02',
-              customerId: 'cust_A',
-              serviceId: 'svc_02',
-              itemType: 'contract',
-              quantity: 2,
-              unitPrice: 12000,
-              subtotalBeforeDiscount: 24000,
-              discountRate: 0.05,
-              discountAmount: 1200,
-              subtotalAfterDiscount: 22800,
-            },
-          ],
-          serviceSubtotalBeforeDiscount: 72000,
-          serviceDiscountAmount: 3600,
-          serviceSubtotalAfterDiscount: 68400,
-        },
-        {
-          customerId: 'cust_B',
-          serviceId: 'svc_01',
-          totalAppointmentCount: 6,
-          totalContractCount: 3,
-          totalRevenueAmount: 150000,
-          invoiceLineItems: [
-            {
-              itemId: 'item_cust_B_svc_01_01',
-              customerId: 'cust_B',
-              serviceId: 'svc_01',
-              itemType: 'appointment',
-              quantity: 6,
-              unitPrice: 15000,
-              subtotalBeforeDiscount: 90000,
-              discountRate: 0.0,
-              discountAmount: 0,
-              subtotalAfterDiscount: 90000,
-            },
-            {
-              itemId: 'item_cust_B_svc_01_02',
-              customerId: 'cust_B',
-              serviceId: 'svc_01',
-              itemType: 'contract',
-              quantity: 3,
-              unitPrice: 15000,
-              subtotalBeforeDiscount: 45000,
-              discountRate: 0.0,
-              discountAmount: 0,
-              subtotalAfterDiscount: 45000,
-            },
-          ],
-          serviceSubtotalBeforeDiscount: 135000,
-          serviceDiscountAmount: 0,
-          serviceSubtotalAfterDiscount: 135000,
-        },
-        {
-          customerId: 'cust_B',
-          serviceId: 'svc_03',
-          totalAppointmentCount: 2,
-          totalContractCount: 1,
-          totalRevenueAmount: 50000,
-          invoiceLineItems: [
-            {
-              itemId: 'item_cust_B_svc_03_01',
-              customerId: 'cust_B',
-              serviceId: 'svc_03',
-              itemType: 'appointment',
-              quantity: 2,
-              unitPrice: 20000,
-              subtotalBeforeDiscount: 40000,
-              discountRate: 0.15,
-              discountAmount: 6000,
-              subtotalAfterDiscount: 34000,
-            },
-            {
-              itemId: 'item_cust_B_svc_03_02',
-              customerId: 'cust_B',
-              serviceId: 'svc_03',
-              itemType: 'contract',
-              quantity: 1,
-              unitPrice: 20000,
-              subtotalBeforeDiscount: 20000,
-              discountRate: 0.15,
-              discountAmount: 3000,
-              subtotalAfterDiscount: 17000,
-            },
-          ],
-          serviceSubtotalBeforeDiscount: 60000,
-          serviceDiscountAmount: 9000,
-          serviceSubtotalAfterDiscount: 51000,
-        },
-      ],
-      customerTotals: [
-        {
-          customerId: 'cust_A',
-          customerSubtotalBeforeDiscount: 182000,
-          customerDiscountAmount: 14600,
-          customerInvoiceTotal: 167400,
-        },
-        {
-          customerId: 'cust_B',
-          customerSubtotalBeforeDiscount: 195000,
-          customerDiscountAmount: 9000,
-          customerInvoiceTotal: 186000,
-        },
-      ],
-      excludedRecords: [
-        {
-          recordId: 'sales_006',
-          customerId: 'cust_C',
-          serviceId: 'svc_02',
-          excludeReason: 'quality_check_failed',
-          qualityCheckStatus: 'failed',
-        },
-      ],
-      summary: {
-        totalProcessedRecords: 5,
-        totalExcludedRecords: 1,
-        grandTotalBeforeDiscount: 377000,
-        grandTotalDiscountAmount: 23600,
-        grandTotalInvoiceAmount: 353400,
-        processingTimestamp: expect.any(String),
-      },
+    // Assert: エラー検出結果の検証
+    expect(result.totalDataProcessed).toBe(4);
+    expect(result.totalViolationsDetected).toBe(3);
+    expect(result.validationPassed).toBe(false);
+
+    // 最初の違反: 顧客IDが空白
+    const violation1 = result.violations[0];
+    expect(violation1.dataId).toBe('DATA_001');
+    expect(violation1.ruleId).toBe('RULE_002');
+    expect(violation1.ruleName).toBe('顧客情報必須項目');
+    expect(violation1.fieldName).toBe('customerId');
+    expect(violation1.violationType).toBe('required');
+    expect(violation1.errorCode).toBe('ERR_CUST_ID_REQUIRED');
+    expect(violation1.errorMessage).toContain('顧客ID');
+    expect(violation1.actualValue).toBe('');
+    expect(violation1.detectedAt).toBe('2024-01-15T10:00:00Z');
+    expect(violation1.severity).toBe('error');
+
+    // 2番目の違反: 金額が負数
+    const violation2 = result.violations[1];
+    expect(violation2.dataId).toBe('DATA_002');
+    expect(violation2.ruleId).toBe('RULE_001');
+    expect(violation2.ruleName).toBe('金額フォーマット');
+    expect(violation2.fieldName).toBe('amount');
+    expect(violation2.violationType).toBe('range');
+    expect(violation2.errorCode).toBe('ERR_AMOUNT_OUT_OF_RANGE');
+    expect(violation2.errorMessage).toContain('金額');
+    expect(violation2.actualValue).toBe(-30000);
+    expect(violation2.expectedRangeMin).toBe(0);
+    expect(violation2.expectedRangeMax).toBe(9999999);
+    expect(violation2.detectedAt).toBe('2024-01-15T10:00:00Z');
+    expect(violation2.severity).toBe('error');
+
+    // 3番目の違反: データ型不正
+    const violation3 = result.violations[2];
+    expect(violation3.dataId).toBe('DATA_003');
+    expect(violation3.ruleId).toBe('RULE_003');
+    expect(violation3.ruleName).toBe('データ型チェック');
+    expect(violation3.fieldName).toBe('amount');
+    expect(violation3.violationType).toBe('dataType');
+    expect(violation3.errorCode).toBe('ERR_AMOUNT_DATA_TYPE');
+    expect(violation3.errorMessage).toContain('データ型');
+    expect(violation3.actualValue).toBe('invalid_amount');
+    expect(violation3.expectedType).toBe('number');
+    expect(violation3.detectedAt).toBe('2024-01-15T10:00:00Z');
+    expect(violation3.severity).toBe('error');
+
+    // 正常データの検証
+    expect(result.validData.length).toBe(1);
+    expect(result.validData[0].dataId).toBe('DATA_004');
+
+    // データベース記録の完全性検証
+    expect(result.recordedViolations.length).toBe(3);
+    result.recordedViolations.forEach((record) => {
+      expect(record).toHaveProperty('violationId');
+      expect(record).toHaveProperty('dataId');
+      expect(record).toHaveProperty('ruleId');
+      expect(record).toHaveProperty('errorCode');
+      expect(record).toHaveProperty('errorMessage');
+      expect(record).toHaveProperty('severity');
+      expect(record).toHaveProperty('recordedAt');
+      expect(record.violationId).toMatch(/^ERR_\d{10,}/);
     });
 
-    expect(result.status).toBe('success');
-    expect(result.aggregatedByCustomerAndService).toHaveLength(4);
-    expect(result.customerTotals).toHaveLength(2);
-    expect(result.excludedRecords).toHaveLength(1);
-    expect(result.summary.totalProcessedRecords).toBe(5);
-    expect(result.summary.totalExcludedRecords).toBe(1);
-    expect(result.summary.grandTotalInvoiceAmount).toBe(353400);
-    expect(result.excludedRecords[0].excludeReason).toBe('quality_check_failed');
+    // 一意性の検証
+    const errorCodes = result.violations.map((v) => v.errorCode);
+    const uniqueErrorCodes = new Set(errorCodes);
+    expect(uniqueErrorCodes.size).toBe(3);
+
+    // 検出日時の整合性検証
+    result.violations.forEach((violation) => {
+      const detectedTime = new Date(violation.detectedAt);
+      const executionTime = new Date('2024-01-15T10:00:00Z');
+      expect(detectedTime.getTime()).toBeLessThanOrEqual(
+        executionTime.getTime()
+      );
+    });
   });
 });

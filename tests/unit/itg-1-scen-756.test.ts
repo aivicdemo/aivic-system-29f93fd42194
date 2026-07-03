@@ -1,172 +1,304 @@
-import { createMonthlySummaryTemplate } from "../../src/logic/it-1-br-1781935279444-1-2-1";
+import { validateContractChangeConsistency } from '../../src/logic/it-1-1-1';
 
-describe("月次サマリーテンプレート定義・管理", () => {
-  // SCEN-756
-  test("月次サマリーテンプレート項目の表示順序が負の数または不正な値で設定されている場合、テンプレート登録時にバリデーションエラーが発生する", () => {
-    const validTemplateBase = {
-      template_name: "Test Template",
-      template_items: [
-        {
-          item_id: "item_001",
-          item_label: "営業成果指標",
-          display_order: 1,
-          is_visible: true,
-        },
-        {
-          item_id: "item_002",
-          item_label: "請求集計結果",
-          display_order: 2,
-          is_visible: true,
-        },
-      ],
-      created_by: "user_123",
-      created_at: new Date("2024-01-15T10:00:00Z"),
+describe('営業成果データの自動検証ルール定義と異常検出機能', () => {
+  // SCEN-756: [edge] 契約書・提案資料の変更内容妥当性判定 - 適用対象顧客が複数指定されている場合にすべての顧客との整合性が確認される
+  test('複数顧客に対する契約変更の整合性チェック - すべての顧客で矛盾なし', () => {
+    const customers = [
+      {
+        customer_id: 'CUST001',
+        customer_name: '顧客A',
+        contract_price: 100000,
+        contract_delivery_days: 30,
+        special_terms: '支払い条件：後払い30日'
+      },
+      {
+        customer_id: 'CUST002',
+        customer_name: '顧客B',
+        contract_price: 100000,
+        contract_delivery_days: 30,
+        special_terms: '支払い条件：後払い30日'
+      },
+      {
+        customer_id: 'CUST003',
+        customer_name: '顧客C',
+        contract_price: 100000,
+        contract_delivery_days: 30,
+        special_terms: '支払い条件：後払い30日'
+      }
+    ];
+
+    const change_content = {
+      change_type: 'price_revision',
+      new_price: 120000,
+      new_delivery_days: 30,
+      new_special_terms: '支払い条件：後払い30日'
     };
 
-    // ケース1: 表示順序が負の数（-1）
-    const templateWithNegativeOrder = {
-      ...validTemplateBase,
-      template_items: [
-        {
-          item_id: "item_001",
-          item_label: "営業成果指標",
-          display_order: -1,
-          is_visible: true,
-        },
-        {
-          item_id: "item_002",
-          item_label: "請求集計結果",
-          display_order: 2,
-          is_visible: true,
-        },
-      ],
+    const result = validateContractChangeConsistency({
+      customers,
+      change_content
+    });
+
+    expect(result.is_consistent).toBe(true);
+    expect(result.total_customers_checked).toBe(3);
+    expect(result.consistent_customers_count).toBe(3);
+    expect(result.inconsistent_customers_count).toBe(0);
+    expect(result.inconsistencies).toEqual([]);
+    expect(result.validation_status).toBe('合格');
+  });
+
+  test('複数顧客に対する契約変更の整合性チェック - 顧客Bで納期条件が不合致', () => {
+    const customers = [
+      {
+        customer_id: 'CUST001',
+        customer_name: '顧客A',
+        contract_price: 100000,
+        contract_delivery_days: 30,
+        special_terms: '支払い条件：後払い30日'
+      },
+      {
+        customer_id: 'CUST002',
+        customer_name: '顧客B',
+        contract_price: 100000,
+        contract_delivery_days: 45,
+        special_terms: '支払い条件：後払い30日'
+      },
+      {
+        customer_id: 'CUST003',
+        customer_name: '顧客C',
+        contract_price: 100000,
+        contract_delivery_days: 30,
+        special_terms: '支払い条件：後払い30日'
+      }
+    ];
+
+    const change_content = {
+      change_type: 'delivery_change',
+      new_price: 100000,
+      new_delivery_days: 30,
+      new_special_terms: '支払い条件：後払い30日'
     };
 
-    expect(() => createMonthlySummaryTemplate(templateWithNegativeOrder)).toThrow(
-      /表示順序/
-    );
+    const result = validateContractChangeConsistency({
+      customers,
+      change_content
+    });
 
-    // ケース2: 表示順序が文字列（不正な値）
-    const templateWithStringOrder = {
-      ...validTemplateBase,
-      template_items: [
-        {
-          item_id: "item_001",
-          item_label: "営業成果指標",
-          display_order: "abc" as any,
-          is_visible: true,
-        },
-        {
-          item_id: "item_002",
-          item_label: "請求集計結果",
-          display_order: 2,
-          is_visible: true,
-        },
-      ],
+    expect(result.is_consistent).toBe(false);
+    expect(result.total_customers_checked).toBe(3);
+    expect(result.consistent_customers_count).toBe(2);
+    expect(result.inconsistent_customers_count).toBe(1);
+    expect(result.inconsistencies).toHaveLength(1);
+    expect(result.inconsistencies[0]).toEqual({
+      customer_id: 'CUST002',
+      customer_name: '顧客B',
+      mismatch_field: 'contract_delivery_days',
+      expected_value: 30,
+      actual_value: 45,
+      mismatch_reason: '契約納期が変更内容と不合致'
+    });
+    expect(result.validation_status).toBe('不合格');
+  });
+
+  test('複数顧客に対する契約変更の整合性チェック - 複数の顧客で異なる不合致が発生', () => {
+    const customers = [
+      {
+        customer_id: 'CUST001',
+        customer_name: '顧客A',
+        contract_price: 100000,
+        contract_delivery_days: 30,
+        special_terms: '支払い条件：後払い30日'
+      },
+      {
+        customer_id: 'CUST002',
+        customer_name: '顧客B',
+        contract_price: 150000,
+        contract_delivery_days: 30,
+        special_terms: '支払い条件：後払い30日'
+      },
+      {
+        customer_id: 'CUST003',
+        customer_name: '顧客C',
+        contract_price: 100000,
+        contract_delivery_days: 45,
+        special_terms: '支払い条件：即日払い'
+      }
+    ];
+
+    const change_content = {
+      change_type: 'comprehensive_revision',
+      new_price: 120000,
+      new_delivery_days: 30,
+      new_special_terms: '支払い条件：後払い30日'
     };
 
-    expect(() => createMonthlySummaryTemplate(templateWithStringOrder)).toThrow(
-      /表示順序/
-    );
+    const result = validateContractChangeConsistency({
+      customers,
+      change_content
+    });
 
-    // ケース3: 表示順序が特殊文字
-    const templateWithSpecialCharOrder = {
-      ...validTemplateBase,
-      template_items: [
-        {
-          item_id: "item_001",
-          item_label: "営業成果指標",
-          display_order: "@#$" as any,
-          is_visible: true,
-        },
-        {
-          item_id: "item_002",
-          item_label: "請求集計結果",
-          display_order: 2,
-          is_visible: true,
-        },
-      ],
+    expect(result.is_consistent).toBe(false);
+    expect(result.total_customers_checked).toBe(3);
+    expect(result.consistent_customers_count).toBe(1);
+    expect(result.inconsistent_customers_count).toBe(2);
+    expect(result.inconsistencies).toHaveLength(2);
+    expect(result.inconsistencies[0]).toEqual({
+      customer_id: 'CUST002',
+      customer_name: '顧客B',
+      mismatch_field: 'contract_price',
+      expected_value: 120000,
+      actual_value: 150000,
+      mismatch_reason: '契約価格が変更内容と不合致'
+    });
+    expect(result.inconsistencies[1]).toEqual({
+      customer_id: 'CUST003',
+      customer_name: '顧客C',
+      mismatch_field: 'contract_delivery_days',
+      expected_value: 30,
+      actual_value: 45,
+      mismatch_reason: '契約納期が変更内容と不合致'
+    });
+    expect(result.validation_status).toBe('不合格');
+  });
+
+  test('複数顧客に対する契約変更の整合性チェック - 特記事項の相違が検出される', () => {
+    const customers = [
+      {
+        customer_id: 'CUST001',
+        customer_name: '顧客A',
+        contract_price: 100000,
+        contract_delivery_days: 30,
+        special_terms: '支払い条件：後払い30日'
+      },
+      {
+        customer_id: 'CUST002',
+        customer_name: '顧客B',
+        contract_price: 100000,
+        contract_delivery_days: 30,
+        special_terms: '支払い条件：後払い30日・割引率10%'
+      },
+      {
+        customer_id: 'CUST003',
+        customer_name: '顧客C',
+        contract_price: 100000,
+        contract_delivery_days: 30,
+        special_terms: '支払い条件：後払い30日'
+      }
+    ];
+
+    const change_content = {
+      change_type: 'special_terms_update',
+      new_price: 100000,
+      new_delivery_days: 30,
+      new_special_terms: '支払い条件：後払い30日'
     };
 
-    expect(() =>
-      createMonthlySummaryTemplate(templateWithSpecialCharOrder)
-    ).toThrow(/表示順序/);
+    const result = validateContractChangeConsistency({
+      customers,
+      change_content
+    });
 
-    // ケース4: 表示順序がnull
-    const templateWithNullOrder = {
-      ...validTemplateBase,
-      template_items: [
-        {
-          item_id: "item_001",
-          item_label: "営業成果指標",
-          display_order: null as any,
-          is_visible: true,
-        },
-        {
-          item_id: "item_002",
-          item_label: "請求集計結果",
-          display_order: 2,
-          is_visible: true,
-        },
-      ],
+    expect(result.is_consistent).toBe(false);
+    expect(result.total_customers_checked).toBe(3);
+    expect(result.consistent_customers_count).toBe(2);
+    expect(result.inconsistent_customers_count).toBe(1);
+    expect(result.inconsistencies).toHaveLength(1);
+    expect(result.inconsistencies[0]).toEqual({
+      customer_id: 'CUST002',
+      customer_name: '顧客B',
+      mismatch_field: 'special_terms',
+      expected_value: '支払い条件：後払い30日',
+      actual_value: '支払い条件：後払い30日・割引率10%',
+      mismatch_reason: '特記事項が変更内容と不合致'
+    });
+    expect(result.validation_status).toBe('不合格');
+  });
+
+  test('複数顧客に対する契約変更の整合性チェック - 顧客リストが空の場合エラー', () => {
+    const customers: Array<{
+      customer_id: string;
+      customer_name: string;
+      contract_price: number;
+      contract_delivery_days: number;
+      special_terms: string;
+    }> = [];
+
+    const change_content = {
+      change_type: 'price_revision',
+      new_price: 120000,
+      new_delivery_days: 30,
+      new_special_terms: '支払い条件：後払い30日'
     };
 
-    expect(() => createMonthlySummaryTemplate(templateWithNullOrder)).toThrow(
-      /表示順序/
-    );
+    expect(() => {
+      validateContractChangeConsistency({
+        customers,
+        change_content
+      });
+    }).toThrow(/適用対象顧客/);
+  });
 
-    // ケース5: 表示順序が0（正常系）- 成功すべき
-    const templateWithZeroOrder = {
-      ...validTemplateBase,
-      template_items: [
-        {
-          item_id: "item_001",
-          item_label: "営業成果指標",
-          display_order: 0,
-          is_visible: true,
-        },
-        {
-          item_id: "item_002",
-          item_label: "請求集計結果",
-          display_order: 1,
-          is_visible: true,
-        },
-      ],
+  test('複数顧客に対する契約変更の整合性チェック - 変更内容が不完全な場合エラー', () => {
+    const customers = [
+      {
+        customer_id: 'CUST001',
+        customer_name: '顧客A',
+        contract_price: 100000,
+        contract_delivery_days: 30,
+        special_terms: '支払い条件：後払い30日'
+      }
+    ];
+
+    const change_content = {
+      change_type: 'price_revision',
+      new_price: undefined as any,
+      new_delivery_days: 30,
+      new_special_terms: '支払い条件：後払い30日'
     };
 
-    const result = createMonthlySummaryTemplate(templateWithZeroOrder);
-    expect(result).toBeDefined();
-    expect(result.template_id).toBeDefined();
-    expect(result.template_name).toBe("Test Template");
-    expect(result.template_items).toHaveLength(2);
-    expect(result.template_items[0].display_order).toBe(0);
-    expect(result.template_items[1].display_order).toBe(1);
+    expect(() => {
+      validateContractChangeConsistency({
+        customers,
+        change_content
+      });
+    }).toThrow(/変更内容/);
+  });
 
-    // ケース6: 表示順序が正の整数（正常系）- 成功すべき
-    const templateWithValidOrder = {
-      ...validTemplateBase,
-      template_items: [
-        {
-          item_id: "item_001",
-          item_label: "営業成果指標",
-          display_order: 1,
-          is_visible: true,
-        },
-        {
-          item_id: "item_002",
-          item_label: "請求集計結果",
-          display_order: 2,
-          is_visible: true,
-        },
-      ],
+  test('複数顧客に対する契約変更の整合性チェック - 整合性レポートに詳細情報が含まれる', () => {
+    const customers = [
+      {
+        customer_id: 'CUST001',
+        customer_name: '顧客A',
+        contract_price: 100000,
+        contract_delivery_days: 30,
+        special_terms: '支払い条件：後払い30日'
+      },
+      {
+        customer_id: 'CUST002',
+        customer_name: '顧客B',
+        contract_price: 100000,
+        contract_delivery_days: 30,
+        special_terms: '支払い条件：後払い30日'
+      }
+    ];
+
+    const change_content = {
+      change_type: 'price_revision',
+      new_price: 120000,
+      new_delivery_days: 30,
+      new_special_terms: '支払い条件：後払い30日'
     };
 
-    const resultValid = createMonthlySummaryTemplate(templateWithValidOrder);
-    expect(resultValid).toBeDefined();
-    expect(resultValid.template_id).toBeDefined();
-    expect(resultValid.template_name).toBe("Test Template");
-    expect(resultValid.template_items).toHaveLength(2);
-    expect(resultValid.template_items[0].display_order).toBe(1);
-    expect(resultValid.template_items[1].display_order).toBe(2);
+    const result = validateContractChangeConsistency({
+      customers,
+      change_content
+    });
+
+    expect(result).toHaveProperty('validation_timestamp');
+    expect(result).toHaveProperty('change_type');
+    expect(result.change_type).toBe('price_revision');
+    expect(result).toHaveProperty('consistency_check_details');
+    expect(result.consistency_check_details).toBeDefined();
+    expect(typeof result.consistency_check_details).toBe('object');
   });
 });

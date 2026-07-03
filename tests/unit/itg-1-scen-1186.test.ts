@@ -1,166 +1,184 @@
-import { describe, test, expect, beforeEach, afterEach } from '@jest/globals';
-import { searchSalesActivityData } from '../../src/logic/it-1781935279444-1-1-1';
+import { describe, test, expect, beforeEach } from "@jest/globals";
+import {
+  saveInquiryResponseRecord,
+  validateSupportingDocuments,
+  retrieveInquiryResponseRecord,
+} from "../../src/logic/it-1781935279444-2-1-1";
 
-describe('営業活動データ検索・抽出・検証 - 不正なパラメータハンドリング', () => {
-  let consoleSpy: jest.SpyInstance;
-  let loggedErrors: any[];
-
-  beforeEach(() => {
-    loggedErrors = [];
-    consoleSpy = jest.spyOn(console, 'error').mockImplementation((err: any) => {
-      loggedErrors.push(err);
-    });
-  });
-
-  afterEach(() => {
-    consoleSpy.mockRestore();
-  });
-
-  // SCEN-1186
-  test('不正な検索条件パラメータが入力された場合、エラーが返される', () => {
-    // ハッピーパス：正常な検索条件を試す
-    const validParams = {
-      startDate: '2024-01-01',
-      endDate: '2024-01-31',
-      customerId: 'CUST-001',
-      activityType: 'APPOINTMENT',
-      salesPersonId: 'SP-001',
+describe("営業データ入力時の品質検証ルール定義・実行機能", () => {
+  // SCEN-1186: 複数の根拠資料（3件以上）を含む問い合わせ対応記録が正常に保存される
+  test("should save inquiry response record with 4 supporting documents and verify metadata integrity", async () => {
+    const inquiryResponseRecord = {
+      customer_id: "CUST-001",
+      customer_name: "テスト顧客A",
+      inquiry_content: "請求額の計算根拠について確認したい",
+      inquiry_date: new Date("2024-01-15T10:30:00Z"),
+      response_date: new Date("2024-01-15T14:00:00Z"),
+      responder_id: "USR-001",
+      responder_name: "営業オペレーター太郎",
+      response_content:
+        "契約条件に基づいて計算されています。詳細は根拠資料を参照してください。",
+      supporting_documents: [
+        {
+          doc_id: "DOC-001",
+          document_type: "sales_data",
+          file_name: "sales_activity_202401.csv",
+          upload_date: new Date("2024-01-15T13:45:00Z"),
+          file_size: 2048,
+          document_content_hash: "hash_001_abc123def456",
+          metadata: {
+            period: "2024-01",
+            record_count: 45,
+            data_fields: ["customer_id", "activity_date", "achievement_type"],
+          },
+        },
+        {
+          doc_id: "DOC-002",
+          document_type: "contract",
+          file_name: "contract_CUST-001_v2.pdf",
+          upload_date: new Date("2024-01-15T13:50:00Z"),
+          file_size: 4096,
+          document_content_hash: "hash_002_xyz789uvw012",
+          metadata: {
+            contract_version: "2",
+            effective_date: "2024-01-01",
+            pricing_model: "performance_based",
+          },
+        },
+        {
+          doc_id: "DOC-003",
+          document_type: "calculation_sheet",
+          file_name: "billing_calculation_CUST-001_202401.xlsx",
+          upload_date: new Date("2024-01-15T13:55:00Z"),
+          file_size: 3072,
+          document_content_hash: "hash_003_pqr345stu678",
+          metadata: {
+            base_amount: 100000,
+            discount_rate: 0.1,
+            final_amount: 90000,
+            calculation_method: "contract_based",
+          },
+        },
+        {
+          doc_id: "DOC-004",
+          document_type: "communication_history",
+          file_name: "email_thread_CUST-001_inquiry.eml",
+          upload_date: new Date("2024-01-15T14:00:00Z"),
+          file_size: 1536,
+          document_content_hash: "hash_004_klm901nop234",
+          metadata: {
+            email_count: 3,
+            conversation_start_date: "2024-01-15T09:00:00Z",
+            conversation_end_date: "2024-01-15T14:00:00Z",
+            sender_count: 2,
+          },
+        },
+      ],
     };
 
-    const validResult = searchSalesActivityData(validParams);
-    expect(validResult).toBeDefined();
-    expect(validResult.success).toBe(true);
-    expect(Array.isArray(validResult.data)).toBe(true);
+    const validation_result = validateSupportingDocuments(
+      inquiryResponseRecord.supporting_documents
+    );
+    expect(validation_result.is_valid).toBe(true);
+    expect(validation_result.document_count).toBe(4);
+    expect(validation_result.meets_minimum_requirement).toBe(true);
 
-    // 境界値テスト：null パラメータ
-    expect(() => {
-      searchSalesActivityData(null as any);
-    }).toThrow(/パラメータ/);
+    const saved_record = await saveInquiryResponseRecord(
+      inquiryResponseRecord
+    );
+    expect(saved_record.record_id).toBeDefined();
+    expect(saved_record.record_id).toMatch(/^REC-\d{4}-\d{6}$/);
+    expect(saved_record.customer_id).toBe("CUST-001");
+    expect(saved_record.customer_name).toBe("テスト顧客A");
+    expect(saved_record.inquiry_content).toBe("請求額の計算根拠について確認したい");
+    expect(saved_record.response_content).toBe(
+      "契約条件に基づいて計算されています。詳細は根拠資料を参照してください。"
+    );
+    expect(saved_record.status).toBe("saved");
+    expect(saved_record.created_at).toBeDefined();
 
-    // 境界値テスト：undefined パラメータ
-    expect(() => {
-      searchSalesActivityData(undefined as any);
-    }).toThrow(/パラメータ/);
+    expect(saved_record.supporting_documents).toHaveLength(4);
 
-    // 境界値テスト：空オブジェクト
-    expect(() => {
-      searchSalesActivityData({} as any);
-    }).toThrow(/必須項目/);
+    expect(saved_record.supporting_documents[0]).toEqual({
+      doc_id: "DOC-001",
+      document_type: "sales_data",
+      file_name: "sales_activity_202401.csv",
+      upload_date: new Date("2024-01-15T13:45:00Z"),
+      file_size: 2048,
+      document_content_hash: "hash_001_abc123def456",
+      metadata: {
+        period: "2024-01",
+        record_count: 45,
+        data_fields: ["customer_id", "activity_date", "achievement_type"],
+      },
+    });
 
-    // 境界値テスト：startDate が null
-    expect(() => {
-      searchSalesActivityData({
-        startDate: null as any,
-        endDate: '2024-01-31',
-        customerId: 'CUST-001',
-        activityType: 'APPOINTMENT',
-        salesPersonId: 'SP-001',
-      });
-    }).toThrow(/日付形式/);
+    expect(saved_record.supporting_documents[1]).toEqual({
+      doc_id: "DOC-002",
+      document_type: "contract",
+      file_name: "contract_CUST-001_v2.pdf",
+      upload_date: new Date("2024-01-15T13:50:00Z"),
+      file_size: 4096,
+      document_content_hash: "hash_002_xyz789uvw012",
+      metadata: {
+        contract_version: "2",
+        effective_date: "2024-01-01",
+        pricing_model: "performance_based",
+      },
+    });
 
-    // 境界値テスト：startDate が空文字列
-    expect(() => {
-      searchSalesActivityData({
-        startDate: '',
-        endDate: '2024-01-31',
-        customerId: 'CUST-001',
-        activityType: 'APPOINTMENT',
-        salesPersonId: 'SP-001',
-      });
-    }).toThrow(/日付形式/);
+    expect(saved_record.supporting_documents[2]).toEqual({
+      doc_id: "DOC-003",
+      document_type: "calculation_sheet",
+      file_name: "billing_calculation_CUST-001_202401.xlsx",
+      upload_date: new Date("2024-01-15T13:55:00Z"),
+      file_size: 3072,
+      document_content_hash: "hash_003_pqr345stu678",
+      metadata: {
+        base_amount: 100000,
+        discount_rate: 0.1,
+        final_amount: 90000,
+        calculation_method: "contract_based",
+      },
+    });
 
-    // 境界値テスト：endDate が不正な形式
-    expect(() => {
-      searchSalesActivityData({
-        startDate: '2024-01-01',
-        endDate: '2024/13/45',
-        customerId: 'CUST-001',
-        activityType: 'APPOINTMENT',
-        salesPersonId: 'SP-001',
-      });
-    }).toThrow(/日付形式/);
+    expect(saved_record.supporting_documents[3]).toEqual({
+      doc_id: "DOC-004",
+      document_type: "communication_history",
+      file_name: "email_thread_CUST-001_inquiry.eml",
+      upload_date: new Date("2024-01-15T14:00:00Z"),
+      file_size: 1536,
+      document_content_hash: "hash_004_klm901nop234",
+      metadata: {
+        email_count: 3,
+        conversation_start_date: "2024-01-15T09:00:00Z",
+        conversation_end_date: "2024-01-15T14:00:00Z",
+        sender_count: 2,
+      },
+    });
 
-    // 境界値テスト：customerId が空文字列
-    expect(() => {
-      searchSalesActivityData({
-        startDate: '2024-01-01',
-        endDate: '2024-01-31',
-        customerId: '',
-        activityType: 'APPOINTMENT',
-        salesPersonId: 'SP-001',
-      });
-    }).toThrow(/顧客ID/);
+    const retrieved_record = await retrieveInquiryResponseRecord(
+      saved_record.record_id
+    );
+    expect(retrieved_record).toBeDefined();
+    expect(retrieved_record.record_id).toBe(saved_record.record_id);
+    expect(retrieved_record.supporting_documents).toHaveLength(4);
+    expect(retrieved_record.supporting_documents.every((doc: any) => doc.document_content_hash)).toBe(true);
 
-    // 境界値テスト：activityType が不正な値
-    expect(() => {
-      searchSalesActivityData({
-        startDate: '2024-01-01',
-        endDate: '2024-01-31',
-        customerId: 'CUST-001',
-        activityType: 'INVALID_TYPE',
-        salesPersonId: 'SP-001',
-      });
-    }).toThrow(/活動区分/);
+    const doc_integrity_check = retrieved_record.supporting_documents.reduce(
+      (acc: any, doc: any) => {
+        acc.total_file_size += doc.file_size;
+        acc.doc_types.add(doc.document_type);
+        acc.metadata_fields += Object.keys(doc.metadata).length;
+        return acc;
+      },
+      { total_file_size: 0, doc_types: new Set(), metadata_fields: 0 }
+    );
 
-    // 境界値テスト：salesPersonId が null
-    expect(() => {
-      searchSalesActivityData({
-        startDate: '2024-01-01',
-        endDate: '2024-01-31',
-        customerId: 'CUST-001',
-        activityType: 'APPOINTMENT',
-        salesPersonId: null as any,
-      });
-    }).toThrow(/営業担当者ID/);
+    expect(doc_integrity_check.total_file_size).toBe(10752);
+    expect(doc_integrity_check.doc_types.size).toBe(4);
+    expect(doc_integrity_check.metadata_fields).toBeGreaterThanOrEqual(13);
 
-    // 境界値テスト：特殊文字のみの customerId
-    expect(() => {
-      searchSalesActivityData({
-        startDate: '2024-01-01',
-        endDate: '2024-01-31',
-        customerId: '@#$%',
-        activityType: 'APPOINTMENT',
-        salesPersonId: 'SP-001',
-      });
-    }).toThrow(/顧客ID/);
-
-    // 境界値テスト：負の数値をページ番号として指定
-    expect(() => {
-      searchSalesActivityData({
-        startDate: '2024-01-01',
-        endDate: '2024-01-31',
-        customerId: 'CUST-001',
-        activityType: 'APPOINTMENT',
-        salesPersonId: 'SP-001',
-        pageNumber: -1,
-      });
-    }).toThrow(/ページ番号/);
-
-    // 境界値テスト：型が不正（文字列をページサイズに指定）
-    expect(() => {
-      searchSalesActivityData({
-        startDate: '2024-01-01',
-        endDate: '2024-01-31',
-        customerId: 'CUST-001',
-        activityType: 'APPOINTMENT',
-        salesPersonId: 'SP-001',
-        pageSize: 'invalid' as any,
-      });
-    }).toThrow(/ページサイズ/);
-
-    // 境界値テスト：startDate が endDate より後の日付
-    expect(() => {
-      searchSalesActivityData({
-        startDate: '2024-01-31',
-        endDate: '2024-01-01',
-        customerId: 'CUST-001',
-        activityType: 'APPOINTMENT',
-        salesPersonId: 'SP-001',
-      });
-    }).toThrow(/日付範囲/);
-
-    // エラーログが記録されたか確認
-    expect(loggedErrors.length).toBeGreaterThan(0);
-    expect(loggedErrors[0]).toBeDefined();
+    expect(retrieved_record.data_consistency).toBe(true);
   });
 });

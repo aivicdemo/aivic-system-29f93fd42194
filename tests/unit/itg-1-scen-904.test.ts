@@ -1,49 +1,32 @@
-import { describe, it, expect } from "@jest/globals";
-import { validateInvoiceChecklist } from "../../src/logic/it-1781935279444-2-1-1";
+import { validateBillingAmountConsistency } from '../../src/logic/it-1-2-1';
 
-describe("Invoice Checklist Validation", () => {
-  it("SCEN-904: [normal] 請求書作成チェックリスト検証機能 - 全チェックリスト項目が検証基準を満たし、完了ステータスが返される", () => {
-    const invoice_data = {
-      customer_name: "テスト顧客",
-      invoice_amount: 100000,
-      invoice_date: "2024-01-15",
-      payment_due_date: "2024-02-15",
-      tax_rate: 0.1,
-      subtotal: 100000,
-      tax_amount: 10000,
-      total_amount: 110000,
-      bank_account_number: "1234567890",
+describe('営業成果データから請求対象項目を自動抽出し、顧客ごと・サービスごとの請求額を集計する機能', () => {
+  // SCEN-904: [error] 契約内容と請求額の整合性検証
+  test('契約書の請求金額と営業データから生成された請求額が不一致の場合、不一致の詳細情報をエラーレスポンスで返す', () => {
+    const contractId = 'CNT-20240115-001';
+    const contractAmount = 100000;
+    const generatedAmount = 95000;
+    const discrepancy = contractAmount - generatedAmount;
+
+    const contractData = {
+      contractId: contractId,
+      billingAmount: contractAmount,
     };
 
-    const result = validateInvoiceChecklist(invoice_data);
+    const generatedBillingData = {
+      contractId: contractId,
+      calculatedAmount: generatedAmount,
+    };
 
-    expect(result.status).toBe("完了");
-    expect(result.checklist_items).toHaveLength(6);
+    const result = validateBillingAmountConsistency(contractData, generatedBillingData);
 
-    const item_1_customer_name = result.checklist_items[0];
-    expect(item_1_customer_name.check_item).toBe("顧客名");
-    expect(item_1_customer_name.is_valid).toBe(true);
-
-    const item_2_invoice_amount = result.checklist_items[1];
-    expect(item_2_invoice_amount.check_item).toBe("請求金額");
-    expect(item_2_invoice_amount.is_valid).toBe(true);
-
-    const item_3_invoice_date = result.checklist_items[2];
-    expect(item_3_invoice_date.check_item).toBe("請求日付");
-    expect(item_3_invoice_date.is_valid).toBe(true);
-
-    const item_4_payment_due = result.checklist_items[3];
-    expect(item_4_payment_due.check_item).toBe("支払期限");
-    expect(item_4_payment_due.is_valid).toBe(true);
-
-    const item_5_tax = result.checklist_items[4];
-    expect(item_5_tax.check_item).toBe("消費税");
-    expect(item_5_tax.is_valid).toBe(true);
-
-    const item_6_bank_account = result.checklist_items[5];
-    expect(item_6_bank_account.check_item).toBe("銀行口座情報");
-    expect(item_6_bank_account.is_valid).toBe(true);
-
-    expect(result.all_checks_passed).toBe(true);
+    expect(result.success).toBe(false);
+    expect(result.errorCode).toBe('BILLING_AMOUNT_MISMATCH');
+    expect(result.contractId).toBe(contractId);
+    expect(result.contractBillingAmount).toBe(contractAmount);
+    expect(result.generatedBillingAmount).toBe(generatedAmount);
+    expect(result.discrepancyAmount).toBe(discrepancy);
+    expect(result.discrepancyAmount).toBe(5000);
+    expect(result.message).toMatch(/不一致/);
   });
 });

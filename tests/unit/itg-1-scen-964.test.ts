@@ -1,152 +1,83 @@
-import { validateSalesDataQuality } from '../../src/logic/it-1781935279444-2-2-1';
+import { validateBillingAmountAgainstProcedure } from '../../src/logic/it-1781935279444-2-1-1';
 
-describe('営業データ品質検証 - 必須項目欠落検出', () => {
-  // SCEN-964
-  test('請求対象営業データから必須項目の欠落を検出できる', () => {
-    // 準備: 必須項目定義
-    const required_fields = [
-      'customer_name',
-      'billing_amount',
-      'billing_date',
-      'billing_address',
-    ];
+describe('営業データ入力時の品質検証ルール定義・実行機能', () => {
+  // SCEN-964: [edge] 請求額計算結果の手順書照合検証
+  test('請求額が手順書の計算ルールの境界値（最小請求額または最大割引率）に達した場合、正確に判定される', () => {
+    // テストデータ: 最小請求額の境界値 (10,000円) に該当するケース
+    const minBillingAmount = 10000;
+    const maxDiscountRate = 0.30; // 30%
 
-    // テストケース1: 顧客名欠落
-    const test_data_1 = {
-      customer_name: '',
-      billing_amount: 100000,
-      billing_date: '2024-01-15',
-      billing_address: '東京都渋谷区',
+    // ケース 1: 計算結果が正確に最小請求額と一致する場合
+    const inputAtMinBoundary = {
+      baseAmount: 9500,
+      discountRate: 0.05,
+      minimumBillingAmount: minBillingAmount,
+      maximumDiscountRate: maxDiscountRate,
     };
+    const resultAtMinBoundary = validateBillingAmountAgainstProcedure(inputAtMinBoundary);
+    expect(resultAtMinBoundary.finalAmount).toBe(10000);
+    expect(resultAtMinBoundary.appliedMinimum).toBe(true);
+    expect(resultAtMinBoundary.isCompliant).toBe(true);
 
-    const result_1 = validateSalesDataQuality(test_data_1, required_fields);
-
-    expect(result_1.is_valid).toBe(false);
-    expect(result_1.errors).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          field: 'customer_name',
-          error_type: 'missing_required_field',
-        }),
-      ])
-    );
-    expect(result_1.excluded_from_billing).toBe(true);
-
-    // テストケース2: 請求金額欠落
-    const test_data_2 = {
-      customer_name: '株式会社サンプル',
-      billing_amount: null,
-      billing_date: '2024-01-15',
-      billing_address: '東京都渋谷区',
+    // ケース 2: 最小請求額の境界値を1円下回るデータで計算し、最小請求額が適用される場合
+    const inputBelowMinBoundary = {
+      baseAmount: 9900,
+      discountRate: 0.01,
+      minimumBillingAmount: minBillingAmount,
+      maximumDiscountRate: maxDiscountRate,
     };
+    const resultBelowMinBoundary = validateBillingAmountAgainstProcedure(inputBelowMinBoundary);
+    expect(resultBelowMinBoundary.finalAmount).toBe(10000);
+    expect(resultBelowMinBoundary.appliedMinimum).toBe(true);
+    expect(resultBelowMinBoundary.isCompliant).toBe(true);
 
-    const result_2 = validateSalesDataQuality(test_data_2, required_fields);
-
-    expect(result_2.is_valid).toBe(false);
-    expect(result_2.errors).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          field: 'billing_amount',
-          error_type: 'missing_required_field',
-        }),
-      ])
-    );
-    expect(result_2.excluded_from_billing).toBe(true);
-
-    // テストケース3: 請求日欠落
-    const test_data_3 = {
-      customer_name: '株式会社サンプル',
-      billing_amount: 100000,
-      billing_date: '',
-      billing_address: '東京都渋谷区',
+    // ケース 3: 最大割引率の境界値に該当する割引データ（割引後額が計算値と一致）
+    const inputAtMaxDiscount = {
+      baseAmount: 50000,
+      discountRate: 0.30, // 最大割引率 30%
+      minimumBillingAmount: minBillingAmount,
+      maximumDiscountRate: maxDiscountRate,
     };
+    const resultAtMaxDiscount = validateBillingAmountAgainstProcedure(inputAtMaxDiscount);
+    expect(resultAtMaxDiscount.finalAmount).toBe(35000); // 50000 * (1 - 0.30)
+    expect(resultAtMaxDiscount.appliedMaxDiscount).toBe(false); // 上限に達していない、正常範囲
+    expect(resultAtMaxDiscount.isCompliant).toBe(true);
 
-    const result_3 = validateSalesDataQuality(test_data_3, required_fields);
-
-    expect(result_3.is_valid).toBe(false);
-    expect(result_3.errors).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          field: 'billing_date',
-          error_type: 'missing_required_field',
-        }),
-      ])
-    );
-    expect(result_3.excluded_from_billing).toBe(true);
-
-    // テストケース4: 請求先住所欠落
-    const test_data_4 = {
-      customer_name: '株式会社サンプル',
-      billing_amount: 100000,
-      billing_date: '2024-01-15',
-      billing_address: null,
+    // ケース 4: 最大割引率の境界値を0.1%上回るデータで計算し、割引が上限に制限される場合
+    const inputAboveMaxDiscount = {
+      baseAmount: 50000,
+      discountRate: 0.31, // 最大割引率を0.1%上回る
+      minimumBillingAmount: minBillingAmount,
+      maximumDiscountRate: maxDiscountRate,
     };
+    const resultAboveMaxDiscount = validateBillingAmountAgainstProcedure(inputAboveMaxDiscount);
+    expect(resultAboveMaxDiscount.finalAmount).toBe(35000); // 50000 * (1 - 0.30) に制限される
+    expect(resultAboveMaxDiscount.appliedMaxDiscount).toBe(true);
+    expect(resultAboveMaxDiscount.isCompliant).toBe(true);
 
-    const result_4 = validateSalesDataQuality(test_data_4, required_fields);
-
-    expect(result_4.is_valid).toBe(false);
-    expect(result_4.errors).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          field: 'billing_address',
-          error_type: 'missing_required_field',
-        }),
-      ])
-    );
-    expect(result_4.excluded_from_billing).toBe(true);
-
-    // テストケース5: 複数項目欠落
-    const test_data_5 = {
-      customer_name: '',
-      billing_amount: null,
-      billing_date: '2024-01-15',
-      billing_address: '東京都渋谷区',
+    // ケース 5: 最小請求額が適用される場合、割引率が高くても最小請求額が優先される
+    const inputMinAndDiscount = {
+      baseAmount: 15000,
+      discountRate: 0.40, // 最大割引率を超える
+      minimumBillingAmount: minBillingAmount,
+      maximumDiscountRate: maxDiscountRate,
     };
+    const resultMinAndDiscount = validateBillingAmountAgainstProcedure(inputMinAndDiscount);
+    // 割引適用後: 15000 * (1 - 0.30) = 10500
+    // 最小請求額: 10000
+    // 結果: 10500 (最小値より大きいため最小値未適用)
+    expect(resultMinAndDiscount.finalAmount).toBe(10500);
+    expect(resultMinAndDiscount.appliedMinimum).toBe(false);
+    expect(resultMinAndDiscount.isCompliant).toBe(true);
 
-    const result_5 = validateSalesDataQuality(test_data_5, required_fields);
-
-    expect(result_5.is_valid).toBe(false);
-    expect(result_5.errors.length).toBe(2);
-    expect(result_5.errors).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          field: 'customer_name',
-          error_type: 'missing_required_field',
-        }),
-        expect.objectContaining({
-          field: 'billing_amount',
-          error_type: 'missing_required_field',
-        }),
-      ])
-    );
-    expect(result_5.excluded_from_billing).toBe(true);
-
-    // テストケース6: すべての必須項目完備（正常系）
-    const test_data_6 = {
-      customer_name: '株式会社サンプル',
-      billing_amount: 100000,
-      billing_date: '2024-01-15',
-      billing_address: '東京都渋谷区渋谷1-1-1',
-    };
-
-    const result_6 = validateSalesDataQuality(test_data_6, required_fields);
-
-    expect(result_6.is_valid).toBe(true);
-    expect(result_6.errors.length).toBe(0);
-    expect(result_6.excluded_from_billing).toBe(false);
-
-    // 検証レポート生成
-    const validation_report = {
-      total_records: 6,
-      valid_records: 1,
-      invalid_records: 5,
-      excluded_from_billing: 5,
-      error_details: [result_1, result_2, result_3, result_4, result_5],
-    };
-
-    expect(validation_report.total_records).toBe(6);
-    expect(validation_report.valid_records).toBe(1);
-    expect(validation_report.invalid_records).toBe(5);
-    expect(validation_report.excluded_from_billing).toBe(5);
+    // ケース 6: 全体の手順書ルール照合の確認
+    const allCasesCompliant = [
+      resultAtMinBoundary,
+      resultBelowMinBoundary,
+      resultAtMaxDiscount,
+      resultAboveMaxDiscount,
+      resultMinAndDiscount,
+    ].every((result) => result.isCompliant === true);
+    expect(allCasesCompliant).toBe(true);
   });
 });

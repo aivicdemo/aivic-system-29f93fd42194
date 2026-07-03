@@ -1,67 +1,94 @@
-import { describe, test, expect } from '@jest/globals';
-import { validateSalesDataCompleteness } from '../../src/logic/it-1781935279444-2-2-1';
+import { classifyComplaintAndDeterminePriority } from '../../src/logic/it-1781935279444-2-1-1';
 
-describe('営業データの完全性・正確性を自動検証し、不足データ・誤りを検出・通知する機能', () => {
-  // SCEN-969: [error] 請求額自動計算・検証機能 - 営業データの完全性が基準を満たさない場合、不足項目の詳細と修正要件を通知する
-  test('必須項目が未入力のとき、不足項目の詳細リストと修正要件を含むエラー通知を返す', () => {
-    // 手順: 営業データ品質管理・請求自動化システムにログインする → 請求額自動計算・検証機能の画面を開く → 営業データ入力フォームで必須項目の一部（例：顧客名、取引金額など）を意図的に未入力のまま保存を試みる
-    const incompleteData = {
-      customer_name: '', // 未入力
-      transaction_date: '2024-01-15',
-      transaction_amount: 50000,
-      service_type: '', // 未入力
-      contact_person: 'Tanaka Taro',
-      contact_email: 'tanaka@example.com',
-      appointment_status: 'confirmed',
+describe('営業データ入力時の品質検証ルール定義・実行機能', () => {
+  // SCEN-969: [error] 顧客質問・異議の分類・対応ルート判定 - 複合的な請求異議の優先度付け
+  test('複合的な請求異議が入力された場合、複数の分類カテゴリが抽出され、優先度付けロジックに基づいて最高優先度のルートが選択される', () => {
+    const complaintInput = {
+      customer_id: 'CUST-00123',
+      complaint_content:
+        '請求額が高い上に、請求日が間違っている。また商品の説明と異なる',
+      received_date: '2024-03-15T10:30:00Z',
+      complaint_priority_initial: 'high'
     };
 
-    // データ検証処理が実行される → システムが完全性チェックを行い、基準（必須項目充足度）を評価する
-    const result = validateSalesDataCompleteness(incompleteData);
+    const result = classifyComplaintAndDeterminePriority(complaintInput);
 
-    // チェック結果として不足項目の詳細情報を確認する
-    expect(result.is_valid).toBe(false);
-    expect(result.missing_fields).toBeDefined();
-    expect(Array.isArray(result.missing_fields)).toBe(true);
-    expect(result.missing_fields.length).toBe(2);
+    // 複数の分類カテゴリが抽出されることを確認
+    expect(Array.isArray(result.classified_categories)).toBe(true);
+    expect(result.classified_categories.length).toBeGreaterThanOrEqual(3);
 
-    // 修正要件（必須項目、データ形式、入力形式など）の通知内容を確認する
-    expect(result.missing_fields).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          field_name: 'customer_name',
-          field_description: '顧客名',
-          requirement: '必須',
-          data_type: '文字列',
-          character_limit: '1-100文字',
-          priority: 'high',
-          correction_deadline: '2024-01-16T09:00:00Z',
-        }),
-        expect.objectContaining({
-          field_name: 'service_type',
-          field_description: 'サービス種別',
-          requirement: '必須',
-          data_type: '文字列',
-          allowed_values: ['sales_consultation', 'recruitment', 'marketing', 'management'],
-          priority: 'high',
-          correction_deadline: '2024-01-16T09:00:00Z',
-        }),
-      ])
+    // 分類カテゴリの内容を確認（請求金額異議、請求日異議、商品説明異議を含む）
+    const category_names = result.classified_categories.map(
+      (c: { category_name: string }) => c.category_name
     );
+    expect(category_names).toContain('billing_amount_dispute');
+    expect(category_names).toContain('billing_date_dispute');
+    expect(category_names).toContain('product_description_mismatch');
 
-    // 通知メッセージにエラーコードと具体的な修正手順が含まれていることを検証する
-    expect(result.error_code).toBe('INCOMPLETE_DATA');
-    expect(result.error_message).toMatch(/不足項目/);
-    expect(result.detailed_message).toBeDefined();
-    expect(result.detailed_message).toContain('customer_name');
-    expect(result.detailed_message).toContain('service_type');
-    expect(result.correction_instructions).toBeDefined();
-    expect(Array.isArray(result.correction_instructions)).toBe(true);
-    expect(result.correction_instructions.length).toBeGreaterThan(0);
-    expect(result.correction_instructions[0]).toMatch(/顧客名/);
+    // 優先度スコアが計算されていることを確認
+    expect(result.classified_categories.every((c: { priority_score: number }) => typeof c.priority_score === 'number')).toBe(true);
 
-    // ユーザーが不足項目を明確に特定し、必要な修正を実施できる状態となることを検証
-    expect(result.completeness_score).toBe(75); // 8 必須項目中 6 項目が入力 → 75%
-    expect(result.completeness_threshold).toBe(100); // 完全性チェックの基準は100%
-    expect(result.status).toBe('correction_required');
+    // 優先度スコアが0以上100以下であることを確認
+    expect(
+      result.classified_categories.every(
+        (c: { priority_score: number }) =>
+          c.priority_score >= 0 && c.priority_score <= 100
+      )
+    ).toBe(true);
+
+    // 複数ルート候補の中から最高優先度のルートが選択されていることを確認
+    expect(result.primary_response_route).toBeDefined();
+    expect(typeof result.primary_response_route).toBe('string');
+
+    // 最高優先度のルートに対応するカテゴリの優先度スコアが最も高いことを確認
+    const primary_category = result.classified_categories.find(
+      (c: { response_route: string }) =>
+        c.response_route === result.primary_response_route
+    );
+    const all_scores = result.classified_categories.map(
+      (c: { priority_score: number }) => c.priority_score
+    );
+    expect(primary_category.priority_score).toBe(Math.max(...all_scores));
+
+    // 優先度が最も高いルートが1つだけ選択されていることを確認
+    expect(result.primary_response_route.length).toBeGreaterThan(0);
+
+    // 他のカテゴリが関連情報として記録されていることを確認
+    expect(Array.isArray(result.secondary_categories)).toBe(true);
+    expect(result.secondary_categories.length).toBeGreaterThanOrEqual(0);
+
+    // 二次ルート情報が保持されていることを確認（複数ルート候補がある場合）
+    if (result.classified_categories.length > 1) {
+      expect(result.secondary_categories.length).toBeGreaterThan(0);
+      expect(
+        result.secondary_categories.every(
+          (c: { category_name: string; priority_score: number }) =>
+            typeof c.category_name === 'string' &&
+            typeof c.priority_score === 'number'
+        )
+      ).toBe(true);
+    }
+
+    // ビジネスルール（緊急性、顧客影響度、解決難度）に基づいた優先度付けが行われたことを確認
+    // 緊急性スコア、顧客影響度スコア、解決難度スコアが含まれていることを検証
+    expect(
+      result.classified_categories.every(
+        (c: {
+          urgency_score?: number;
+          customer_impact_score?: number;
+          resolution_difficulty?: number;
+        }) =>
+          typeof c.urgency_score === 'number' &&
+          typeof c.customer_impact_score === 'number' &&
+          typeof c.resolution_difficulty === 'number'
+      )
+    ).toBe(true);
+
+    // 最終ルート割り当てが確定していることを確認
+    expect(result.final_assigned_route).toBe(result.primary_response_route);
+
+    // システムが複合異議を正常に処理したことをログで確認
+    expect(result.processing_status).toBe('completed');
+    expect(typeof result.classification_timestamp).toBe('string');
   });
 });

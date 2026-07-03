@@ -1,72 +1,65 @@
-import { describe, test, expect } from '@jest/globals';
-import { saveInquiryResponseRecord } from '../../src/logic/it-1-1-1';
+import { validateContractChangeCompliance } from '../../src/logic/it-1-2-1';
 
-describe('営業成果データの自動検証ルール定義と異常検出機能', () => {
-  // SCEN-1210: [error] 問い合わせ対応記録の構造化保存機能 - 必須フィールド（問い合わせ内容、回答内容）が不足している場合、保存を拒否してエラーメッセージを返す
-  test('問い合わせ内容が空の場合、保存を拒否してエラーを返す', () => {
-    const input_inquiry_content = '';
-    const input_response_content = 'こちらが回答内容です。';
-    const input_inquiry_id = 'INQ-20240115-001';
-    const input_created_by = 'user@example.com';
+describe('営業成果データから請求対象項目を自動抽出し、顧客ごと・サービスごとの請求額を集計する機能', () => {
+  // SCEN-1210
+  test('契約変更内容がすべてのルール要件を満たす場合、承認可と判定される', () => {
+    const contractChangeInput = {
+      contractId: 'CNT-00001',
+      customerId: 'CUST-12345',
+      serviceId: 'SVC-001',
+      changeType: 'amount_adjustment',
+      previousAmount: 500000,
+      newAmount: 600000,
+      billingCycle: 'monthly',
+      billingAmount: 50000,
+      newDeliveryDate: new Date('2025-03-31T23:59:59Z'),
+      leadTimeDays: 30,
+      changeDescription: 'Service expansion with increased scope',
+      effectiveDate: new Date('2025-02-01T00:00:00Z'),
+    };
 
-    expect(() =>
-      saveInquiryResponseRecord({
-        inquiry_id: input_inquiry_id,
-        inquiry_content: input_inquiry_content,
-        response_content: input_response_content,
-        created_by: input_created_by,
-      })
-    ).toThrow(/問い合わせ内容/);
-  });
+    const contractRules = {
+      minContractAmount: 100000,
+      maxContractAmount: 10000000,
+      minContractDurationMonths: 12,
+      allowedBillingCycles: ['monthly', 'quarterly', 'annual'],
+      minBillingAmount: 10000,
+      maxBillingAmount: 500000,
+    };
 
-  test('回答内容が空の場合、保存を拒否してエラーを返す', () => {
-    const input_inquiry_content = 'こちらが問い合わせ内容です。';
-    const input_response_content = '';
-    const input_inquiry_id = 'INQ-20240115-002';
-    const input_created_by = 'user@example.com';
+    const billingRules = {
+      minBillingInterval: 30,
+      maxBillingDelayDays: 5,
+      allowedBillingIntervals: [30, 90, 365],
+    };
 
-    expect(() =>
-      saveInquiryResponseRecord({
-        inquiry_id: input_inquiry_id,
-        inquiry_content: input_inquiry_content,
-        response_content: input_response_content,
-        created_by: input_created_by,
-      })
-    ).toThrow(/回答内容/);
-  });
+    const deliveryRules = {
+      minLeadTimeDays: 14,
+      maxDeliveryDaysFromNow: 365,
+      allowedDeliveryWeekdays: [1, 2, 3, 4, 5],
+    };
 
-  test('問い合わせ内容と回答内容の両方が空の場合、保存を拒否してエラーを返す', () => {
-    const input_inquiry_content = '';
-    const input_response_content = '';
-    const input_inquiry_id = 'INQ-20240115-003';
-    const input_created_by = 'user@example.com';
-
-    expect(() =>
-      saveInquiryResponseRecord({
-        inquiry_id: input_inquiry_id,
-        inquiry_content: input_inquiry_content,
-        response_content: input_response_content,
-        created_by: input_created_by,
-      })
-    ).toThrow(/問い合わせ内容|回答内容/);
-  });
-
-  test('必須フィールドが揃っている場合、正常に保存される', () => {
-    const input_inquiry_content = 'こちらが問い合わせ内容です。';
-    const input_response_content = 'こちらが回答内容です。';
-    const input_inquiry_id = 'INQ-20240115-004';
-    const input_created_by = 'user@example.com';
-    const expected_status = 'saved';
-    const expected_inquiry_id = 'INQ-20240115-004';
-
-    const result = saveInquiryResponseRecord({
-      inquiry_id: input_inquiry_id,
-      inquiry_content: input_inquiry_content,
-      response_content: input_response_content,
-      created_by: input_created_by,
+    const result = validateContractChangeCompliance({
+      contractChange: contractChangeInput,
+      contractRules,
+      billingRules,
+      deliveryRules,
     });
 
-    expect(result.status).toBe(expected_status);
-    expect(result.inquiry_id).toBe(expected_inquiry_id);
+    expect(result).toEqual({
+      isApproved: true,
+      complianceStatus: 'approved',
+      ruleCheckResults: {
+        contractRulesCompliant: true,
+        billingRulesCompliant: true,
+        deliveryRulesCompliant: true,
+      },
+      violations: [],
+      message: '契約変更内容はすべてのルール要件を満たしています。承認可能です。',
+    });
+
+    expect(result.isApproved).toBe(true);
+    expect(result.complianceStatus).toBe('approved');
+    expect(result.violations.length).toBe(0);
   });
 });

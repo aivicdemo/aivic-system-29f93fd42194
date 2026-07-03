@@ -1,124 +1,89 @@
-import { calculateBillingAmountByCustomerAndService } from "../../src/logic/it-1-2-1";
+import { validateSalesData } from "../../src/logic/it-1781935279444-2-2-1";
 
-describe("営業成果データから請求対象項目を自動抽出し、顧客ごと・サービスごとの請求額を集計する機能", () => {
-  test("SCEN-592: 請求額の計算と検証 - 契約書に定義された単価と数量から、顧客ごと・サービスごとの請求額が正確に計算される", () => {
-    // テストデータ: 複数顧客・複数サービスの契約データを準備
-    const contractData = [
+describe("営業データの完全性・正確性を自動検証し、不足データ・誤りを検出・通知する機能", () => {
+  // SCEN-592: [normal] 営業データ品質検証機能 - 必須項目・データ型・範囲・異常値に基づき営業データが合格判定される
+  test("すべての検証項目（必須項目・データ型・範囲・異常値）がOKと判定され、営業データが『合格』と表示される", () => {
+    // テストデータセット準備：必須項目すべて入力、データ型正常、範囲内、異常値なし
+    const validSalesData = {
+      customer_id: "CUST-001",
+      customer_name: "顧客A株式会社",
+      contact_date: "2024-01-15",
+      contact_time: "14:30",
+      service_type: "コンサルティング",
+      appointment_count: 5,
+      contract_count: 2,
+      contract_amount: 500000,
+      customer_reaction: "好意的",
+      appointment_status: "確定",
+      sales_staff_id: "STAFF-001",
+      sales_staff_name: "営業太郎",
+    };
+
+    // 検証処理を実行
+    const result = validateSalesData(validSalesData);
+
+    // 検証結果の判定ステータスを確認：『合格』と表示される
+    expect(result.status).toBe("合格");
+    expect(result.is_valid).toBe(true);
+
+    // 各項目の検証詳細を確認：すべての検証項目がOKと判定
+    expect(result.validation_details).toEqual({
+      required_fields_check: {
+        status: "OK",
+        passed: true,
+        missing_fields: [],
+      },
+      data_type_check: {
+        status: "OK",
+        passed: true,
+        type_errors: [],
+      },
+      range_check: {
+        status: "OK",
+        passed: true,
+        range_errors: [],
+      },
+      anomaly_check: {
+        status: "OK",
+        passed: true,
+        anomalies: [],
+      },
+    });
+
+    // 検証結果ログに各チェック項目の成功が記録される
+    expect(result.log_entries).toEqual([
       {
-        customerId: "CUST001",
-        customerName: "顧客A",
-        contracts: [
-          {
-            serviceId: "SVC001",
-            serviceName: "サービス1",
-            unitPrice: 10000,
-            quantity: 5,
-          },
-          {
-            serviceId: "SVC002",
-            serviceName: "サービス2",
-            unitPrice: 15000,
-            quantity: 3,
-          },
-        ],
+        timestamp: expect.any(String),
+        check_type: "required_fields_check",
+        result: "OK",
+        details: "すべての必須項目が入力されています",
       },
       {
-        customerId: "CUST002",
-        customerName: "顧客B",
-        contracts: [
-          {
-            serviceId: "SVC001",
-            serviceName: "サービス1",
-            unitPrice: 12000,
-            quantity: 4,
-          },
-          {
-            serviceId: "SVC002",
-            serviceName: "サービス2",
-            unitPrice: 8000,
-            quantity: 6,
-          },
-        ],
+        timestamp: expect.any(String),
+        check_type: "data_type_check",
+        result: "OK",
+        details: "すべてのデータ型が正常です",
       },
-    ];
+      {
+        timestamp: expect.any(String),
+        check_type: "range_check",
+        result: "OK",
+        details: "すべての項目が許容範囲内です",
+      },
+      {
+        timestamp: expect.any(String),
+        check_type: "anomaly_check",
+        result: "OK",
+        details: "異常値は検出されません",
+      },
+    ]);
 
-    // 請求額計算ロジックを実行
-    const result = calculateBillingAmountByCustomerAndService(contractData);
-
-    // 顧客Aのサービス1の請求額を検証: 10000 × 5 = 50000
-    expect(result.customerBillings[0].serviceBillings[0].billingAmount).toBe(
-      50000
-    );
-
-    // 顧客Aのサービス2の請求額を検証: 15000 × 3 = 45000
-    expect(result.customerBillings[0].serviceBillings[1].billingAmount).toBe(
-      45000
-    );
-
-    // 顧客Bのサービス1の請求額を検証: 12000 × 4 = 48000
-    expect(result.customerBillings[1].serviceBillings[0].billingAmount).toBe(
-      48000
-    );
-
-    // 顧客Bのサービス2の請求額を検証: 8000 × 6 = 48000
-    expect(result.customerBillings[1].serviceBillings[1].billingAmount).toBe(
-      48000
-    );
-
-    // 顧客Aの合計請求額を検証: 50000 + 45000 = 95000
-    expect(result.customerBillings[0].totalBillingAmount).toBe(95000);
-
-    // 顧客Bの合計請求額を検証: 48000 + 48000 = 96000
-    expect(result.customerBillings[1].totalBillingAmount).toBe(96000);
-
-    // 全体の合計請求額を検証: 95000 + 96000 = 191000
-    expect(result.grandTotalBillingAmount).toBe(191000);
-
-    // レスポンスの構造を検証
-    expect(result.customerBillings).toHaveLength(2);
-    expect(result.customerBillings[0].customerId).toBe("CUST001");
-    expect(result.customerBillings[0].customerName).toBe("顧客A");
-    expect(result.customerBillings[0].serviceBillings).toHaveLength(2);
-
-    expect(result.customerBillings[1].customerId).toBe("CUST002");
-    expect(result.customerBillings[1].customerName).toBe("顧客B");
-    expect(result.customerBillings[1].serviceBillings).toHaveLength(2);
-
-    // サービス別の明細を検証
-    expect(result.customerBillings[0].serviceBillings[0].serviceId).toBe(
-      "SVC001"
-    );
-    expect(result.customerBillings[0].serviceBillings[0].serviceName).toBe(
-      "サービス1"
-    );
-    expect(result.customerBillings[0].serviceBillings[0].unitPrice).toBe(10000);
-    expect(result.customerBillings[0].serviceBillings[0].quantity).toBe(5);
-
-    expect(result.customerBillings[0].serviceBillings[1].serviceId).toBe(
-      "SVC002"
-    );
-    expect(result.customerBillings[0].serviceBillings[1].serviceName).toBe(
-      "サービス2"
-    );
-    expect(result.customerBillings[0].serviceBillings[1].unitPrice).toBe(15000);
-    expect(result.customerBillings[0].serviceBillings[1].quantity).toBe(3);
-
-    expect(result.customerBillings[1].serviceBillings[0].serviceId).toBe(
-      "SVC001"
-    );
-    expect(result.customerBillings[1].serviceBillings[0].serviceName).toBe(
-      "サービス1"
-    );
-    expect(result.customerBillings[1].serviceBillings[0].unitPrice).toBe(12000);
-    expect(result.customerBillings[1].serviceBillings[0].quantity).toBe(4);
-
-    expect(result.customerBillings[1].serviceBillings[1].serviceId).toBe(
-      "SVC002"
-    );
-    expect(result.customerBillings[1].serviceBillings[1].serviceName).toBe(
-      "サービス2"
-    );
-    expect(result.customerBillings[1].serviceBillings[1].unitPrice).toBe(8000);
-    expect(result.customerBillings[1].serviceBillings[1].quantity).toBe(6);
+    // 検証結果サマリー
+    expect(result.summary).toEqual({
+      total_checks: 4,
+      passed_checks: 4,
+      failed_checks: 0,
+      validation_timestamp: expect.any(String),
+    });
   });
 });

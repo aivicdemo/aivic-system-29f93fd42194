@@ -1,98 +1,43 @@
-import { validateSalesData } from "../../src/logic/it-1781935279444-2-2-1";
+import { calculateBillingAmount } from "../../src/logic/it-1-2-1";
 
-describe("営業データ品質検証・異常検出", () => {
+describe("請求額計算機能", () => {
   // SCEN-602
-  test("必須項目が全て入力され、データ型と値の範囲が正常な営業データが検証を通過する", () => {
-    const sales_data = {
-      customer_id: "CUST001",
-      product_id: "PROD002",
-      amount: 50000,
-      transaction_datetime: "2024-01-15T09:30:00Z",
-      sales_rep_id: "REP001",
-    };
+  test("複数割引ルールが適用される場合に請求額が正確に計算される", () => {
+    const baseAmount = 100000;
+    const discountRules = [
+      { type: "quantity", rate: 0.1, order: 1 },
+      { type: "earlyPayment", rate: 0.05, order: 2 },
+      { type: "membership", rate: 0.03, order: 3 },
+    ];
 
-    const result = validateSalesData(sales_data);
+    // 計算過程
+    // 基本金額: 100,000円
+    // ステップ1: 数量割引10%を適用 → 100,000 * (1 - 0.1) = 90,000円
+    // ステップ2: 早期支払割引5%を適用 → 90,000 * (1 - 0.05) = 85,500円
+    // ステップ3: 会員割引3%を適用 → 85,500 * (1 - 0.03) = 82,935円
+    const expectedBillingAmount = 82935;
 
-    expect(result.status).toBe("合格");
-    expect(result.is_valid).toBe(true);
-    expect(result.errors).toEqual([]);
-    expect(result.error_count).toBe(0);
-    expect(result.warnings).toEqual([]);
-  });
+    const result = calculateBillingAmount({
+      baseAmount,
+      discountRules,
+    });
 
-  test("必須項目が欠落している場合、検証が不合格になる", () => {
-    const sales_data_missing = {
-      customer_id: "CUST001",
-      product_id: "PROD002",
-      amount: 50000,
-      transaction_datetime: "2024-01-15T09:30:00Z",
-    };
-
-    expect(() => validateSalesData(sales_data_missing)).toThrow(/営業担当者ID/);
-  });
-
-  test("金額がゼロ以下の場合、検証が不合格になる", () => {
-    const sales_data_invalid_amount = {
-      customer_id: "CUST001",
-      product_id: "PROD002",
-      amount: -10000,
-      transaction_datetime: "2024-01-15T09:30:00Z",
-      sales_rep_id: "REP001",
-    };
-
-    expect(() => validateSalesData(sales_data_invalid_amount)).toThrow(/金額/);
-  });
-
-  test("金額が上限値を超える場合、検証が不合格になる", () => {
-    const sales_data_amount_exceeded = {
-      customer_id: "CUST001",
-      product_id: "PROD002",
-      amount: 99999999,
-      transaction_datetime: "2024-01-15T09:30:00Z",
-      sales_rep_id: "REP001",
-    };
-
-    expect(() => validateSalesData(sales_data_amount_exceeded)).toThrow(/上限/);
-  });
-
-  test("取引日時がシステム運用開始日より前の場合、検証が不合格になる", () => {
-    const sales_data_old_date = {
-      customer_id: "CUST001",
-      product_id: "PROD002",
-      amount: 50000,
-      transaction_datetime: "2020-01-01T09:30:00Z",
-      sales_rep_id: "REP001",
-    };
-
-    expect(() => validateSalesData(sales_data_old_date)).toThrow(/取引日時/);
-  });
-
-  test("データ型が正しくない場合、検証が不合格になる", () => {
-    const sales_data_wrong_type = {
-      customer_id: "CUST001",
-      product_id: "PROD002",
-      amount: "50000",
-      transaction_datetime: "2024-01-15T09:30:00Z",
-      sales_rep_id: "REP001",
-    };
-
-    expect(() => validateSalesData(sales_data_wrong_type)).toThrow(/データ型/);
-  });
-
-  test("すべての必須項目が有効な値で入力された場合、検証ステータスが合格になり詳細情報が返される", () => {
-    const sales_data_valid = {
-      customer_id: "CUST002",
-      product_id: "PROD003",
-      amount: 75000,
-      transaction_datetime: "2024-02-20T14:45:00Z",
-      sales_rep_id: "REP002",
-    };
-
-    const result = validateSalesData(sales_data_valid);
-
-    expect(result.status).toBe("合格");
-    expect(result.is_valid).toBe(true);
-    expect(result.error_count).toBe(0);
-    expect(result.errors.length).toBe(0);
+    expect(result.finalAmount).toBe(expectedBillingAmount);
+    expect(result.appliedDiscounts).toHaveLength(3);
+    expect(result.appliedDiscounts[0]).toEqual({
+      type: "quantity",
+      rate: 0.1,
+      amountAfter: 90000,
+    });
+    expect(result.appliedDiscounts[1]).toEqual({
+      type: "earlyPayment",
+      rate: 0.05,
+      amountAfter: 85500,
+    });
+    expect(result.appliedDiscounts[2]).toEqual({
+      type: "membership",
+      rate: 0.03,
+      amountAfter: 82935,
+    });
   });
 });
